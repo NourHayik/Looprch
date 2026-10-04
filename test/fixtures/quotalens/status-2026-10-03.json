@@ -1,0 +1,274 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-10-03T20:06:20.008Z",
+  "fresh": true,
+  "providers": [
+    {
+      "id": "codex",
+      "display_name": "Codex",
+      "installed": true,
+      "auth_state": "authenticated",
+      "usage_capability": "supported",
+      "status": "ok",
+      "source": "app-server",
+      "cli_version": "0.156.1",
+      "fetched_at": "2026-10-03T20:06:20.008Z",
+      "fetch_started_at": "2026-10-03T20:06:20.008Z",
+      "stale": false,
+      "plan_label": "redacted",
+      "limits": [
+        {
+          "id": "primary",
+          "name": "5-hour rolling window",
+          "category": "rolling_window",
+          "window_minutes": 300,
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "resets_at": "2026-10-04T01:06:22.000Z",
+          "reset_countdown_seconds": 17999
+        },
+        {
+          "id": "weekly",
+          "name": "Weekly quota",
+          "category": "weekly",
+          "window_minutes": 10080,
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "resets_at": "2026-10-10T20:06:22.000Z",
+          "reset_countdown_seconds": 604799
+        },
+        {
+          "id": "reset_credits",
+          "name": "Rate limit reset credits",
+          "category": "credit",
+          "remaining_amount": 4,
+          "amount_unit": "credits"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "id": "kimi",
+      "display_name": "Kimi",
+      "installed": true,
+      "auth_state": "unknown",
+      "usage_capability": "unknown",
+      "status": "timeout",
+      "source": "local-api",
+      "cli_version": "2.1.1",
+      "fetched_at": "2026-10-03T20:06:20.008Z",
+      "fetch_started_at": "2026-10-03T20:06:20.008Z",
+      "stale": true,
+      "plan_label": "redacted",
+      "limits": [
+        {
+          "id": "5h",
+          "name": "5-hour rolling limit",
+          "category": "rolling_window",
+          "window_minutes": 300,
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "resets_at": "2026-09-30T07:02:00.404Z",
+          "reset_countdown_seconds": 0
+        },
+        {
+          "id": "weekly",
+          "name": "Weekly quota",
+          "category": "weekly",
+          "window_minutes": 10080,
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "resets_at": "2026-10-04T04:02:00.404Z",
+          "reset_countdown_seconds": 28540
+        },
+        {
+          "id": "context_window",
+          "name": "Context window",
+          "category": "other",
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "used_amount": 0,
+          "limit_amount": 1000000,
+          "remaining_amount": 1000000,
+          "amount_unit": "tokens"
+        }
+      ],
+      "errors": [
+        {
+          "code": "timeout",
+          "message": "Kimi acquisition exceeded 10000ms"
+        }
+      ]
+    },
+    {
+      "id": "antigravity",
+      "display_name": "Gemini / Antigravity",
+      "installed": true,
+      "auth_state": "unknown",
+      "usage_capability": "unknown",
+      "status": "timeout",
+      "source": "tui-pty",
+      "cli_version": "1.2.14",
+      "fetched_at": "2026-10-03T20:06:20.008Z",
+      "fetch_started_at": "2026-10-03T20:06:20.008Z",
+      "stale": true,
+      "plan_label": "redacted",
+      "limits": [
+        {
+          "id": "gemini_models:weekly",
+          "name": "Gemini Models (Weekly)",
+          "category": "weekly",
+          "window_minutes": 10080,
+          "used_percent": 21.27,
+          "remaining_percent": 78.73,
+          "resets_at": "2026-09-30T06:15:07.857Z",
+          "reset_countdown_seconds": 0,
+          "model_id": "gemini-flash,gemini-pro"
+        },
+        {
+          "id": "gemini_models:5h",
+          "name": "Gemini Models (5-hour)",
+          "category": "rolling_window",
+          "window_minutes": 300,
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "model_id": "gemini-flash,gemini-pro"
+        },
+        {
+          "id": "claude_and_gpt_models:weekly",
+          "name": "Claude And GPT Models (Weekly)",
+          "category": "weekly",
+          "window_minutes": 10080,
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "model_id": "claude-opus,claude-sonnet,gpt-oss"
+        },
+        {
+          "id": "claude_and_gpt_models:5h",
+          "name": "Claude And GPT Models (5-hour)",
+          "category": "rolling_window",
+          "window_minutes": 300,
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "model_id": "claude-opus,claude-sonnet,gpt-oss"
+        }
+      ],
+      "errors": [
+        {
+          "code": "timeout",
+          "message": "Gemini / Antigravity acquisition exceeded 10000ms"
+        }
+      ]
+    },
+    {
+      "id": "cursor",
+      "display_name": "Cursor",
+      "installed": true,
+      "auth_state": "authenticated",
+      "usage_capability": "supported",
+      "status": "ok",
+      "source": "local-api",
+      "cli_version": "2026.09.18-9a7762b",
+      "fetched_at": "2026-10-03T20:06:20.008Z",
+      "fetch_started_at": "2026-10-03T20:06:20.008Z",
+      "stale": false,
+      "plan_label": "redacted",
+      "limits": [
+        {
+          "id": "plan_allowance",
+          "name": "Ultra Plan Allowance",
+          "category": "monthly",
+          "window_minutes": 43200,
+          "used_percent": 18.1,
+          "remaining_percent": 81.9,
+          "used_amount": 72.57,
+          "limit_amount": 400,
+          "remaining_amount": 327.43,
+          "amount_unit": "USD",
+          "resets_at": "2026-10-08T08:38:40.000Z",
+          "reset_countdown_seconds": 390736
+        },
+        {
+          "id": "auto_models",
+          "name": "Auto Models Usage",
+          "category": "monthly",
+          "window_minutes": 43200,
+          "used_percent": 17.2,
+          "remaining_percent": 82.8,
+          "amount_unit": "percent",
+          "resets_at": "2026-10-08T08:38:40.000Z",
+          "reset_countdown_seconds": 390736
+        },
+        {
+          "id": "api_models",
+          "name": "API / Named Models Usage",
+          "category": "monthly",
+          "window_minutes": 43200,
+          "used_percent": 25.7,
+          "remaining_percent": 74.3,
+          "amount_unit": "percent",
+          "resets_at": "2026-10-08T08:38:40.000Z",
+          "reset_countdown_seconds": 390736
+        },
+        {
+          "id": "agent_usage",
+          "name": "Grok Bot Plan",
+          "category": "weekly",
+          "window_minutes": 6688,
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "amount_unit": "percent",
+          "resets_at": "2026-10-07T09:31:26.113Z",
+          "reset_countdown_seconds": 307502
+        }
+      ],
+      "errors": []
+    },
+    {
+      "id": "opencode",
+      "display_name": "OpenCode Go",
+      "installed": true,
+      "auth_state": "authenticated",
+      "usage_capability": "supported",
+      "status": "ok",
+      "source": "local-api",
+      "cli_version": "1.18.32",
+      "fetched_at": "2026-10-03T20:06:20.008Z",
+      "fetch_started_at": "2026-10-03T20:06:20.008Z",
+      "stale": false,
+      "plan_label": "redacted",
+      "limits": [
+        {
+          "id": "rolling",
+          "name": "Rolling limit",
+          "category": "rolling_window",
+          "used_percent": 0,
+          "remaining_percent": 100,
+          "resets_at": "2026-10-03T23:27:17.000Z",
+          "reset_countdown_seconds": 12045
+        },
+        {
+          "id": "weekly",
+          "name": "Weekly quota",
+          "category": "weekly",
+          "window_minutes": 10080,
+          "used_percent": 1,
+          "remaining_percent": 99,
+          "resets_at": "2026-10-05T00:00:00.000Z",
+          "reset_countdown_seconds": 100408
+        },
+        {
+          "id": "monthly",
+          "name": "Monthly quota",
+          "category": "monthly",
+          "window_minutes": 43200,
+          "used_percent": 5,
+          "remaining_percent": 95,
+          "resets_at": "2026-10-17T20:53:11.000Z",
+          "reset_countdown_seconds": 1212399
+        }
+      ],
+      "errors": []
+    }
+  ]
+}

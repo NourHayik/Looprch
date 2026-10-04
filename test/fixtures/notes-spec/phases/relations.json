@@ -1,0 +1,100 @@
+{
+  "documents": [
+    {
+      "depends_on": [],
+      "id": "G-SAFETY",
+      "kind": "global"
+    },
+    {
+      "depends_on": [],
+      "id": "C-NOTE-ID",
+      "kind": "contract"
+    },
+    {
+      "depends_on": [
+        "C-NOTE-ID"
+      ],
+      "id": "F-NOTES",
+      "kind": "requirement"
+    },
+    {
+      "depends_on": [],
+      "id": "R-OPERATIONS",
+      "kind": "requirement"
+    }
+  ],
+  "phases": [
+    {
+      "execution_prerequisites": [],
+      "incoming_mentions": [
+        {
+          "phase": "P-002",
+          "reason": "Inspect published primitive and verified ownership.",
+          "relation": "upstream"
+        }
+      ],
+      "notice": "Chronological order, source reading and change impact are distinct graphs.",
+      "phase": "P-001",
+      "related": [
+        {
+          "documents": [
+            "F-NOTES"
+          ],
+          "phase": "P-002",
+          "read_admitted": true,
+          "reason": "The producer must preserve ValueError and boolean rejection expected by notes.",
+          "relation": "consumer",
+          "scope": "exact declared sources; no recursive phase preflight",
+          "sections": [
+            "contracts"
+          ],
+          "source": "phases/en/P-002.md",
+          "title": "Notes vertical capability"
+        }
+      ]
+    },
+    {
+      "execution_prerequisites": [
+        "P-001"
+      ],
+      "incoming_mentions": [
+        {
+          "phase": "P-001",
+          "reason": "The producer must preserve ValueError and boolean rejection expected by notes.",
+          "relation": "consumer"
+        }
+      ],
+      "notice": "Chronological order, source reading and change impact are distinct graphs.",
+      "phase": "P-002",
+      "related": [
+        {
+          "documents": [
+            "C-NOTE-ID"
+          ],
+          "phase": "P-001",
+          "read_admitted": true,
+          "reason": "Inspect published primitive and verified ownership.",
+          "relation": "upstream",
+          "scope": "exact declared sources; no recursive phase preflight",
+          "sections": [
+            "contracts"
+          ],
+          "source": "phases/en/P-001.md",
+          "title": "Identifier foundation"
+        }
+      ]
+    },
+    {
+      "execution_prerequisites": [
+        "P-001",
+        "P-002"
+      ],
+      "incoming_mentions": [],
+      "notice": "Chronological order, source reading and change impact are distinct graphs.",
+      "phase": "P-003",
+      "related": []
+    }
+  ],
+  "schema_version": "sev3/1",
+  "toolkit_version": "1.2.0"
+}

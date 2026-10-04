@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://looprch.dev/schemas/gates.schema.json",
+  "title": "Gate runs of one phase (.looprch/phases/P-NNN/gates.json)",
+  "type": "object",
+  "required": ["schema_version", "phase", "runs", "latest"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "phase": { "type": "string", "pattern": "^P-[0-9]{3,}$" },
+    "latest": { "type": "object", "additionalProperties": { "type": "string" } },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["gate_run_id", "gate_id", "kind", "negative", "argv", "cwd", "started_at", "duration_ms", "exit_code", "signal", "timed_out", "evidence", "manual_report", "stdout_path", "stderr_path", "stdout_tail", "ok", "reason", "snapshot_tree"],
+        "properties": {
+          "gate_run_id": { "type": "string", "pattern": "^P-[0-9]{3,}-g-[0-9]+$" },
+          "gate_id": { "type": "string" },
+          "kind": { "enum": ["test", "static", "build", "security", "manual", "integration"] },
+          "negative": { "type": "boolean" },
+          "argv": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "cwd": { "const": "." },
+          "started_at": { "type": "string", "format": "date-time" },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "exit_code": { "type": ["integer", "null"] },
+          "signal": { "type": ["string", "null"] },
+          "timed_out": { "type": "boolean" },
+          "evidence": {
+            "type": "object",
+            "required": ["format", "path", "sha256", "tests", "failures", "errors", "skipped"],
+            "properties": {
+              "format": { "enum": ["unittest", "junit", "none"] },
+              "path": { "type": ["string", "null"] },
+              "sha256": { "type": ["string", "null"] },
+              "tests": { "type": "integer" },
+              "failures": { "type": "integer" },
+              "errors": { "type": "integer" },
+              "skipped": { "type": "integer" }
+            }
+          },
+          "manual_report": { "type": ["string", "null"] },
+          "stdout_path": { "type": "string" },
+          "stderr_path": { "type": "string" },
+          "stdout_tail": { "type": "string" },
+          "ok": { "type": "boolean" },
+          "reason": { "type": ["string", "null"] },
+          "snapshot_tree": { "type": "string", "description": "git tree hash of the tested working tree without .looprch/ and phases/todo.md" }
+        }
+      }
+    }
+  }
+}

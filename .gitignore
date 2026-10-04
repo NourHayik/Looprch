@@ -1,0 +1,13 @@
+# External, read-only SEV3 skill used as design context. It is not Looprch source.
+# The SEV3 toolkit Looprch ships will be vendored separately under vendor/.
+/sev3/
+
+node_modules/
+dist/
+build/
+*.tgz
+/VERSION
+/MANIFEST.sha256
+__pycache__/
+*.log
+.DS_Store

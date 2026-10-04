@@ -1,0 +1,202 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { packageRoot, PROTOCOL, READ_ONLY_ROLES, type Role } from "./constants.js";
+import { writeFileAtomic } from "./fsx.js";
+import { projectPaths } from "./paths.js";
+import { DECISIONS } from "./results.js";
+import type { Delta } from "./state.js";
+
+export type Task =
+  | "planning"
+  | "synthesis"
+  | "revise"
+  | "context_answer"
+  | "debate"
+  | "implementation"
+  | "repair"
+  | "handover"
+  | "testing"
+  | "review"
+  | "adhoc_review"
+  | "worker";
+
+export interface BriefInput {
+  root: string;
+  runId: string;
+  role: Role;
+  task: Task;
+  stage: string;
+  phase: string;
+  phaseTitle: string;
+  phaseBase: string | null;
+  packet: { path: string; bytes: number } | null;
+  phaseSource: string | null;
+  inputs: { path: string; why: string }[];
+  delta: Delta | null;
+  userNote: string | null;
+  resume: boolean;
+  question?: string;
+  gateIds: string[];
+}
+
+const ROLE_FILE: Record<Role, string> = {
+  planner: "planner.md",
+  plan_debater: "plan-debater.md",
+  implementer: "implementer.md",
+  tester: "tester.md",
+  reviewer: "reviewer.md",
+  worker: "worker.md",
+};
+
+const TASK_DECISIONS: Record<Task, string[]> = {
+  planning: ["plan_ready", "needs_expansion"],
+  synthesis: ["plan_final", "needs_expansion"],
+  revise: ["plan_final"],
+  context_answer: ["context_answer"],
+  debate: ["findings", "no_findings", "needs_expansion"],
+  implementation: ["implemented", "needs_context"],
+  repair: ["implemented", "needs_context"],
+  handover: ["handover_ready"],
+  testing: ["pass", "fail"],
+  review: ["approve", "changes_requested"],
+  adhoc_review: ["approve", "changes_requested"],
+  worker: ["answered"],
+};
+
+const FIELDS: Record<Role, string> = {
+  planner: '"expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]   (only with needs_expansion)',
+  plan_debater: '"findings": [{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…"}]',
+  implementer:
+    '"files_changed": ["…"]; with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]',
+  tester: '"tests_written": ["…"], "failures": [{"id":"T-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]',
+  reviewer: '"findings": [{"id":"R-1","severity":"high","summary":"…","files":["…"]}], "manual_gate_reports": []',
+  worker: '"evidence": [{"path":"…","lines":"10-20","note":"…"}]',
+};
+
+export function roleText(role: Role, task: Task): string {
+  const text = readFileSync(join(packageRoot(), "assets", "roles", ROLE_FILE[role]), "utf8");
+  const parts = text.split(/^### Task: /m);
+  const general = parts[0]!.trim();
+  const section = parts.slice(1).find((p) => p.startsWith(`${task}\n`));
+  return section ? `${general}\n\n### Task: ${section.trim()}` : general;
+}
+
+function taskText(input: BriefInput): string {
+  const lines: string[] = [];
+  switch (input.task) {
+    case "planning":
+      lines.push(`Write the implementation plan for ${input.phase}.`);
+      break;
+    case "synthesis":
+      lines.push("Synthesize the final plan from your plan and the single Plan Debate pass.");
+      break;
+    case "revise":
+      lines.push("Revise the plan as the user asked (see Delta).");
+      break;
+    case "context_answer":
+      lines.push("Answer the Implementer's context request in the Delta from approved sources only.");
+      break;
+    case "debate":
+      lines.push("Critically review the plan once.");
+      break;
+    case "implementation":
+      lines.push("Implement the approved plan.");
+      break;
+    case "repair":
+      lines.push("Repair the problems listed in the Delta, then stop.");
+      break;
+    case "handover":
+      lines.push(`Write the final handover. Phase base commit: \`${input.phaseBase ?? "unknown"}\`. Compare with \`git diff --name-status ${input.phaseBase ?? "<base>"}\` plus untracked files.`);
+      break;
+    case "testing":
+      lines.push(`Write or update the tests for the declared gates: ${input.gateIds.join(", ") || "(none)"}. Looprch reruns every gate after you finish.`);
+      break;
+    case "review":
+      lines.push(`Review the implementation of ${input.phase}: actual code, the phase diff since \`${input.phaseBase ?? "the phase base"}\`, the test report and gates.json.`);
+      break;
+    case "adhoc_review":
+      lines.push(`Independent review of ${input.phase} requested by the user. Diff source is listed in the inputs.`);
+      break;
+    case "worker":
+      lines.push(`Question: ${input.question ?? "(none)"}`);
+      break;
+    default: {
+      const never: never = input.task;
+      throw new Error(`unhandled task ${String(never)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function deltaText(d: Delta | null, note: string | null): string {
+  if (!d && !note) return "";
+  const lines = ["", "## Delta", ""];
+  if (d) {
+    lines.push(d.text);
+    for (const f of d.findings ?? []) lines.push(`- ${f.id}${f.severity ? ` [${f.severity}]` : ""}${f.gate_id ? ` (${f.gate_id})` : ""}: ${f.summary}${f.files?.length ? ` — ${f.files.join(", ")}` : ""}`);
+    for (const p of d.paths ?? []) lines.push(`- read: \`${p}\``);
+  }
+  if (note) lines.push("", `User note: ${note}`);
+  lines.push("");
+  return lines.join("\n");
+}
+
+function outputContract(role: Role, task: Task): string {
+  const decisions = TASK_DECISIONS[task].filter((d) => (DECISIONS[role] as readonly string[]).includes(d));
+  return [
+    "Write your report in Markdown (it is saved as the stage artifact). Then end your final message with exactly one fenced block:",
+    "",
+    "```looprch-result",
+    `{"role":"${role}","decision":"${decisions[0]}", …}`,
+    "```",
+    "",
+    `- decision: one of ${decisions.map((d) => `\`${d}\``).join(", ")}`,
+    `- fields: ${FIELDS[role]}`,
+    "- The block must be valid JSON. Nothing may follow it.",
+  ].join("\n");
+}
+
+export function assembleBrief(input: BriefInput): string {
+  const tpl = readFileSync(join(packageRoot(), "assets", "templates", "brief.md"), "utf8");
+  const inputs: string[] = [];
+  let n = 1;
+  if (input.packet) inputs.push(`${n++}. \`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). Read all of it.`);
+  else if (input.phaseSource) inputs.push(`${n++}. \`${input.phaseSource}\` — current phase source.`);
+  const rules = projectPaths(input.root).userRules;
+  if (existsSync(rules)) inputs.push(`${n++}. \`.looprch/user-rules.md\` — project rules every role follows.`);
+  for (const i of input.inputs) inputs.push(`${n++}. \`${i.path}\` — ${i.why}`);
+  const readOnly = READ_ONLY_ROLES.includes(input.role);
+  const writeRule = readOnly
+    ? "You are read-only: do not create, edit or delete any file. Looprch checks git status before and after."
+    : input.role === "implementer"
+      ? "Change application code only; never write or edit tests."
+      : input.role === "tester"
+        ? "Change test code (and gate evidence) only; never edit application code."
+        : "Do not edit files.";
+  const vars: Record<string, string> = {
+    role_title: input.role.replace("_", " "),
+    role: input.role,
+    phase: input.phase,
+    phase_title: input.phaseTitle,
+    run_id: input.runId,
+    protocol: String(PROTOCOL),
+    stage: input.stage,
+    task: input.task,
+    phase_base: input.phaseBase ?? "none",
+    role_text: roleText(input.role, input.task),
+    root: input.root,
+    write_rule: writeRule,
+    session_note: input.resume ? "- You are continuing an earlier session for this phase; re-read inputs only where the Delta requires it." : "",
+    inputs: inputs.join("\n") || "(none)",
+    task_text: taskText(input),
+    delta: deltaText(input.delta, input.userNote),
+    output_contract: outputContract(input.role, input.task),
+  };
+  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? "");
+}
+
+export function writeBrief(root: string, runId: string, text: string): string {
+  const rel = `.looprch/runs/${runId}/brief.md`;
+  writeFileAtomic(join(root, rel), text);
+  return rel;
+}

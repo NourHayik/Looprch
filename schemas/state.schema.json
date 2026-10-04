@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://looprch.dev/schemas/state.schema.json",
+  "title": "Looprch execution state (.looprch/state.json), schema_version 1",
+  "description": "Documentation schema. The CLI owns this file; never edit it by hand. See src/core/state.ts.",
+  "type": "object",
+  "required": ["schema_version", "protocol", "core_version_at_phase_start", "scope", "spec", "git", "current", "flags", "pending_question", "answers", "pending_checkpoint", "runs_index", "sessions", "assignments_history", "quota", "phases", "project"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "protocol": { "type": "integer", "minimum": 1 },
+    "core_version_at_phase_start": { "type": ["string", "null"] },
+    "scope": { "enum": ["phase", "auto", "finish"] },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "package_fingerprint": { "type": ["string", "null"] },
+        "source_fingerprint": { "type": ["string", "null"] },
+        "manifest_sha256": { "type": ["string", "null"] },
+        "toolkit_version": { "type": ["string", "null"] },
+        "phases_total": { "type": "integer" },
+        "verified_at": { "type": ["string", "null"] }
+      }
+    },
+    "git": { "type": "object", "properties": { "base_branch": { "type": ["string", "null"] }, "baseline_commit": { "type": ["string", "null"] } } },
+    "current": {
+      "type": ["object", "null"],
+      "required": ["phase", "title", "stage", "round", "close_step", "phase_base", "branch", "last_commit", "active_run", "snapshots"],
+      "properties": {
+        "phase": { "type": "string", "pattern": "^P-[0-9]{3,}$" },
+        "stage": { "enum": ["preflight", "planning", "debating", "synthesizing", "plan_approval", "implementing", "testing", "gating", "reviewing", "repairing", "handover", "closing"] },
+        "round": { "type": "integer", "minimum": 0 },
+        "close_step": { "enum": [null, "ticks", "merge_approval", "commit", "merge", "tag"] },
+        "active_run": { "type": ["string", "null"] },
+        "tester_verdict": { "enum": [null, "pass", "fail"] },
+        "repair_source": { "enum": [null, "test", "review"] },
+        "snapshots": {
+          "type": "object",
+          "properties": { "gates": { "type": ["string", "null"] }, "review": { "type": ["string", "null"] }, "handover": { "type": ["string", "null"] } }
+        }
+      }
+    },
+    "flags": {
+      "type": "object",
+      "required": ["pause_requested", "paused", "waiting", "blocked"],
+      "properties": {
+        "pause_requested": { "type": "boolean" },
+        "paused": { "type": ["object", "null"], "required": ["reason", "at"] },
+        "waiting": { "type": ["object", "null"], "required": ["until", "reason"] },
+        "blocked": { "type": ["object", "null"], "required": ["code", "reason", "hint", "at"] }
+      }
+    },
+    "pending_question": {
+      "type": ["object", "null"],
+      "required": ["id", "kind", "question", "options"],
+      "properties": {
+        "kind": { "enum": ["commit_baseline", "ack_gates", "approve_plan", "approve_merge", "context_over_budget", "host_conflict", "rate_limit_long"] }
+      }
+    },
+    "sessions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["session_id", "mode", "resumable", "created_at", "last_used", "runs"]
+      }
+    },
+    "assignments_history": { "type": "array" },
+    "phases": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status", "started_at", "closed_at", "merge_commit", "tag", "rounds_used", "implementers"]
+      }
+    },
+    "project": { "type": "object", "properties": { "status": { "enum": ["in_progress", "done"] }, "finished_at": { "type": ["string", "null"] } } }
+  }
+}

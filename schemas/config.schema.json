@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://looprch.dev/schemas/config.schema.json",
+  "title": "Looprch project config (.looprch/config.json), schema_version 1",
+  "description": "Documentation schema. The CLI validates with src/core/config.ts (validateConfig).",
+  "type": "object",
+  "required": ["schema_version", "project", "lead_host", "agents", "roles", "context_kb", "limits", "approvals", "git", "gates", "integrations", "spec"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "project": { "type": "object", "properties": { "id": { "type": ["string", "null"] } } },
+    "lead_host": { "enum": [null, "codex", "cursor", "agy", "kimi", "hermes", "opencode", "grok"] },
+    "agents": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/agent" } },
+    "roles": {
+      "type": "object",
+      "propertyNames": { "enum": ["planner", "plan_debater", "implementer", "tester", "reviewer", "worker"] },
+      "additionalProperties": { "$ref": "#/$defs/role" }
+    },
+    "context_kb": { "type": "object", "additionalProperties": { "type": ["integer", "null"], "minimum": 1 } },
+    "limits": {
+      "type": "object",
+      "required": ["repair_rounds", "quota_wait_minutes", "run_attempts", "dispatch_max_wait", "expansion_rounds"],
+      "properties": {
+        "repair_rounds": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "quota_wait_minutes": { "type": "integer", "minimum": 0, "maximum": 1440 },
+        "run_attempts": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "dispatch_max_wait": { "$ref": "#/$defs/duration" },
+        "expansion_rounds": { "type": "integer", "minimum": 0, "maximum": 5 }
+      }
+    },
+    "approvals": {
+      "type": "object",
+      "required": ["plan", "merge"],
+      "properties": { "plan": { "$ref": "#/$defs/approval" }, "merge": { "$ref": "#/$defs/approval" } }
+    },
+    "git": { "type": "object", "required": ["phase_branches"], "properties": { "phase_branches": { "type": "boolean" } } },
+    "gates": {
+      "type": "object",
+      "required": ["env"],
+      "properties": { "env": { "type": "object", "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" }, "additionalProperties": { "type": "string" } } }
+    },
+    "integrations": { "type": "object", "required": ["commit_generated"], "properties": { "commit_generated": { "type": "boolean" } } },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "gates_ack": {
+          "type": ["object", "null"],
+          "required": ["manifest_sha256", "acknowledged_at", "commands"],
+          "properties": {
+            "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "acknowledged_at": { "type": "string", "format": "date-time" },
+            "commands": { "type": "array", "items": { "type": "object", "required": ["argv0", "count"] } }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "agent": { "enum": ["codex", "cursor", "agy", "kimi", "hermes", "opencode", "grok"] },
+    "approval": { "enum": ["never", "high-risk", "always"] },
+    "duration": { "type": "string", "pattern": "^[0-9]+[hms]$" },
+    "assignment": {
+      "type": "object",
+      "required": ["mode", "agent", "model"],
+      "properties": {
+        "mode": { "enum": ["direct", "delegate"] },
+        "agent": { "$ref": "#/$defs/agent" },
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": ["string", "null"] },
+        "timeout": { "$ref": "#/$defs/duration" },
+        "context_kb": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "role": {
+      "allOf": [{ "$ref": "#/$defs/assignment" }],
+      "required": ["fallbacks"],
+      "properties": {
+        "fallbacks": { "type": "array", "items": { "$ref": "#/$defs/assignment" } },
+        "max_parallel": { "type": "integer", "minimum": 1, "maximum": 8 }
+      }
+    }
+  }
+}

@@ -1,0 +1,285 @@
+{
+  "documents": [
+    {
+      "always_read": true,
+      "ar": "requirements/ar/safety.md",
+      "depends_on": [],
+      "en": "requirements/en/safety.md",
+      "id": "G-SAFETY",
+      "ids": [
+        "G-001"
+      ],
+      "kind": "global"
+    },
+    {
+      "ar": "requirements/ar/note-id.md",
+      "depends_on": [],
+      "en": "requirements/en/note-id.md",
+      "id": "C-NOTE-ID",
+      "ids": [
+        "R-ID"
+      ],
+      "kind": "contract"
+    },
+    {
+      "ar": "requirements/ar/notes.md",
+      "depends_on": [
+        "C-NOTE-ID"
+      ],
+      "en": "requirements/en/notes.md",
+      "id": "F-NOTES",
+      "ids": [
+        "R-NOTE"
+      ],
+      "kind": "requirement"
+    },
+    {
+      "ar": "requirements/ar/operations.md",
+      "depends_on": [],
+      "en": "requirements/en/operations.md",
+      "id": "R-OPERATIONS",
+      "ids": [
+        "R-OPS"
+      ],
+      "kind": "requirement"
+    }
+  ],
+  "phases": [
+    {
+      "ar": "phases/ar/P-001.md",
+      "en": "phases/en/P-001.md",
+      "gates": [
+        {
+          "command": [
+            "python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_ids.py"
+          ],
+          "evidence": {
+            "format": "unittest"
+          },
+          "id": "GATE-P-001-negative",
+          "kind": "test",
+          "negative": true,
+          "requirements": [
+            "G-001",
+            "R-ID"
+          ],
+          "timeout_seconds": 30
+        }
+      ],
+      "id": "P-001",
+      "kind": "implementation",
+      "number": 1,
+      "owns": [
+        "C-NOTE-ID"
+      ],
+      "related": [
+        {
+          "documents": [
+            "F-NOTES"
+          ],
+          "phase": "P-002",
+          "reason": "The producer must preserve ValueError and boolean rejection expected by notes.",
+          "relation": "consumer",
+          "sections": [
+            "contracts"
+          ]
+        }
+      ],
+      "requirements": [
+        "G-001",
+        "R-ID"
+      ],
+      "requires": [],
+      "research": [
+        "RES-001"
+      ],
+      "risk": "high",
+      "sections": [
+        "objective",
+        "scope",
+        "contracts",
+        "implementation",
+        "verification",
+        "acceptance",
+        "handover"
+      ],
+      "title": "Identifier foundation",
+      "uses": [
+        {
+          "direction": "consumer",
+          "document": "F-NOTES",
+          "reason": "Preserve the validation semantics used by the next capability; do not build it now."
+        }
+      ],
+      "work_class": "small"
+    },
+    {
+      "ar": "phases/ar/P-002.md",
+      "en": "phases/en/P-002.md",
+      "gates": [
+        {
+          "command": [
+            "python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_*.py"
+          ],
+          "evidence": {
+            "format": "unittest"
+          },
+          "id": "GATE-P-002-negative",
+          "kind": "test",
+          "negative": true,
+          "requirements": [
+            "G-001",
+            "R-ID",
+            "R-NOTE"
+          ],
+          "timeout_seconds": 30
+        }
+      ],
+      "id": "P-002",
+      "kind": "implementation",
+      "number": 2,
+      "owns": [
+        "F-NOTES"
+      ],
+      "related": [
+        {
+          "documents": [
+            "C-NOTE-ID"
+          ],
+          "phase": "P-001",
+          "reason": "Inspect published primitive and verified ownership.",
+          "relation": "upstream",
+          "sections": [
+            "contracts"
+          ]
+        }
+      ],
+      "requirements": [
+        "G-001",
+        "R-ID",
+        "R-NOTE"
+      ],
+      "requires": [
+        "P-001"
+      ],
+      "research": [
+        "RES-001"
+      ],
+      "risk": "high",
+      "sections": [
+        "objective",
+        "scope",
+        "contracts",
+        "implementation",
+        "verification",
+        "acceptance",
+        "handover"
+      ],
+      "title": "Notes vertical capability",
+      "uses": [
+        {
+          "direction": "upstream",
+          "document": "C-NOTE-ID",
+          "reason": "Reuse the actual closed validation interface."
+        }
+      ],
+      "work_class": "small"
+    },
+    {
+      "ar": "phases/ar/P-003.md",
+      "en": "phases/en/P-003.md",
+      "gates": [
+        {
+          "command": [
+            "python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_*.py"
+          ],
+          "evidence": {
+            "format": "unittest"
+          },
+          "id": "GATE-P-003-negative",
+          "kind": "test",
+          "negative": true,
+          "requirements": [
+            "G-001",
+            "R-ID",
+            "R-NOTE",
+            "R-OPS"
+          ],
+          "timeout_seconds": 30
+        }
+      ],
+      "id": "P-003",
+      "kind": "closure",
+      "number": 3,
+      "owns": [
+        "R-OPERATIONS"
+      ],
+      "related": [],
+      "requirements": [
+        "G-001",
+        "R-ID",
+        "R-NOTE",
+        "R-OPS"
+      ],
+      "requires": [
+        "P-001",
+        "P-002"
+      ],
+      "research": [
+        "RES-001"
+      ],
+      "risk": "high",
+      "sections": [
+        "objective",
+        "scope",
+        "contracts",
+        "implementation",
+        "verification",
+        "acceptance",
+        "handover"
+      ],
+      "title": "Full local-scope closure",
+      "uses": [
+        {
+          "direction": "upstream",
+          "document": "C-NOTE-ID",
+          "reason": "Reuse the actual closed validation interface."
+        },
+        {
+          "direction": "upstream",
+          "document": "F-NOTES",
+          "reason": "Verify the complete store behavior."
+        }
+      ],
+      "work_class": "small"
+    }
+  ],
+  "project": {
+    "canonical_language": "en",
+    "id": "notes-training-fixture",
+    "title": "Local in-memory note contracts"
+  },
+  "schema_version": "sev3/1",
+  "toolkit_version": "1.2.0"
+}

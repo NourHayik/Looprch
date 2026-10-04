@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://looprch.dev/schemas/events.schema.json",
+  "title": "One line of .looprch/events.jsonl (append-only journal)",
+  "type": "object",
+  "required": ["v", "seq", "ts", "type", "phase", "stage", "role", "agent", "run_id", "data"],
+  "properties": {
+    "v": { "const": 1 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "ts": { "type": "string", "format": "date-time" },
+    "type": {
+      "enum": [
+        "init.discovered", "init.gates_acknowledged", "config.changed",
+        "phase.started", "preflight.passed", "preflight.failed", "stage.entered",
+        "run.issued", "run.dispatched", "run.completed", "run.failed", "run.interrupted", "run.reask",
+        "result.accepted", "result.rejected", "expansion.executed", "context.over_budget", "mode.auto_delegate", "readonly.violation",
+        "gates.run", "gate.result", "checkpoint.committed",
+        "quota.checked", "quota.wait", "quota.fallback", "ratelimit.detected",
+        "question.asked", "question.answered", "paused", "resumed", "blocked",
+        "todo.ticked", "handover.accepted", "phase.merged", "phase.closed", "project.done",
+        "spec.changed", "protocol.mismatch", "lock.stale_recovered", "warning"
+      ]
+    },
+    "phase": { "type": ["string", "null"] },
+    "stage": { "type": ["string", "null"] },
+    "role": { "type": ["string", "null"] },
+    "agent": { "type": ["string", "null"] },
+    "run_id": { "type": ["string", "null"] },
+    "data": { "type": "object" }
+  }
+}

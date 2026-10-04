@@ -1,0 +1,54 @@
+{
+  "claim": "author-attestation-not-machine-proof",
+  "phases": {
+    "P-001": {
+      "checks": {
+        "context_completeness": "reviewed",
+        "contracts": "reviewed",
+        "dependencies": "reviewed",
+        "failure_paths": "reviewed",
+        "lifecycle": "reviewed",
+        "ownership": "reviewed",
+        "scope_boundaries": "reviewed",
+        "security": "reviewed",
+        "translation": "reviewed",
+        "verification": "reviewed"
+      },
+      "notes": "Pure id owns R-ID; future consumer expects bool rejection and no mutable state."
+    },
+    "P-002": {
+      "checks": {
+        "context_completeness": "reviewed",
+        "contracts": "reviewed",
+        "dependencies": "reviewed",
+        "failure_paths": "reviewed",
+        "lifecycle": "reviewed",
+        "ownership": "reviewed",
+        "scope_boundaries": "reviewed",
+        "security": "reviewed",
+        "translation": "reviewed",
+        "verification": "reviewed"
+      },
+      "notes": "Notes reuses the closed primitive; KeyError and ValueError remain separate; invalid operations are side-effect free."
+    },
+    "P-003": {
+      "checks": {
+        "context_completeness": "reviewed",
+        "contracts": "reviewed",
+        "dependencies": "reviewed",
+        "failure_paths": "reviewed",
+        "lifecycle": "reviewed",
+        "ownership": "reviewed",
+        "scope_boundaries": "reviewed",
+        "security": "reviewed",
+        "translation": "reviewed",
+        "verification": "reviewed"
+      },
+      "notes": "Full closure maps all four invariants, inspects code and preserves the stated in-memory-only boundary."
+    }
+  },
+  "reviewer": "SEV3 example author / explicit manual design review",
+  "schema_version": "sev3-refinement/1",
+  "source_fingerprint": "e44b72d5de43d829e9c3b4924b9121a39cc65d1f039557f5ca9d3b991ab7e425",
+  "unresolved_blockers": []
+}

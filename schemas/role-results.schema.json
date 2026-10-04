@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://looprch.dev/schemas/role-results.schema.json",
+  "title": "The looprch-result block at the end of every role's final message",
+  "description": "Documentation schema. The CLI validates with src/core/results.ts (validateResult) and additionally checks that the decision fits the task.",
+  "type": "object",
+  "required": ["role", "decision"],
+  "properties": {
+    "role": { "enum": ["planner", "plan_debater", "implementer", "tester", "reviewer", "worker"] },
+    "run_id": { "type": "string" },
+    "decision": { "type": "string" },
+    "expansion_requests": { "type": "array", "items": { "$ref": "#/$defs/expansion" } }
+  },
+  "oneOf": [
+    { "properties": { "role": { "const": "planner" }, "decision": { "enum": ["plan_ready", "plan_final", "needs_expansion", "context_answer"] } } },
+    {
+      "properties": {
+        "role": { "const": "plan_debater" },
+        "decision": { "enum": ["findings", "no_findings", "needs_expansion"] },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+      }
+    },
+    {
+      "properties": {
+        "role": { "const": "implementer" },
+        "decision": { "enum": ["implemented", "needs_context", "handover_ready"] },
+        "files_changed": { "$ref": "#/$defs/paths" },
+        "context_request": {
+          "type": "object",
+          "required": ["question", "reason"],
+          "properties": { "question": { "type": "string" }, "reason": { "type": "string" }, "documents": { "$ref": "#/$defs/paths" }, "phases": { "$ref": "#/$defs/paths" } }
+        },
+        "modified_files": { "$ref": "#/$defs/paths" },
+        "new_files": { "$ref": "#/$defs/paths" },
+        "deleted_files": { "$ref": "#/$defs/paths" },
+        "renamed": { "type": "array", "items": { "type": "object", "required": ["from", "to"], "properties": { "from": { "type": "string" }, "to": { "type": "string" } } } },
+        "reverted": { "$ref": "#/$defs/paths" },
+        "migrations": {},
+        "contracts_published": { "type": "array", "items": { "type": "object", "required": ["name", "path"] } },
+        "verification_ids": { "type": "array", "items": { "type": "string" } },
+        "limitations": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    {
+      "properties": {
+        "role": { "const": "tester" },
+        "decision": { "enum": ["pass", "fail"] },
+        "tests_written": { "$ref": "#/$defs/paths" },
+        "failures": { "type": "array", "items": { "type": "object", "required": ["id", "summary"], "properties": { "id": { "type": "string" }, "gate_id": { "type": "string" }, "summary": { "type": "string" }, "files": { "$ref": "#/$defs/paths" } } } },
+        "manual_gate_reports": { "$ref": "#/$defs/reports" }
+      }
+    },
+    {
+      "properties": {
+        "role": { "const": "reviewer" },
+        "decision": { "enum": ["approve", "changes_requested"] },
+        "findings": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/finding" }], "required": ["files"] } },
+        "manual_gate_reports": { "$ref": "#/$defs/reports" }
+      }
+    },
+    {
+      "properties": {
+        "role": { "const": "worker" },
+        "decision": { "const": "answered" },
+        "evidence": { "type": "array", "items": { "type": "object", "required": ["path", "note"], "properties": { "path": { "type": "string" }, "lines": { "type": "string" }, "note": { "type": "string" } } } }
+      }
+    }
+  ],
+  "$defs": {
+    "paths": { "type": "array", "items": { "type": "string" } },
+    "finding": {
+      "type": "object",
+      "required": ["id", "summary"],
+      "properties": {
+        "id": { "type": "string" },
+        "severity": { "enum": ["low", "medium", "high", "critical"] },
+        "summary": { "type": "string" },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "section": { "type": "string" },
+        "requirement_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "expansion": {
+      "type": "object",
+      "required": ["kind", "id", "question", "reason"],
+      "properties": { "kind": { "enum": ["document", "phase"] }, "id": { "type": "string" }, "question": { "type": "string" }, "reason": { "type": "string" } }
+    },
+    "reports": { "type": "array", "items": { "type": "object", "required": ["gate_id", "path"] } }
+  }
+}

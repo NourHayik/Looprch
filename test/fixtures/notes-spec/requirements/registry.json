@@ -1,0 +1,42 @@
+{
+  "requirements": {
+    "G-001": {
+      "ar": "requirements/ar/safety.md",
+      "document": "G-SAFETY",
+      "en": "requirements/en/safety.md",
+      "phases": [
+        "P-001",
+        "P-002",
+        "P-003"
+      ]
+    },
+    "R-ID": {
+      "ar": "requirements/ar/note-id.md",
+      "document": "C-NOTE-ID",
+      "en": "requirements/en/note-id.md",
+      "phases": [
+        "P-001",
+        "P-002",
+        "P-003"
+      ]
+    },
+    "R-NOTE": {
+      "ar": "requirements/ar/notes.md",
+      "document": "F-NOTES",
+      "en": "requirements/en/notes.md",
+      "phases": [
+        "P-002",
+        "P-003"
+      ]
+    },
+    "R-OPS": {
+      "ar": "requirements/ar/operations.md",
+      "document": "R-OPERATIONS",
+      "en": "requirements/en/operations.md",
+      "phases": [
+        "P-003"
+      ]
+    }
+  },
+  "schema_version": "sev3/1"
+}
