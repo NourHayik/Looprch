@@ -43,4 +43,13 @@ Repeat until an action tells you to stop. Keep no workflow state in your memory:
    - `blocked`: tell the user `reason` and `hint`, and stop. Never work around a block.
 3. Never edit `.looprch/` or `phases/todo.md`, never commit, never tick boxes, never replace a role.
 4. After a phase closes, use your host's real context compaction if it has one; never invent a summary of results.
+
+## Reporting
+
+Never work silently: the user must always see what just happened, what runs now and what comes next.
+
+- `looprch next`, `looprch record` and `looprch dispatch` return `progress`: tagged status lines such as `[PHASE START]`, `[PLANNING COMPLETE]`, `[DEBATE COMPLETE]`, `[TASK START]`, `[ISSUE]`, `[RETRY]`, `[FALLBACK]`, `[WAITING]`, `[GATES COMPLETE]` or `[BLOCKED]`. After each of these commands, post every `progress` line in the chat exactly as given (a multi-line entry stays multi-line) before you run anything else.
+- Then add one line `Now: <what runs now>. Next: <what follows>`, taken from the action you are about to carry out (for `run_role`: role, task, agent and model; for `wait`: until when). While polling `await_run`, post it once and again only when new `progress` lines arrive.
+- When the loop stops, end with what the user has to do: the `hint` of `blocked`, `/lr-finish` for `stop_before_closure`, `/lr-resume` for `paused`. After `phase_closed`, say `Next:` according to this skill's rule for closed phases.
+- Report workflow steps, decisions, failures and results only. Do not post raw command output, JSON or tool-by-tool activity, and never invent a status line: an empty `progress` list needs only the `Now/Next` line.
 <!-- loop:end -->

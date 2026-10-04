@@ -1,5 +1,31 @@
 # Status and logs
 
+## Progress in the chat
+
+While a loop skill runs, you do not need to ask for a status: the Lead posts each workflow step
+as it happens (see [running-phases.md](running-phases.md#what-the-lead-tells-you) for an
+example). The lines come from Looprch, not from the Lead's memory: `looprch next`, `record` and
+`dispatch` turn the journal events written since the last report into `progress` lines, and the
+Lead posts them unchanged.
+
+| Line | When |
+|---|---|
+| `[PHASE START]`, `[PREFLIGHT COMPLETE]`, `[PHASE COMPLETE]`, `[PROJECT COMPLETE]` | a phase starts, passes preflight, closes; the project is done |
+| `[PLANNING START]` / `[PLANNING COMPLETE]` | the Planner starts / delivers the first plan |
+| `[DEBATE START]` / `[DEBATE COMPLETE]` | the plan goes to the Plan Debater / its result: changes recommended (count, severities, summary) or no changes |
+| `[PLAN UPDATE START]` / `[PLAN UPDATED]` | the Planner updates the plan after the debate or your revision |
+| `[IMPLEMENTATION …]`, `[TESTING …]`, `[GATES …]`, `[REVIEW …]`, `[REPAIR …]`, `[HANDOVER …]`, `[CLOSING START]` | each stage starts and completes, with the verdict, findings or failed gates |
+| `[TASK START]`, `[RETRY]` | a role run starts: run id, role, task, agent/model, mode, attempt, fallback reason |
+| `[ISSUE]` | a run failed, was interrupted or returned an invalid report: reason and what Looprch does next |
+| `[FALLBACK]` | a role moves to its next approved agent/model |
+| `[WAITING]` | a quota or rate-limit wait |
+| `[DECISION NEEDED]`, `[DECISION]` | Looprch needs your answer / records it |
+| `[CHECKPOINT]`, `[EXPANSION]`, `[CONTEXT NEEDED]`, `[CONTEXT ANSWERED]`, `[NOTE]`, `[WARNING]` | checkpoint commits, extra sources, cross-phase context, Direct→Delegate, warnings |
+| `[PAUSED]`, `[RESUMED]`, `[BLOCKED]` | the loop pauses, resumes or stops (with the fix) |
+
+Each event is reported once. The cursor is `.looprch/runs/progress.json` (gitignored); if it is
+missing, reporting starts with the next event. The full history stays in `looprch log`.
+
 ## looprch status
 
 ```text
@@ -29,7 +55,8 @@ looprch log --type gate.result --json
 
 The journal `.looprch/events.jsonl` is append-only and committed with each phase. Event types
 include `phase.started`, `stage.entered`, `run.issued`, `run.dispatched`, `result.accepted`,
-`gate.result`, `checkpoint.committed`, `quota.fallback`, `blocked`, `phase.closed`.
+`gate.result`, `checkpoint.committed`, `quota.fallback`, `assignment.changed`, `blocked`,
+`phase.closed`.
 
 ## Run archive
 

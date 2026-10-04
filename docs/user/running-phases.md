@@ -29,6 +29,52 @@ preflight → planning → debating → [synthesizing] → [plan approval] → i
   `git diff --name-status` since the phase base.
 - **Closing**: Looprch ticks `phases/todo.md`, commits, merges and tags.
 
+## What the Lead tells you
+
+The Lead never works silently. After every `looprch next`, `record` and `dispatch` it posts the
+progress lines Looprch returns, then one `Now: … Next: …` line, so you always see what just
+happened, what runs now and what comes next. A phase looks like this (shortened):
+
+```text
+[PHASE START] P-001 "Identifier foundation"
+[PREFLIGHT COMPLETE] P-001 checks passed (risk high).
+[PLANNING START] P-001 planning started.
+[TASK START] P-001-planner-1: Planner (planning) on cursor/cursor-plan · direct
+[PLANNING COMPLETE] Initial plan completed by the Planner on cursor: .looprch/phases/P-001/plan.md
+[DEBATE START] Plan sent for debate.
+[TASK START] P-001-plan_debater-1: Plan Debater (debate) on kimi/kimi-k · delegate
+[DEBATE COMPLETE]
+Result: Changes recommended (1 finding: 1 medium).
+Summary: D-1 (medium): Clarify error handling.
+[PLAN UPDATE START] The Planner is updating the plan.
+[PLAN UPDATED] The Planner updated the plan after the debate: .looprch/phases/P-001/plan.md
+[IMPLEMENTATION START] P-001 implementation started.
+[ISSUE]
+Task P-001-implementer-1 (Implementer on opencode) failed.
+Reason: failed: boom
+Action: Retry with the same agent.
+[RETRY] P-001-implementer-2: Implementer (implementation) on opencode/oc/impl · delegate · attempt 2
+[IMPLEMENTATION COMPLETE] The Implementer on opencode finished; 1 file touched.
+[TESTING START] P-001 testing started.
+[TESTING COMPLETE] Tester verdict: pass (codex).
+[GATES START] Looprch runs the declared gates.
+[GATES COMPLETE] The gate passed.
+[REVIEW START] P-001 review started.
+[REVIEW COMPLETE] Approved by the Reviewer on cursor.
+[HANDOVER START] The Implementer writes the handover.
+[HANDOVER COMPLETE] Handover accepted; its file lists match git.
+[CLOSING START] Ticking todo.md, then commit, merge and tag.
+[PHASE COMPLETE] P-001 closed and merged (tag looprch/P-001).
+Now: phase closed. Next: P-002.
+```
+
+A debate without findings reads `Result: No changes recommended. Original plan accepted.` Other
+lines report fallbacks (`[FALLBACK] Implementer: opencode/oc/impl replaced by codex/codex-impl`),
+waits for quota or rate limits (`[WAITING]`), checkpoints, warnings, questions you must answer
+(`[DECISION NEEDED]`, `[DECISION]`) and stops (`[BLOCKED]` with the reason and the fix). Command
+output and tool-by-tool activity are not posted. See [status-and-logs.md](status-and-logs.md) for
+the full list.
+
 ## Repair limit
 
 Test and review repairs share a per-phase limit (`limits.repair_rounds`, default 3). At the limit

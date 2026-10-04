@@ -50,6 +50,12 @@ export function persist(e: Engine): void {
   e.events = [];
 }
 
+function severityCounts(list: Finding[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const f of list) if (f.severity) out[f.severity] = (out[f.severity] ?? 0) + 1;
+  return out;
+}
+
 function ev(e: Engine, input: EventInput): void {
   const cur = e.st.current;
   e.events.push({ phase: cur?.phase ?? null, stage: cur?.stage ?? null, ...input });
@@ -74,7 +80,7 @@ function cur(e: Engine) {
 
 export function block(e: Engine, code: string, reason: string, hint: string, details: unknown = null): Action {
   e.st.flags.blocked = { code, reason, details, hint, at: nowIso() };
-  ev(e, { type: "blocked", data: { code, reason } });
+  ev(e, { type: "blocked", data: { code, reason, hint } });
   return { ...base(e, reason), action: "blocked", code, reason, details, hint, durable: true };
 }
 
@@ -98,7 +104,7 @@ function transition(e: Engine, stage: Stage): void {
   const c = cur(e);
   c.stage = stage;
   c.stage_entered_at = nowIso();
-  ev(e, { type: "stage.entered", stage, data: {} });
+  ev(e, { type: "stage.entered", stage, data: { round: c.round } });
 }
 
 function approvalApplies(a: Approval, phase: PhaseDef): boolean {
@@ -381,6 +387,7 @@ function quotaChoice(e: Engine, a: Assignment): QuotaChoice {
 function recordAssignment(e: Engine, role: Role, from: Assignment | null, to: Assignment, reason: AssignmentChange["reason"], runId: string | null): void {
   const c = cur(e);
   e.st.assignments_history.push({ phase: c.phase, role, from: from ? strip(from) : null, to: strip(to), reason, run_id: runId, at: nowIso() });
+  ev(e, { type: "assignment.changed", role, agent: to.agent, run_id: runId, data: { from: from ? `${from.agent}/${from.model}` : null, to: `${to.agent}/${to.model}`, reason } });
 }
 
 function strip(a: Assignment): Assignment {
@@ -596,7 +603,7 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
   st.runs_index[runId] = { role, status: "issued", attempt, side: false };
   c.active_run = runId;
   c.last_agent[role] = chosen.agent;
-  ev(e, { type: "run.issued", role, agent: chosen.agent, run_id: runId, data: { task, mode: effective!, mode_reason: modeReason, model: chosen.model, session: sessionId, packet_bytes: packet?.bytes ?? null } });
+  ev(e, { type: "run.issued", role, agent: chosen.agent, run_id: runId, data: { task, mode: effective!, mode_reason: modeReason, model: chosen.model, session: sessionId, packet_bytes: packet?.bytes ?? null, attempt } });
   if (modeReason === "d05_auto_delegate") ev(e, { type: "mode.auto_delegate", role, agent: chosen.agent, run_id: runId, data: { host: e.host } });
   return runRoleAction(e, run);
 }
@@ -836,7 +843,21 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessage: string, se
   }
   run.decision = result.decision;
   finish("completed");
-  ev(e, { type: "result.accepted", role: run.role, agent: run.agent, run_id: run.run_id, data: { decision: result.decision, touched: run.touched_files.length } });
+  const reported: Finding[] = result.findings ?? result.failures ?? [];
+  ev(e, {
+    type: "result.accepted",
+    role: run.role,
+    agent: run.agent,
+    run_id: run.run_id,
+    data: {
+      decision: result.decision,
+      touched: run.touched_files.length,
+      task: run.task,
+      findings_total: reported.length,
+      severities: severityCounts(reported),
+      findings: reported.slice(0, 5).map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), summary: f.summary.slice(0, 300) })),
+    },
+  });
   if (run.side) return { status: "accepted", decision: result.decision, artifact: writeSideOutput(e, run, ex.artifact, result), errors: [] };
   const c = cur(e);
   c.reask_count = 0;
@@ -1265,7 +1286,7 @@ export function issueSideRun(e: Engine, kind: "worker" | "adhoc_review", opts: {
   };
   saveRun(e.root, run);
   st.runs_index[runId] = { role, status: "issued", attempt: 1, side: true };
-  ev(e, { type: "run.issued", role, agent: run.agent, run_id: runId, data: { task: kind, side: true, mode: effective } });
+  ev(e, { type: "run.issued", role, agent: run.agent, run_id: runId, data: { task: kind, side: true, mode: effective, model: run.model } });
   return runRoleAction(e, run);
 }
 

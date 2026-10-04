@@ -1,5 +1,10 @@
 # Roles and modes
 
+The **Lead** is the agent chat where you run `/lr-phase`, `/lr-auto`, `/lr-resume` or
+`/lr-finish`. It never does a role's work: it runs one Looprch step at a time, starts the
+configured roles and posts every workflow step in the chat (see
+[running-phases.md](running-phases.md#what-the-lead-tells-you)).
+
 ## Configuring a role
 
 ```sh

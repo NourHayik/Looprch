@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { tmp, REPO } from "../helpers/tmp.js";
 import { writeFileAtomic, readJson } from "../../src/core/fsx.js";
 import { acquireLock, releaseLock, readLock, withLock } from "../../src/core/lock.js";
-import { appendEvent, readEvents, EVENT_TYPES } from "../../src/core/journal.js";
+import { appendEvent, lastSeq, progressStart, readEvents, renderProgress, takeProgress, EVENT_TYPES, type EventType, type LrEvent } from "../../src/core/journal.js";
 import { defaultConfig, validateConfig, type AgentCaps, type AgentId, type Config, loadConfig, saveConfig } from "../../src/core/config.js";
 import { migrate } from "../../src/core/migrations.js";
 import { initialState, loadState, saveState } from "../../src/core/state.js";
@@ -123,6 +123,101 @@ describe("core/journal", () => {
   test("schema enum matches the event type list", () => {
     const schema = JSON.parse(readFileSync(join(REPO, "schemas/events.schema.json"), "utf8"));
     assert.deepEqual([...schema.properties.type.enum].sort(), [...EVENT_TYPES].sort());
+  });
+
+  test("lastSeq reads the journal end", () => {
+    const d = tmp();
+    assert.equal(lastSeq(d), 0);
+    appendEvent(d, { type: "phase.started", phase: "P-001" });
+    appendEvent(d, { type: "paused" });
+    assert.equal(lastSeq(d), 2);
+  });
+});
+
+describe("core/journal progress lines", () => {
+  let seq = 0;
+  const ev = (type: EventType, rest: Partial<LrEvent> = {}): LrEvent => ({ v: 1, seq: ++seq, ts: "", type, phase: "P-003", stage: null, role: null, agent: null, run_id: null, data: {}, ...rest });
+
+  test("phase, stage and run lines", () => {
+    assert.deepEqual(
+      renderProgress([
+        ev("phase.started", { data: { title: "Tenant registry" } }),
+        ev("stage.entered", { stage: "planning", data: { round: 0 } }),
+        ev("run.issued", { role: "planner", agent: "codex", run_id: "P-003-planner-1", data: { task: "planning", mode: "delegate", mode_reason: "configured", model: "gpt", attempt: 1 } }),
+        ev("result.accepted", { role: "planner", agent: "codex", run_id: "P-003-planner-1", data: { decision: "plan_ready", task: "planning", touched: 0 } }),
+        ev("stage.entered", { stage: "debating", data: { round: 0 } }),
+        ev("stage.entered", { stage: "repairing", data: { round: 2 } }),
+        ev("phase.closed", { data: { tag: "looprch/P-003" } }),
+      ]),
+      [
+        '[PHASE START] P-003 "Tenant registry"',
+        "[PLANNING START] P-003 planning started.",
+        "[TASK START] P-003-planner-1: Planner (planning) on codex/gpt · delegate",
+        "[PLANNING COMPLETE] Initial plan completed by the Planner on codex: .looprch/phases/P-003/plan.md",
+        "[DEBATE START] Plan sent for debate.",
+        "[REPAIR START] Repair round 2 started.",
+        "[PHASE COMPLETE] P-003 closed and merged (tag looprch/P-003).",
+      ],
+    );
+  });
+
+  test("debate outcomes", () => {
+    const debate = (data: Record<string, unknown>) => renderProgress([ev("result.accepted", { role: "plan_debater", agent: "kimi", data: { task: "debate", ...data } })])[0];
+    assert.equal(debate({ decision: "no_findings", findings_total: 0 }), "[DEBATE COMPLETE]\nResult: No changes recommended. Original plan accepted.");
+    assert.equal(
+      debate({ decision: "findings", findings_total: 5, severities: { high: 1, medium: 4 }, findings: [{ id: "D-1", severity: "high", summary: "Missing rollback." }, { id: "D-2", severity: "medium", summary: "Name the gate." }] }),
+      "[DEBATE COMPLETE]\nResult: Changes recommended (5 findings: 1 high, 4 medium).\nSummary: D-1 (high): Missing rollback.; D-2 (medium): Name the gate.; 3 more",
+    );
+  });
+
+  test("failures name the follow-up action", () => {
+    const failed = ev("run.failed", { role: "tester", agent: "codex", run_id: "P-003-tester-1", data: { kind: "timeout", detail: "x\nrelay timed out after 60m\n" } });
+    assert.equal(renderProgress([failed])[0], "[ISSUE]\nTask P-003-tester-1 (Tester on codex) failed.\nReason: timeout: relay timed out after 60m\nAction: Retry with the same agent.");
+    const fallback = ev("assignment.changed", { role: "tester", agent: "kimi", data: { from: "codex/c", to: "kimi/k", reason: "run_failed_fallback" } });
+    const lines = renderProgress([failed, fallback]);
+    assert.match(lines[0]!, /Action: Switching the Tester to kimi\/k\.$/);
+    assert.equal(lines[1], "[FALLBACK] Tester: codex/c replaced by kimi/k (run failed fallback).");
+    const blocked = ev("blocked", { data: { code: "run_failed", reason: "tester failed 2 time(s)", hint: "Inspect the run" } });
+    const b = renderProgress([failed, blocked]);
+    assert.match(b[0]!, /Action: Looprch stopped; see \[BLOCKED\] below\.$/);
+    assert.equal(b[1], "[BLOCKED]\nReason (run_failed): tester failed 2 time(s)\nFix: Inspect the run");
+  });
+
+  test("gates are summarized from their results; low-level events give no line", () => {
+    const lines = renderProgress([
+      ev("gate.result", { data: { gate_id: "G-1", ok: true } }),
+      ev("gate.result", { data: { gate_id: "G-2", ok: false, reason: "exit 1" } }),
+      ev("gates.run", { data: { all_passed: false } }),
+      ev("todo.ticked", { data: { key: "P-003" } }),
+      ev("quota.fallback", { data: {} }),
+    ]);
+    assert.deepEqual(lines, ["[GATES COMPLETE]\nResult: 1/2 gates passed.\nFailed: G-2 (exit 1)"]);
+  });
+
+  test("events written before 0.2.0 still render", () => {
+    assert.deepEqual(renderProgress([ev("result.accepted", { role: "tester", agent: "codex", run_id: "P-003-tester-1", data: { decision: "pass" } })]), ["[TASK COMPLETE] P-003-tester-1: Tester on codex returned pass."]);
+  });
+});
+
+describe("core/journal progress cursor", () => {
+  test("without a cursor reporting starts at the journal end; each event is reported once", () => {
+    const d = tmp();
+    appendEvent(d, { type: "phase.started", phase: "P-001", data: { title: "Old" } });
+    const from = progressStart(d);
+    assert.equal(from, 1);
+    appendEvent(d, { type: "paused" });
+    assert.deepEqual(takeProgress(d, from), ["[PAUSED] Looprch paused at your request."]);
+    assert.deepEqual(readJson(projectPaths(d).progress), { reported_seq: 2 });
+    assert.equal(progressStart(d, 0), 2);
+    assert.deepEqual(takeProgress(d, progressStart(d)), []);
+  });
+
+  test("an unreadable cursor falls back", () => {
+    const d = tmp();
+    appendEvent(d, { type: "paused" });
+    writeFileAtomic(projectPaths(d).progress, "{nope");
+    assert.equal(progressStart(d), 1);
+    assert.equal(progressStart(d, 0), 0);
   });
 });
 

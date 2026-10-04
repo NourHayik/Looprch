@@ -1,7 +1,7 @@
 #!/bin/sh
 # Looprch installer: checks prerequisites, then runs the same npx command as the npm channel.
 #   curl -fsSL <url>/install.sh | sh
-#   LOOPRCH_VERSION=0.1.1 sh install.sh
+#   LOOPRCH_VERSION=0.2.0 sh install.sh
 # LOOPRCH_NPX_SPEC overrides the npx package spec (testing a local tarball).
 # Uses the npm registry when looprch is published there, otherwise github:NourHayik/Looprch.
 set -eu

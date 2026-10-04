@@ -30,6 +30,14 @@ describe("skills", () => {
     for (const a of ACTION_NAMES) assert.ok(block.includes(`\`${a}\``), `loop does not mention ${a}`);
   });
 
+  test("the loop block tells the Lead to post the progress lines and never work silently", () => {
+    const block = loop(skill("lr-phase"))!;
+    assert.match(block, /## Reporting/);
+    assert.match(block, /post every `progress` line in the chat exactly as given/);
+    assert.match(block, /`Now: <what runs now>\. Next: <what follows>`/);
+    assert.match(block, /Never work silently/);
+  });
+
   test("every skill that runs next or a side run names all host ids", () => {
     for (const s of ["lr-phase", "lr-auto", "lr-resume", "lr-finish", "lr-init", "lr-review", "lr-worker"]) {
       for (const id of ["codex", "cursor", "agy", "kimi", "hermes", "opencode", "grok"]) assert.ok(skill(s).includes(`\`${id}\``), `${s} misses ${id}`);

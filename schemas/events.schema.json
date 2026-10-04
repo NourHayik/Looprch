@@ -15,7 +15,7 @@
         "run.issued", "run.dispatched", "run.completed", "run.failed", "run.interrupted", "run.reask",
         "result.accepted", "result.rejected", "expansion.executed", "context.over_budget", "mode.auto_delegate", "readonly.violation",
         "gates.run", "gate.result", "checkpoint.committed",
-        "quota.checked", "quota.wait", "quota.fallback", "ratelimit.detected",
+        "quota.checked", "quota.wait", "quota.fallback", "assignment.changed", "ratelimit.detected",
         "question.asked", "question.answered", "paused", "resumed", "blocked",
         "todo.ticked", "handover.accepted", "phase.merged", "phase.closed", "project.done",
         "spec.changed", "protocol.mismatch", "lock.stale_recovered", "warning"
@@ -26,6 +26,9 @@
     "role": { "type": ["string", "null"] },
     "agent": { "type": ["string", "null"] },
     "run_id": { "type": ["string", "null"] },
-    "data": { "type": "object" }
+    "data": {
+      "type": "object",
+      "description": "Free-form per type. Fields read by the progress lines: stage.entered {round}; run.issued {task, mode, mode_reason, model, attempt}; result.accepted {decision, touched, task, findings_total, severities, findings[{id, severity?, summary}]}; assignment.changed {from, to, reason}; blocked {code, reason, hint}."
+    }
   }
 }

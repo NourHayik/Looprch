@@ -22,7 +22,8 @@ Observed schema 1.0 (2026-10-03): `providers[]` with `id`, `installed`, `auth_st
 ## Use in the lifecycle
 
 `issueRun` walks the role's assignments from the current fallback index: mode resolution, then
-the quota choice. Fallbacks are recorded in `assignments_history` and `quota.fallback` events and
+the quota choice. Fallbacks are recorded in `assignments_history` and `quota.fallback` events
+(every assignment change, including failure fallbacks, also writes `assignment.changed`) and
 stay in effect for the rest of the phase. Rate-limit failures set `state.quota.exhausted[provider]`
 (source `rate_limit`, reset unknown); the mark is cleared after a successful run or when its
 15-minute wait ends.

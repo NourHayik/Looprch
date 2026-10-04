@@ -20,6 +20,8 @@ export interface DriveOptions {
 export interface DriveResult {
   actions: any[];
   last: any;
+  /** Every `progress` line returned by next, dispatch and record, in order. */
+  progress: string[];
 }
 
 function cli(args: string[], o: DriveOptions, input?: string) {
@@ -43,18 +45,20 @@ export function drive(o: DriveOptions): DriveResult {
   const host = o.host ?? "cursor";
   const scope = o.scope ?? "phase";
   const actions: any[] = [];
+  const progress: string[] = [];
+  const collect = (r: any) => progress.push(...(r.progress ?? []));
   const stopOn = o.stopOn ?? ["paused", "blocked", "stop_before_closure", "project_done"];
   for (let i = 0; i < (o.maxSteps ?? 200); i++) {
     const a = cli(["next", "--host", host, "--scope", scope], o);
     actions.push(a);
-    if (o.onAction?.(a) === "stop") return { actions, last: a };
+    collect(a);
+    if (o.onAction?.(a) === "stop") return { actions, last: a, progress };
     switch (a.action) {
       case "run_role":
-        if (a.mode === "delegate") cli(["dispatch", a.run_id, "--max-wait", o.dispatchWait ?? "60s"], o);
-        else runDirect(a, o);
+        collect(a.mode === "delegate" ? cli(["dispatch", a.run_id, "--max-wait", o.dispatchWait ?? "60s"], o) : runDirect(a, o));
         break;
       case "await_run":
-        cli(["dispatch", "--wait", a.run_id, "--max-wait", o.dispatchWait ?? "60s"], o);
+        collect(cli(["dispatch", "--wait", a.run_id, "--max-wait", o.dispatchWait ?? "60s"], o));
         break;
       case "run_gates":
       case "checkpoint":
@@ -69,10 +73,10 @@ export function drive(o: DriveOptions): DriveResult {
         break;
       }
       case "phase_closed":
-        if (scope === "phase" || stopOn.includes("phase_closed")) return { actions, last: a };
+        if (scope === "phase" || stopOn.includes("phase_closed")) return { actions, last: a, progress };
         break;
       default:
-        if (stopOn.includes(a.action)) return { actions, last: a };
+        if (stopOn.includes(a.action)) return { actions, last: a, progress };
     }
   }
   throw new Error(`driver did not finish: last actions ${JSON.stringify(actions.slice(-3), null, 1)}`);

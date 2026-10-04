@@ -30,6 +30,7 @@ export function projectPaths(root: string) {
     backups: join(lr, "backups"),
     runs: join(lr, "runs"),
     run: (id: string) => join(lr, "runs", id),
+    progress: join(lr, "runs", "progress.json"),
     packets: join(lr, "packets"),
     testEvidence: join(lr, "test-evidence"),
     reports: join(lr, "reports"),

@@ -6,7 +6,7 @@ import { loadConfig } from "../core/config.js";
 import { parseDuration } from "../core/clock.js";
 import { withLock } from "../core/lock.js";
 import { block, loadEngine, persist } from "../core/lifecycle.js";
-import { appendEvent } from "../core/journal.js";
+import { appendEvent, lastSeq, progressStart, takeProgress } from "../core/journal.js";
 import { loadRun, saveRun, type RunRecord } from "../core/runs.js";
 import { nowIso } from "../core/clock.js";
 import { buildRelayArgv, finalizeWithLock, relayWrapper, spawnWrapper, waitForRun } from "../delegate/dispatch.js";
@@ -30,11 +30,23 @@ function report(run: RunRecord, done: boolean) {
   };
 }
 
+/** Progress lines for the main loop; side runs leave them for the Lead's next command. */
+async function progressFor(root: string, run: RunRecord, from: number): Promise<string[]> {
+  if (run.side) return [];
+  try {
+    return await withLock(root, null, `progress ${run.run_id}`, () => takeProgress(root, progressStart(root, from)));
+  } catch (err) {
+    if ((err as LrError).code === "lock_busy") return [];
+    throw err;
+  }
+}
+
 export async function run(argv: string[]): Promise<number> {
   const { values, positionals } = parse(argv, { wait: { type: "string" }, "max-wait": { type: "string" }, root: { type: "string" } }, USAGE);
   const root = projectRoot(values.root);
   const runId = values.wait ?? positionals[0];
   if (!runId) throw new UsageError("Name the run to dispatch", USAGE);
+  const startSeq = lastSeq(root);
   const maxMs = parseDuration(values["max-wait"] ?? loadConfig(root).limits.dispatch_max_wait);
   if (!values.wait) {
     const started = await withLock(root, null, `dispatch ${runId}`, () => {
@@ -63,15 +75,18 @@ export async function run(argv: string[]): Promise<number> {
     });
     if (!started) {
       const r = loadRun(root, runId);
-      out(!!values.json, report(r, true), `Run ${runId} already finished: ${r.status}`);
+      const data = { ...report(r, true), progress: await progressFor(root, r, startSeq) };
+      out(!!values.json, data, () => [...data.progress, `Run ${runId} already finished: ${r.status}`].join("\n"));
       return 0;
     }
   }
   const done = await waitForRun(root, runId, maxMs);
   if (done) await finalizeWithLock(root, runId);
   const r = loadRun(root, runId);
-  const data = report(r, done && r.status !== "running");
-  out(!!values.json, data, () => (data.status === "running" ? `Run ${runId} is still running in ${r.agent}. Check again with: looprch dispatch --wait ${runId}` : `Run ${runId}: ${data.status}${data.decision ? ` (${data.decision})` : ""}. Continue with: looprch next`));
+  const data = { ...report(r, done && r.status !== "running"), progress: await progressFor(root, r, startSeq) };
+  out(!!values.json, data, () =>
+    [...data.progress, data.status === "running" ? `Run ${runId} is still running in ${r.agent}. Check again with: looprch dispatch --wait ${runId}` : `Run ${runId}: ${data.status}${data.decision ? ` (${data.decision})` : ""}. Continue with: looprch next`].join("\n"),
+  );
   return 0;
 }
 

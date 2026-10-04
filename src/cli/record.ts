@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { LrError, UsageError } from "../core/errors.js";
 import { withLock } from "../core/lock.js";
 import { acceptResult, loadEngine, persist } from "../core/lifecycle.js";
+import { progressStart, takeProgress } from "../core/journal.js";
 import { loadRun } from "../core/runs.js";
 import { parse, projectRoot } from "./args.js";
 import { out } from "./output.js";
@@ -15,6 +16,7 @@ export async function run(argv: string[]): Promise<number> {
   const text = readFileSync(0, "utf8");
   const root = projectRoot(values.root);
   const r = await withLock(root, null, `record ${runId}`, () => {
+    const from = progressStart(root);
     const e = loadEngine(root, null);
     const run = loadRun(root, runId);
     if (run.status !== "issued") throw new LrError("run_not_open", `Run ${runId} is ${run.status}; nothing to record`, "Run looprch next for the current action");
@@ -22,8 +24,9 @@ export async function run(argv: string[]): Promise<number> {
     if (!run.side && e.st.current?.active_run !== runId) throw new LrError("stale_run", `Run ${runId} is not the active run (${e.st.current?.active_run ?? "none"})`, "Run looprch next");
     const outcome = acceptResult(e, run, text, values.session ?? null);
     persist(e);
-    return { ok: outcome.status === "accepted", run_id: runId, ...outcome, next_hint: "looprch next" };
+    const progress = run.side ? [] : takeProgress(root, from);
+    return { ok: outcome.status === "accepted", run_id: runId, ...outcome, next_hint: "looprch next", progress };
   });
-  out(!!values.json, r, () => `${runId}: ${r.status}${r.decision ? ` (${r.decision})` : ""}${r.errors.length ? `\n${r.errors.join("\n")}` : ""}\nContinue with: looprch next`);
+  out(!!values.json, r, () => [...r.progress, `${runId}: ${r.status}${r.decision ? ` (${r.decision})` : ""}${r.errors.length ? `\n${r.errors.join("\n")}` : ""}\nContinue with: looprch next`].join("\n"));
   return 0;
 }

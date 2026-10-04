@@ -16,6 +16,22 @@ JSON output of agent-facing commands (`next`, `dispatch`, `record`, `gates run`,
 `status`, `doctor`, `init discover`, `config validate`, `models`) is an interface used by the
 skills. Add fields; never rename or remove them without a protocol bump.
 
+## Progress lines
+
+`next`, `record` and `dispatch` add `progress: string[]` to their JSON (and print the lines above
+their human output). Under the project lock they read the journal events after the cursor
+`.looprch/runs/progress.json` (`{reported_seq}`, gitignored so commits stay clean), render them
+with `renderProgress` in `src/core/journal.ts` and advance the cursor. Without a cursor, reporting
+starts at the journal's end, so upgraded projects do not replay old history. Events written by the
+background dispatch wrapper are picked up by the Lead's next command. Side runs (`/lr-worker`,
+`/lr-review`) return no progress and leave the cursor alone.
+
+`renderProgress` has an exhaustive `switch` over event types: a new event type must choose a line
+or `null` (low-level events such as `todo.ticked`, `gate.result` and `quota.fallback`, which is
+reported through `assignment.changed`). Follow-up actions after a failure (`retry`, `fallback`,
+`blocked`) are read from the events that follow it in the same batch. The skills' loop block tells
+the Lead to post every line unchanged, then one `Now: … Next: …` line.
+
 ## Locking
 
 Every command that mutates `.looprch/` runs inside `withLock(root, host, command, fn)`. The lock

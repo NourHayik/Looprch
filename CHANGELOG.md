@@ -2,6 +2,25 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.2.0 - 2026-10-04
+
+### Added
+
+- The Lead reports every workflow step in the chat. `looprch next`, `record` and `dispatch`
+  return a new `progress` field: tagged lines such as `[PHASE START]`, `[PLANNING COMPLETE]`,
+  `[DEBATE COMPLETE]` (changes recommended with count, severities and summary, or no changes),
+  `[PLAN UPDATED]`, `[TASK START]`, `[RETRY]`, `[FALLBACK]`, `[ISSUE]` (reason and next action),
+  `[WAITING]`, `[GATES COMPLETE]`, `[BLOCKED]` and `[PHASE COMPLETE]`, built from the journal
+  events since the last report. Human output prints them first.
+- The `/lr-phase`, `/lr-auto`, `/lr-resume` and `/lr-finish` loop has a Reporting section: post
+  every progress line unchanged, then one `Now: … Next: …` line; never work silently.
+- New journal event `assignment.changed` for every role reassignment (quota, rate-limit, failure
+  or user-chosen fallback). Existing events gain fields: `stage.entered` `round`, `run.issued`
+  `attempt` (side runs: `model`), `result.accepted` `task`, `findings_total`, `severities`,
+  `findings`, and `blocked` `hint`.
+- The progress cursor lives in `.looprch/runs/progress.json` (gitignored). Projects upgraded from
+  0.1.x start reporting with the next event.
+
 ## 0.1.1 - 2026-10-04
 
 ### Changed

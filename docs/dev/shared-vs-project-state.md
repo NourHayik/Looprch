@@ -25,7 +25,7 @@ appears there.
 | `phases/P-NNN/` | committed | plan, debate, test-report, review, handover, gates.json, workers/, reviews/ |
 | `user-rules.md` | committed | you (optional; listed in every brief) |
 | `FINAL_REPORT.md` | committed | `/lr-finish` |
-| `runs/ packets/ test-evidence/ reports/ backups/ lock` | ignored | runtime |
+| `runs/ packets/ test-evidence/ reports/ backups/ lock` | ignored | runtime (`runs/progress.json` is the Lead's progress cursor) |
 
 Writes are atomic (temp file in the same directory, fsync, rename, fsync of the directory).
 
