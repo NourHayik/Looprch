@@ -5,6 +5,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, writ
 import { join } from "node:path";
 import { REPO, runCli, sandbox, writeExecutable } from "../helpers/tmp.js";
 import { makePackage } from "../helpers/pkg.js";
+import { packageSpec } from "../../src/cli/update.js";
 
 describe("install / update / rollback / uninstall", () => {
   test("install from a checkout writes versions, current and the shim", () => {
@@ -111,12 +112,29 @@ describe("install / update / rollback / uninstall", () => {
     s.cleanup();
   });
 
-  test("install.sh runs npx with the requested spec", () => {
-    const s = sandbox();
-    writeExecutable(join(s.bin, "npx"), `#!/bin/sh\necho "npx $*" > ${join(s.dir, "npx.log")}\n`);
-    const r = spawnSync("sh", [join(REPO, "install.sh")], { env: { ...process.env, PATH: `${s.bin}:${process.env.PATH}`, LOOPRCH_VERSION: "0.1.0" }, encoding: "utf8" });
-    assert.equal(r.status, 0, r.stderr);
-    assert.equal(readFileSync(join(s.dir, "npx.log"), "utf8").trim(), "npx -y looprch@0.1.0 install");
-    s.cleanup();
+  for (const [label, published, version, expected] of [
+    ["npm registry", true, "0.1.0", "npx -y looprch@0.1.0 install"],
+    ["GitHub when not on npm", false, "", "npx -y github:NourHayik/Looprch install"],
+    ["GitHub tag for a pinned version", false, "0.1.0", "npx -y github:NourHayik/Looprch#v0.1.0 install"],
+  ] as const) {
+    test(`install.sh uses the ${label}`, () => {
+      const s = sandbox();
+      writeExecutable(join(s.bin, "npx"), `#!/bin/sh\necho "npx $*" > ${join(s.dir, "npx.log")}\n`);
+      writeExecutable(join(s.bin, "npm"), `#!/bin/sh\n${published ? "echo 0.1.0" : "exit 1"}\n`);
+      const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${s.bin}:${process.env.PATH}` };
+      if (version) env.LOOPRCH_VERSION = version;
+      else delete env.LOOPRCH_VERSION;
+      const r = spawnSync("sh", [join(REPO, "install.sh")], { env, encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(readFileSync(join(s.dir, "npx.log"), "utf8").trim(), expected);
+      s.cleanup();
+    });
+  }
+
+  test("update falls back to the GitHub repository when looprch is not on npm", () => {
+    assert.equal(packageSpec(undefined, true), "looprch@latest");
+    assert.equal(packageSpec("0.2.0", true), "looprch@0.2.0");
+    assert.equal(packageSpec(undefined, false), "github:NourHayik/Looprch");
+    assert.equal(packageSpec("0.2.0", false), "github:NourHayik/Looprch#v0.2.0");
   });
 });

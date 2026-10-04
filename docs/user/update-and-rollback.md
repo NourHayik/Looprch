@@ -9,7 +9,9 @@ looprch rollback               # back to the previous version
 
 `update`:
 
-1. Finds the version (`npm view looprch version`, `--to` or `--from`).
+1. Finds the package: the npm registry when `looprch` is published there, otherwise the GitHub
+   repository (`github:NourHayik/Looprch`, or the tag `v<version>` with `--to`). `--from` uses a
+   local directory.
 2. Warns if a registered project has a phase in progress and asks you to confirm (`--yes` skips).
 3. Installs into `~/.looprch/versions/<new>/` beside the current one and verifies its manifest.
 4. Runs `looprch self-test` from the new version. A failure leaves `current` untouched.

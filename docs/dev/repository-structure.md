@@ -4,7 +4,7 @@
 package.json          name "looprch", bin dist/looprch.mjs, engines node>=22, no runtime deps
 tsconfig.json         strict type check (noEmit)
 tsconfig.test.json    emits src/ and test/ to build/ for node --test
-install.sh            curl | sh entry: checks prerequisites, runs npx looprch@<v> install
+install.sh            curl | sh entry: checks prerequisites, runs npx (npm registry or GitHub) install
 scripts/bundle.mjs    esbuild: src/cli/main.ts + @clack/prompts -> dist/looprch.mjs
 scripts/build-manifest.mjs  writes VERSION and MANIFEST.sha256
 src/

@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Orchestrates coding agents phase by phase from a SEV3 project specification.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NourHayik/Looprch.git"
+  },
+  "homepage": "https://github.com/NourHayik/Looprch#readme",
   "type": "module",
   "bin": {
     "looprch": "dist/looprch.mjs"
@@ -27,6 +32,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
+    "prepare": "npm run build",
     "build": "tsc --noEmit -p tsconfig.json && node scripts/bundle.mjs && node scripts/build-manifest.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:test": "tsc -p tsconfig.test.json",

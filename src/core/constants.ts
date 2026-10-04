@@ -10,6 +10,9 @@ export const CONFIG_SCHEMA = 1;
 export const STATE_SCHEMA = 1;
 export const SEV3_SCHEMA = "sev3/1";
 
+/** npm spec used while the package is not on the npm registry (npm builds it via `prepare`). */
+export const GITHUB_SPEC = "github:NourHayik/Looprch";
+
 export const SKILLS = [
   "lr-init",
   "lr-doctor",

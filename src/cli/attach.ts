@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_IDS, type AgentId, type Config, configExists, defaultConfig, loadConfig, saveConfig } from "../core/config.js";
+import { GITHUB_SPEC } from "../core/constants.js";
 import { LrError } from "../core/errors.js";
 import { home, projectPaths } from "../core/paths.js";
 import { adapterFor } from "../agents/index.js";
@@ -23,7 +24,7 @@ export function assertNot5x(root: string): void {
 
 export function assertCoreInstalled(): void {
   if (!existsSync(home.skills()))
-    throw new LrError("core_not_installed", `Looprch is not installed centrally (${home.skills()} missing)`, "Run: npx looprch@latest install (or node dist/looprch.mjs install --from . in a checkout)");
+    throw new LrError("core_not_installed", `Looprch is not installed centrally (${home.skills()} missing)`, `Run: npx ${GITHUB_SPEC} install (or node dist/looprch.mjs install --from . in a checkout)`);
 }
 
 export function parseAgents(list: string): AgentId[] {

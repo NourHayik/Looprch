@@ -3,6 +3,7 @@
 #   curl -fsSL <url>/install.sh | sh
 #   LOOPRCH_VERSION=0.1.0 sh install.sh
 # LOOPRCH_NPX_SPEC overrides the npx package spec (testing a local tarball).
+# Uses the npm registry when looprch is published there, otherwise github:NourHayik/Looprch.
 set -eu
 
 fail() {
@@ -27,6 +28,13 @@ python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/de
 
 command -v git >/dev/null 2>&1 || fail "git is required."
 
-SPEC="${LOOPRCH_NPX_SPEC:-looprch@${LOOPRCH_VERSION:-latest}}"
+if [ -n "${LOOPRCH_NPX_SPEC:-}" ]; then
+  SPEC="$LOOPRCH_NPX_SPEC"
+elif npm view looprch version >/dev/null 2>&1; then
+  SPEC="looprch@${LOOPRCH_VERSION:-latest}"
+else
+  # Not on the npm registry yet: install from GitHub (npm builds it through the prepare script).
+  SPEC="github:NourHayik/Looprch${LOOPRCH_VERSION:+#v$LOOPRCH_VERSION}"
+fi
 printf 'Installing %s ...\n' "$SPEC"
 exec npx -y "$SPEC" install

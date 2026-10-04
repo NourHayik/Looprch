@@ -1,6 +1,9 @@
 # Release process
 
-v0.1.0 is built and tagged locally and not published.
+Releases are published on GitHub (`NourHayik/Looprch`): users install with
+`npx github:NourHayik/Looprch[#v<version>] install`, and npm builds `dist/` through the
+`prepare` script. Publishing to the npm registry is optional and makes `npx looprch@latest`
+work too.
 
 1. `npm ci && npm run build && npm test && npm run test:e2e`; `npx tsc --noEmit -p tsconfig.json` clean.
 2. `(cd vendor/sev3-toolkit/1.2.0 && sha256sum -c SHA256SUMS)`; the vendored files equal
@@ -15,5 +18,9 @@ v0.1.0 is built and tagged locally and not published.
    temporary `HOME`; it must refuse Node < 22 or Python < 3.10.
 6. `CHANGELOG.md` has a `## <version> - <date>` section; the README quickstart was checked by hand.
 7. `docs/dev/spike-results.md` is current; unverified agents are marked in doctor and docs.
-8. `git tag -a v<version> -m "Looprch <version>"` locally. No `npm publish`, no push (the
-   publication repository is decided later).
+8. `git tag -a v<version> -m "Looprch <version>"`, then `git push origin main v<version>`.
+9. Check the GitHub channel in a temporary `HOME`:
+   `npx -y github:NourHayik/Looprch#v<version> install` and `looprch self-test`.
+10. Optional, npm registry: `npm login`, then `npm publish` from a clean checkout of the tag
+    (`prepare` builds `dist/` first). Afterwards `npx looprch@latest install` works, and
+    `install.sh` and `looprch update` prefer the registry automatically.

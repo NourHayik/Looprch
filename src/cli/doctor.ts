@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { configExists, loadConfig, validateConfig, type AgentId, type Config } from "../core/config.js";
+import { GITHUB_SPEC } from "../core/constants.js";
 import { errorMessage } from "../core/errors.js";
 import { nowIso } from "../core/clock.js";
 import { readLock, pidAlive } from "../core/lock.js";
@@ -64,8 +65,8 @@ export function runDoctor(root: string, quick: boolean): DoctorReport {
 
   if (existsSync(home.current())) {
     const m = verifyManifest(home.current());
-    checks.push(m.ok ? c("core_integrity", "ok", `Core files verified (${m.files})`) : c("core_integrity", "fail", `Core install differs from its manifest: ${[...m.missing, ...m.mismatched].slice(0, 3).join(", ")}`, "Reinstall: npx looprch@latest install"));
-  } else checks.push(c("core_integrity", "fail", `Looprch is not installed centrally (${home.current()} missing)`, "Run: npx looprch@latest install"));
+    checks.push(m.ok ? c("core_integrity", "ok", `Core files verified (${m.files})`) : c("core_integrity", "fail", `Core install differs from its manifest: ${[...m.missing, ...m.mismatched].slice(0, 3).join(", ")}`, `Reinstall: npx ${GITHUB_SPEC} install`));
+  } else checks.push(c("core_integrity", "fail", `Looprch is not installed centrally (${home.current()} missing)`, `Run: npx ${GITHUB_SPEC} install`));
   const shim = home.shim();
   const onPath = (process.env.PATH ?? "").split(":").includes(dirname(shim));
   checks.push(!isOurShim(shim) ? c("shim_path", "warn", `No looprch shim at ${shim}`, "Run: looprch install") : onPath ? c("shim_path", "ok", `${shim} on PATH`) : c("shim_path", "warn", `${dirname(shim)} is not on PATH`, 'Add to your shell profile: export PATH="$HOME/.local/bin:$PATH"'));

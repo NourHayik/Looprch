@@ -4,6 +4,13 @@ All notable changes to Looprch are documented here. The project follows semantic
 
 ## Unreleased
 
+### Fixed
+
+- Installation works without the npm registry: `npx github:NourHayik/Looprch install` builds the
+  package through a new `prepare` script. `install.sh` and `looprch update` use the npm registry
+  when `looprch` is published there and the GitHub repository otherwise; doctor and error hints
+  point at the GitHub command.
+
 ## 0.1.0 - 2026-10-03
 
 First version of the rewrite (unpublished).

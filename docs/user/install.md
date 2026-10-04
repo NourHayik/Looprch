@@ -8,7 +8,23 @@
 - git
 - Optional: the agent CLIs you want to use, delegate-skills relays, QuotaLens
 
-## npm (primary)
+## From GitHub (current channel)
+
+Looprch is not on the npm registry yet, so `npx looprch@latest` answers `404 Not Found`.
+Install it straight from the repository instead:
+
+```sh
+npx github:NourHayik/Looprch install            # latest main
+npx github:NourHayik/Looprch#v0.1.0 install     # a tagged version
+```
+
+npm clones the repository, installs the build tools, builds `dist/` through the `prepare`
+script and runs `looprch install` from the result. The first run takes about a minute.
+
+## npm registry (after publication)
+
+Once the package is published (`npm login` then `npm publish` from a clean checkout, see
+[docs/dev/release-process.md](../dev/release-process.md)):
 
 ```sh
 npx looprch@latest install
@@ -17,16 +33,17 @@ npx looprch@latest install
 ## curl
 
 ```sh
-curl -fsSL <url>/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NourHayik/Looprch/main/install.sh | sh
 ```
 
-`install.sh` only checks the prerequisites above and runs the same `npx -y looprch@<version> install`.
-Set `LOOPRCH_VERSION=0.1.0` to pin a version.
+`install.sh` only checks the prerequisites above and runs `npx -y <spec> install`, where the spec
+is `looprch@<version>` when the package is on npm and `github:NourHayik/Looprch[#v<version>]`
+otherwise. Set `LOOPRCH_VERSION=0.1.0` to pin a version.
 
-## From a checkout (before publication)
+## From a checkout
 
 ```sh
-npm ci && npm run build
+npm ci        # also builds dist/ (prepare script)
 node dist/looprch.mjs install --from .
 ```
 

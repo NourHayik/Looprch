@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { GITHUB_SPEC } from "../core/constants.js";
 import { LrError } from "../core/errors.js";
 import { readJsonIfExists } from "../core/fsx.js";
 import { home, projectPaths } from "../core/paths.js";
@@ -13,12 +14,22 @@ import { askConfirm } from "../ui/prompts.js";
 import { parse } from "./args.js";
 import { out } from "./output.js";
 
+function onNpmRegistry(): boolean {
+  return spawnSync("npm", ["view", "looprch", "version"], { encoding: "utf8" }).status === 0;
+}
+
+/** npm registry when the package is published there, otherwise the GitHub repository. */
+export function packageSpec(version: string | undefined, registry: boolean): string {
+  if (registry) return `looprch@${version ?? "latest"}`;
+  return version ? `${GITHUB_SPEC}#v${version}` : GITHUB_SPEC;
+}
+
 function fetchPackage(version: string | undefined): { dir: string; cleanup: () => void } {
-  const target = version ?? execFileSync("npm", ["view", "looprch", "version"], { encoding: "utf8" }).trim();
+  const spec = packageSpec(version, onNpmRegistry());
   const tmp = mkdtempSync(join(tmpdir(), "looprch-update-"));
-  execFileSync("npm", ["pack", `looprch@${target}`, "--pack-destination", tmp, "--silent"], { stdio: ["ignore", "pipe", "inherit"] });
+  execFileSync("npm", ["pack", spec, "--pack-destination", tmp, "--silent"], { stdio: ["ignore", "pipe", "inherit"] });
   const tgz = readdirSync(tmp).find((f) => f.endsWith(".tgz"));
-  if (!tgz) throw new LrError("download_failed", `npm pack looprch@${target} produced no tarball`);
+  if (!tgz) throw new LrError("download_failed", `npm pack ${spec} produced no tarball`);
   execFileSync("tar", ["xzf", join(tmp, tgz), "-C", tmp]);
   return { dir: join(tmp, "package"), cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
 }
