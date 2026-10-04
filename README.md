@@ -5,13 +5,13 @@ project; Looprch coordinates the Planner, Plan Debater, Implementer, Tester and 
 build and verify it, checks machine evidence for every gate, and keeps the execution state in
 plain files inside your project.
 
-Status: 0.1.0. Installed from GitHub (not yet on the npm registry). Linux and macOS (Windows
-through WSL).
+Status: 0.1.1, on npm as [`looprch`](https://www.npmjs.com/package/looprch). Linux and macOS
+(Windows through WSL).
 
 ## Quickstart
 
 ```sh
-npx github:NourHayik/Looprch install       # or, from a checkout: npm ci && node dist/looprch.mjs install --from .
+npx looprch@latest install                 # or: npx github:NourHayik/Looprch install
 cd my-project                              # SEV3 package (phases/, requirements/) at the root
 looprch add . --agents cursor,codex,opencode --yes
 ```

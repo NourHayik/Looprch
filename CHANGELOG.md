@@ -2,18 +2,19 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
-## Unreleased
+## 0.1.1 - 2026-10-04
 
-### Fixed
+### Changed
 
-- Installation works without the npm registry: `npx github:NourHayik/Looprch install` builds the
-  package through a new `prepare` script. `install.sh` and `looprch update` use the npm registry
-  when `looprch` is published there and the GitHub repository otherwise; doctor and error hints
-  point at the GitHub command.
+- Hermes docs explain why the `/lr-*` commands can be missing: Hermes loads project skills only
+  in a git repository trusted with `hermes skills trust`, and only in sessions started after it.
+  The Hermes install note says the same.
+- The README, install and quickstart docs install from npm (`npx looprch@latest install`);
+  GitHub stays as the alternative.
 
 ## 0.1.0 - 2026-10-03
 
-First version of the rewrite (unpublished).
+First version of the rewrite, published on npm.
 
 ### Added
 
@@ -37,3 +38,10 @@ First version of the rewrite (unpublished).
 - `doctor`, `status`, `log`, `config`, `models`, `install-relay`, `init`, `worker`, `review`.
 - User and developer documentation, verification spike results, unit/integration/e2e tests on
   the SEV3 notes-spec example with fake relays.
+
+### Fixed
+
+- Installation works without the npm registry: `npx github:NourHayik/Looprch install` builds the
+  package through a new `prepare` script. `install.sh` and `looprch update` use the npm registry
+  when `looprch` is published there and the GitHub repository otherwise; doctor and error hints
+  point at the GitHub command.

@@ -31,8 +31,9 @@ hint; after fixing the cause run `looprch resume` (or `/lr-resume`).
 
 - **"Another Looprch process holds the project lock"** (exit code 3): another command is running.
   A lock from a dead process on this machine is reclaimed automatically.
-- **Skills do not appear in an agent**: run `looprch add .`; for Hermes run `hermes skills trust`;
-  for Grok trust the folder. Agents that may not follow symlinks get copies.
+- **Skills do not appear in an agent**: run `looprch add .`; for Grok trust the folder. Agents that
+  may not follow symlinks get copies. Hermes also needs a git repository, `hermes skills trust` and
+  a new session; see [Hermes](agents/hermes.md#make-the-looprch-commands-appear).
 - **`looprch` not found**: add `~/.local/bin` to `PATH` (the install prints the exact line).
 - **Mode-600 files from another user**: `looprch init discover` names them; fix permissions.
 - **Looprch 5.x project**: 0.x refuses `.looprch/` folders from 5.x; move the old folder away.

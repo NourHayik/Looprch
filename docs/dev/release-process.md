@@ -1,9 +1,8 @@
 # Release process
 
-Releases are published on GitHub (`NourHayik/Looprch`): users install with
-`npx github:NourHayik/Looprch[#v<version>] install`, and npm builds `dist/` through the
-`prepare` script. Publishing to the npm registry is optional and makes `npx looprch@latest`
-work too.
+Releases are published on npm as `looprch` (`npx looprch@latest install`) and tagged on GitHub
+(`NourHayik/Looprch`), where `npx github:NourHayik/Looprch[#v<version>] install` builds `dist/`
+through the `prepare` script.
 
 1. `npm ci && npm run build && npm test && npm run test:e2e`; `npx tsc --noEmit -p tsconfig.json` clean.
 2. `(cd vendor/sev3-toolkit/1.2.0 && sha256sum -c SHA256SUMS)`; the vendored files equal
@@ -21,6 +20,6 @@ work too.
 8. `git tag -a v<version> -m "Looprch <version>"`, then `git push origin main v<version>`.
 9. Check the GitHub channel in a temporary `HOME`:
    `npx -y github:NourHayik/Looprch#v<version> install` and `looprch self-test`.
-10. Optional, npm registry: `npm login`, then `npm publish` from a clean checkout of the tag
-    (`prepare` builds `dist/` first). Afterwards `npx looprch@latest install` works, and
-    `install.sh` and `looprch update` prefer the registry automatically.
+10. `npm publish --access public` from a clean checkout of the tag (`prepare` builds `dist/`
+    first). The npm account needs two-factor authentication; npm asks for a one-time code or a
+    browser confirmation. Then check `npx -y looprch@<version> install` in a temporary `HOME`.

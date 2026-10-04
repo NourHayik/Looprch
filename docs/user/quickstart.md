@@ -4,7 +4,7 @@ From a SEV3 package to the first closed phase.
 
 ```sh
 # 1. Install Looprch once
-npx github:NourHayik/Looprch install
+npx looprch@latest install
 
 # 2. Put the SEV3 package at the root of your project (phases/ and requirements/)
 cd my-project
