@@ -15,6 +15,8 @@ export interface RelayResult {
   touchedFiles: string[] | null;
   readOnlyViolation: boolean;
   stderrTail: string;
+  /** The relay's own explanation of a failure (for example a headless permission denial). */
+  error: string | null;
 }
 
 const SESSION_FIELDS = ["threadId", "sessionId", "conversationId"] as const;
@@ -50,6 +52,7 @@ export function parseRelayResult(raw: unknown, sessionField?: string): RelayResu
     touchedFiles,
     readOnlyViolation: raw.readOnlyViolation === true || (isObject(raw.readOnlyViolation) && Object.keys(raw.readOnlyViolation).length > 0),
     stderrTail: Array.isArray(stderr) ? stderr.join("\n") : typeof stderr === "string" ? stderr : "",
+    error: typeof raw.error === "string" && raw.error ? raw.error : null,
   };
 }
 

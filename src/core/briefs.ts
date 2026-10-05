@@ -37,6 +37,8 @@ export interface BriefInput {
   resume: boolean;
   question?: string;
   gateIds: string[];
+  /** Phase review number and the review limit (task review only). */
+  reviewRound?: { n: number; of: number };
 }
 
 const ROLE_FILE: Record<Role, string> = {
@@ -113,6 +115,13 @@ function taskText(input: BriefInput): string {
       break;
     case "review":
       lines.push(`Review the implementation of ${input.phase}: actual code, the phase diff since \`${input.phaseBase ?? "the phase base"}\`, the test report and gates.json.`);
+      if (input.reviewRound) {
+        const { n, of } = input.reviewRound;
+        lines.push(`Review round ${n} of ${of}.`);
+        if (n === 1) lines.push("Report every finding in this one pass; findings held back for a later round waste a repair round.");
+        else lines.push("This is a re-review: verify each prior finding (see Delta) is fixed and check the repair diff for regressions. Do not raise new findings on code the repair did not change unless they are high or critical.");
+        if (n >= of) lines.push("This is the final review: request changes only for high or critical defects; list the rest as notes and approve. There is no review after this one.");
+      }
       break;
     case "adhoc_review":
       lines.push(`Independent review of ${input.phase} requested by the user. Diff source is listed in the inputs.`);

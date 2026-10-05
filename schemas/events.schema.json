@@ -17,7 +17,7 @@
         "gates.run", "gate.result", "checkpoint.committed",
         "quota.checked", "quota.wait", "quota.fallback", "assignment.changed", "ratelimit.detected",
         "question.asked", "question.answered", "paused", "resumed", "blocked",
-        "todo.ticked", "handover.accepted", "phase.merged", "phase.closed", "project.done",
+        "todo.ticked", "review.skipped", "handover.accepted", "phase.merged", "phase.closed", "project.done",
         "spec.changed", "protocol.mismatch", "lock.stale_recovered", "warning"
       ]
     },

@@ -16,6 +16,7 @@ stateDiagram-v2
   testing --> gating
   gating --> reviewing
   gating --> repairing
+  gating --> handover
   repairing --> testing
   reviewing --> handover
   reviewing --> repairing
@@ -52,8 +53,8 @@ stateDiagram-v2
 | plan_approval | if approvals apply: `ask_user approve_plan` (approve / revise). Then checkpoint "plan approved" → implementing |
 | implementing / repairing | if a context request is open: Planner `context_answer` → addendum → Implementer resumes. Implementer `implemented` → checkpoint "implementation" / "repair N" → testing |
 | testing | Tester; verdict and manual reports stored → gating |
-| gating | `run_gates`; all gates pass and verdict pass → reviewing (post-run snapshot stored); else repair (test) or `blocked repair_limit` |
-| reviewing | snapshot must equal the gates snapshot (else gating). `approve` → handover; `changes_requested` → repair (review) or `blocked repair_limit` |
+| gating | `run_gates`; all gates pass and verdict pass → reviewing (post-run snapshot stored), or handover when `review_changes` reached `limits.review_rounds` (`review.skipped`, open findings go into handover.md); else repair (test) or `blocked repair_limit` |
+| reviewing | snapshot must equal the gates snapshot (else gating). The brief carries "Review round n of N"; re-reviews get the earlier findings as a `rereview` delta. `approve` → handover; `changes_requested` → `review_changes`+1 → repair (review; the last one is a "final repair") or `blocked repair_limit` |
 | handover | snapshot changed → gating. File lists must equal `git diff --name-status` since the phase base (re-ask once, then `blocked handover_mismatch`) → closing |
 | closing | ticks todo.md and verifies; merge approval (`ask_user approve_merge`, hold → paused); final commit, `merge --no-ff`, tag, delete branch → `phase_closed` |
 
@@ -95,5 +96,6 @@ Common: `protocol`, `action`, `phase`, `stage`, `round`, `summary`, optional `co
 | `project_done` | `report` |
 
 Resume (`looprch resume [--note]`) clears paused/waiting/blocked; after `repair_limit` it grants
-one round and the note goes into the next brief; after `protocol_changed` the phase adopts the
+one round and the note goes into the next brief (the block is raised in `repairing`, so the
+round is a repair, never another review); after `protocol_changed` the phase adopts the
 new protocol; `spec_changed` stays until the package verifies with an accepted fingerprint.

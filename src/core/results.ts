@@ -133,6 +133,8 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       checkList(errors, raw, "findings", finding(true));
       checkList(errors, raw, "manual_gate_reports", (x) => (isObject(x) && isNonEmptyString(x.gate_id) && isNonEmptyString(x.path) ? null : "needs gate_id and path"));
       if (raw.decision === "changes_requested" && (!Array.isArray(raw.findings) || raw.findings.length === 0)) errors.push("changes_requested needs a non-empty findings list");
+      else if (raw.decision === "changes_requested" && (raw.findings as unknown[]).every((f) => isObject(f) && f.severity === "low"))
+        errors.push("every finding is low: use approve and list the low findings as notes");
       break;
     case "worker":
       checkList(errors, raw, "evidence", (x) => (isObject(x) && isNonEmptyString(x.path) && typeof x.note === "string" ? null : "needs path and note"));

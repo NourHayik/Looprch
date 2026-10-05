@@ -10,6 +10,8 @@ import { recordSession, resumableSession, sessionKey, forgetSession } from "../.
 import { initialState } from "../../src/core/state.js";
 import type { RunRecord } from "../../src/core/runs.js";
 import type { RelayInfo } from "../../src/delegate/locate.js";
+import type { DiscoveredCli } from "../../src/delegate/discover.js";
+import { authCheck } from "../../src/cli/doctor.js";
 
 let s: Sandbox;
 const saved = { HOME: process.env.HOME, PATH: process.env.PATH };
@@ -85,6 +87,36 @@ describe("relay argv", () => {
     assert.match(c.warnings[0]!, /no effort flag/);
     for (const x of [k, c]) assert.ok(!x.argv.includes("--lane") && !x.argv.includes("--resume-last") && !x.argv.includes("--clean-env"));
   });
+  test("agy write roles skip permission prompts; read-only roles stay sandboxed; print timeout follows the run", () => {
+    const w = buildRelayArgv("/p", run({ agent: "agy", role: "implementer", timeout: "2h" }), relay("agy"));
+    assert.ok(w.argv.includes("--dangerously-skip-permissions"));
+    assert.ok(!w.argv.includes("--read-only"));
+    assert.equal(w.argv[w.argv.indexOf("--print-timeout") + 1], "2h");
+    assert.equal(w.argv[w.argv.indexOf("--timeout") + 1], "2h");
+    assert.match(w.warnings[0]!, /agy implementer runs with --dangerously-skip-permissions/);
+    const r = buildRelayArgv("/p", run({ agent: "agy", role: "reviewer", read_only: true }), relay("agy"));
+    assert.ok(r.argv.includes("--read-only"));
+    assert.ok(!r.argv.includes("--dangerously-skip-permissions"));
+    assert.deepEqual(r.warnings, []);
+    const codex = buildRelayArgv("/p", run({ agent: "codex" }), relay("codex")).argv;
+    assert.ok(!codex.includes("--dangerously-skip-permissions") && !codex.includes("--print-timeout"));
+  });
+});
+
+describe("doctor auth", () => {
+  const cli = (over: Partial<DiscoveredCli>): DiscoveredCli => ({ key: "agy", binary: "agy", version: "1.2.16", path: "/bin/agy", authenticated: null, supports: [], models: { status: "reported", values: ["m1\tModel 1", "m2\tModel 2"] }, ...over });
+  test("agy without an auth probe counts as logged in when it listed models", () => {
+    const c = authCheck("agy", cli({}), null);
+    assert.equal(c.status, "ok");
+    assert.match(c.summary, /agy models listed 2 models/);
+  });
+  test("no models, other agents, explicit results and missing discovery", () => {
+    assert.equal(authCheck("agy", cli({ models: { status: "failed", values: [] } }), null).status, "warn");
+    assert.equal(authCheck("kimi", cli({ key: "kimi", binary: "kimi" }), null).status, "warn");
+    assert.equal(authCheck("agy", cli({ authenticated: false }), null).status, "fail");
+    assert.equal(authCheck("agy", cli({ authenticated: true }), null).status, "ok");
+    assert.equal(authCheck("agy", undefined, "discover failed").summary, "discover failed");
+  });
 });
 
 describe("relay results and sessions", () => {
@@ -93,6 +125,8 @@ describe("relay results and sessions", () => {
     assert.equal(parseRelayResult({ status: "completed", threadId: "t" }, "threadId").sessionId, "t");
     assert.equal(parseRelayResult({ status: "completed", conversationId: "c" }, "conversationId").sessionId, "c");
     assert.equal(parseRelayResult({ status: "completed", readOnlyViolation: true }).readOnlyViolation, true);
+    assert.equal(parseRelayResult({ status: "failed", error: "Antigravity auto-denied the command permission" }).error, "Antigravity auto-denied the command permission");
+    assert.equal(parseRelayResult({ status: "failed" }).error, null);
     assert.throws(() => parseRelayResult({ schema: "other.v9" }));
   });
   test("session keys reuse within a phase; non-resumable or lost sessions are not resumed", () => {

@@ -9,7 +9,7 @@ import { readLock, pidAlive } from "../core/lock.js";
 import { home, projectPaths } from "../core/paths.js";
 import { loadState } from "../core/state.js";
 import { adapterFor, detectBinary } from "../agents/index.js";
-import { discoverClis } from "../delegate/discover.js";
+import { discoverClis, type DiscoveredCli } from "../delegate/discover.js";
 import { locateRelay, relayInstallArgv } from "../delegate/locate.js";
 import { verifyManifest } from "../install/manifest.js";
 import { inspectSkillLinks, decideLinkModes } from "../install/links.js";
@@ -52,6 +52,18 @@ export function relayAgents(cfg: Config): AgentId[] {
     for (const a of [rc, ...rc.fallbacks]) if (a.mode === "delegate" || (cfg.lead_host && a.agent !== cfg.lead_host)) set.add(a.agent);
   }
   return [...set].filter((a) => !!adapterFor(a).delegate);
+}
+
+/** Auth from discovery; for CLIs without an auth probe, a reported model list counts as logged in. */
+export function authCheck(id: AgentId, d: DiscoveredCli | undefined, discoveryError: string | null): DoctorCheck {
+  const a = adapterFor(id);
+  const check = `agent:${id}:auth`;
+  if (!d) return c(check, "skip", discoveryError ?? "not reported by discovery");
+  if (d.authenticated === false) return c(check, "fail", `${a.displayName} is not logged in`, `Log in with ${d.binary}`);
+  if (d.authenticated) return c(check, "ok", `authenticated (${d.version ?? "?"})`);
+  const models = d.models.status === "reported" ? d.models.values.length : 0;
+  if (a.delegate?.authFromModels && models > 0) return c(check, "ok", `authenticated (${d.binary} models listed ${models} model${models === 1 ? "" : "s"})`);
+  return c(check, "warn", "authentication unknown");
 }
 
 export function runDoctor(root: string, quick: boolean): DoctorReport {
@@ -99,10 +111,8 @@ export function runDoctor(root: string, quick: boolean): DoctorReport {
     const bin = detectBinary(a);
     checks.push(bin ? c(`agent:${id}:binary`, "ok", `${a.displayName}: ${bin.path}`) : c(`agent:${id}:binary`, id === cfg.lead_host ? "warn" : "fail", `${a.displayName} CLI (${a.binaries.join(" or ")}) not on PATH`, `Install ${a.displayName} or remove it: looprch remove ${id}`));
     if (quick) checks.push(c(`agent:${id}:auth`, "skip", "skipped (--quick)"));
-    else {
-      const d = disc?.data?.discovered.find((x) => x.key === id);
-      checks.push(!d ? c(`agent:${id}:auth`, "skip", disc?.error ?? "not reported by discovery") : d.authenticated === false ? c(`agent:${id}:auth`, "fail", `${a.displayName} is not logged in`, `Log in with ${d.binary}`) : c(`agent:${id}:auth`, d.authenticated ? "ok" : "warn", d.authenticated ? `authenticated (${d.version ?? "?"})` : "authentication unknown"));
-    }
+    else checks.push(authCheck(id, disc?.data?.discovered.find((x) => x.key === id), disc?.error ?? null));
+    if (a.delegate?.writeFlags?.length) checks.push(c(`agent:${id}:permissions`, "ok", `${a.displayName} write roles run with ${a.delegate.writeFlags.join(" ")} (tool permissions auto-approved); read-only roles stay sandboxed`));
     const unverified = Object.entries(a.verified).filter(([, v]) => v !== "verified").map(([k]) => k);
     if (a.experimental) checks.push(c(`agent:${id}:support`, "warn", `${a.displayName} support is experimental (spikes not run: ${unverified.join(", ")})`));
     else if (unverified.length) checks.push(c(`agent:${id}:support`, "warn", `Unverified for ${a.displayName}: ${unverified.join(", ")} (see docs/dev/spike-results.md)`));

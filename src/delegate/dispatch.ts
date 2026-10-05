@@ -28,9 +28,13 @@ export function buildRelayArgv(root: string, run: RunRecord, relay: RelayInfo): 
     if (d.effortFlag) argv.push(d.effortFlag, run.effort);
     else warnings.push(`${run.agent}-delegate has no effort flag; effort "${run.effort}" was not passed`);
   }
+  if (d.printTimeoutFlag) argv.push(d.printTimeoutFlag, run.timeout);
   if (run.read_only) {
     if (d.readOnly !== "none") argv.push("--read-only");
     else warnings.push(`${run.agent}-delegate cannot run read-only; git status is checked before and after`);
+  } else if (d.writeFlags?.length) {
+    argv.push(...d.writeFlags);
+    warnings.push(`${run.agent} ${run.role} runs with ${d.writeFlags.join(" ")}`);
   }
   if (run.resume && run.session_in) argv.push(d.resumeFlag, run.session_in);
   if (d.cleanEnv) argv.push("--clean-env");

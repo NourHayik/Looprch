@@ -62,7 +62,7 @@ function setKey(cfg: Config, key: string, raw: string): void {
   if (key === "lead_host") {
     if (value !== null && !(AGENT_IDS as readonly string[]).includes(String(value))) throw new UsageError(`lead_host must be one of ${AGENT_IDS.join(", ")} or null`);
     cfg.lead_host = value === null ? null : (String(value) as AgentId);
-  } else if (parts[0] === "limits" && parts.length === 2 && parts[1]! in cfg.limits) {
+  } else if (parts[0] === "limits" && parts.length === 2 && (parts[1]! in cfg.limits || parts[1] === "review_rounds")) {
     (cfg.limits as unknown as Record<string, unknown>)[parts[1]!] = value;
   } else if (parts[0] === "approvals" && (parts[1] === "plan" || parts[1] === "merge") && parts.length === 2) {
     if (!(APPROVALS as readonly string[]).includes(String(value))) throw new UsageError(`approvals.${parts[1]} must be one of ${APPROVALS.join(", ")}`);

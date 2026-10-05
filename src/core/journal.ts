@@ -40,6 +40,7 @@ export const EVENT_TYPES = [
   "resumed",
   "blocked",
   "todo.ticked",
+  "review.skipped",
   "handover.accepted",
   "phase.merged",
   "phase.closed",
@@ -321,6 +322,8 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
     }
     case "blocked":
       return block("[BLOCKED]", `Reason (${str(d.code)}): ${str(d.reason)}`, ...(d.hint ? [`Fix: ${str(d.hint)}`] : []));
+    case "review.skipped":
+      return block("[REVIEW SKIPPED]", `The review limit (${str(d.limit)}) is reached; the final repair goes to handover without another review.`, `Open findings recorded in the handover: ${arr<string>(d.findings).join(", ") || "none"}`);
     case "handover.accepted":
       return "[HANDOVER COMPLETE] Handover accepted; its file lists match git.";
     case "phase.closed":

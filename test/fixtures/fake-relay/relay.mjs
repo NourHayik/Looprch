@@ -20,7 +20,7 @@ const opt = {};
 const flags = new Set();
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
-  if (["--brief", "--cd", "--out-dir", "--model", "--effort", "--variant", "--session", "--conversation", "--timeout"].includes(a)) opt[a.slice(2)] = args[++i];
+  if (["--brief", "--cd", "--out-dir", "--model", "--effort", "--variant", "--session", "--conversation", "--timeout", "--print-timeout"].includes(a)) opt[a.slice(2)] = args[++i];
   else if (a.startsWith("--")) flags.add(a.slice(2));
   else {
     process.stderr.write(`usage error: unexpected ${a}\n`);

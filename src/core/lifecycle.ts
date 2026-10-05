@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { packageRoot, PROTOCOL, READ_ONLY_ROLES, type Role } from "./constants.js";
 import type { AgentId, Approval, Assignment, Config } from "./config.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, reviewRounds } from "./config.js";
 import type { Action, RunRoleAction } from "./actions.js";
 import { assembleBrief, writeBrief, type Task } from "./briefs.js";
 import { now, nowIso } from "./clock.js";
@@ -219,6 +219,10 @@ function step(e: Engine): Action | null {
       if (snap !== c.snapshots.gates) {
         ev(e, { type: "warning", data: { message: "Working tree changed after the gates ran; re-running gates" } });
         transition(e, "gating");
+        return null;
+      }
+      if (reviewsExhausted(e)) {
+        afterGatesPassed(e);
         return null;
       }
       return issueRun(e, "reviewer", "review");
@@ -563,6 +567,7 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
     userNote: c.user_note,
     resume: !!sessionId,
     gateIds: phase.gates.map((g) => g.id),
+    ...(task === "review" ? { reviewRound: { n: (c.review_changes ?? 0) + 1, of: reviewRounds(e.cfg) } } : {}),
   });
   const briefPath = writeBrief(e.root, runId, brief);
   c.user_note = null;
@@ -705,9 +710,10 @@ export function finalizeRun(e: Engine, run: RunRecord): void {
     acceptResult(e, run, res.finalMessage, res.sessionId, res.readOnlyViolation);
     return;
   }
-  const text = `${res.stderrTail}\n${res.finalMessage}`;
-  if (looksRateLimited(text)) handleRunFailure(e, run, "rate_limited", res.stderrTail.slice(-500));
-  else handleRunFailure(e, run, res.status === "unavailable" ? "unavailable" : res.status, res.stderrTail.slice(-500) || res.rawStatus);
+  const text = `${res.error ?? ""}\n${res.stderrTail}\n${res.finalMessage}`;
+  const detail = [res.error, res.stderrTail.slice(-500)].filter(Boolean).join("\n");
+  if (looksRateLimited(text)) handleRunFailure(e, run, "rate_limited", detail);
+  else handleRunFailure(e, run, res.status === "unavailable" ? "unavailable" : res.status, detail || res.rawStatus);
 }
 
 export function handleRunFailure(e: Engine, run: RunRecord, kind: Exclude<RunStatus, "issued" | "running" | "completed" | "rejected">, detail: string): void {
@@ -895,18 +901,46 @@ function canRepair(e: Engine): boolean {
   return c.round < e.cfg.limits.repair_rounds + c.extra_rounds;
 }
 
+function reviewsExhausted(e: Engine): boolean {
+  return (cur(e).review_changes ?? 0) >= reviewRounds(e.cfg);
+}
+
+/**
+ * Enter the repair stage with the findings. At the repair limit it blocks there, so
+ * `looprch resume` (one extra round) continues with the repair, never with another review.
+ */
 function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[], paths: string[], summary: string): void {
   const c = cur(e);
-  if (!canRepair(e)) {
-    block(e, "repair_limit", `Repair limit reached (${c.round} round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
-    return;
-  }
+  const allowed = canRepair(e);
+  const used = c.round;
+  const finalRepair = reviewsExhausted(e);
   c.round++;
   c.repair_source = source;
-  c.deltas.implementer = { kind: "repair", text: `Repair round ${c.round} (${source === "test" ? "tests/gates failed" : "review requested changes"}). Fix these problems:`, findings, paths };
+  const why = source === "test" ? "tests/gates failed" : "review requested changes";
+  const text = finalRepair
+    ? `Final repair round ${c.round} (${why}). The review limit is reached: there is no further review, so fix every finding completely, including the same defect anywhere else in the phase diff:`
+    : `Repair round ${c.round} (${why}). Fix every problem below completely, including the same defect anywhere else in the phase diff:`;
+  c.deltas.implementer = { kind: "repair", text, findings, paths };
   if (source === "test") c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer repaired the problems below. Re-verify, keep the tests honest and update them only where they were wrong.`, findings };
   else c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer addressed review findings. Re-verify the affected behavior and gates.`, findings };
+  if (source === "review" && !finalRepair)
+    c.deltas.reviewer = { kind: "rereview", text: "Your previous review requested the changes below. Verify each one is fixed and check the repair diff for regressions. Do not raise new findings on code the repair did not change unless they are high or critical.", findings, paths };
   transition(e, "repairing");
+  if (!allowed) block(e, "repair_limit", `Repair limit reached (${used} round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
+}
+
+/** After passing gates: review, or go straight to handover once the review limit is reached. */
+function afterGatesPassed(e: Engine): void {
+  const c = cur(e);
+  if (!reviewsExhausted(e)) {
+    transition(e, "reviewing");
+    return;
+  }
+  c.snapshots.review = null;
+  delete c.deltas.reviewer;
+  c.deltas.implementer = { kind: "unreviewed", text: "The final review requested the changes below; they were repaired but not reviewed again. In Limitations, say for each finding whether it is fully fixed.", findings: c.review_findings };
+  ev(e, { type: "review.skipped", data: { limit: reviewRounds(e.cfg), findings: c.review_findings.map((f) => f.id) } });
+  transition(e, "handover");
 }
 
 function recordImplementer(e: Engine, run: RunRecord): void {
@@ -993,6 +1027,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         transition(e, "handover");
       } else {
         c.review_findings = (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary, files: f.files }));
+        c.review_changes = (c.review_changes ?? 0) + 1;
         repairOrBlock(e, "review", c.review_findings, [path], c.review_findings.map((f) => f.summary).join("; "));
       }
       return path;
@@ -1007,6 +1042,19 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       throw new LrError("internal", `unhandled task ${String(never)}`);
     }
   }
+}
+
+function unreviewedSection(e: Engine, findings: Finding[]): string {
+  const lines = findings.map((f) => `- ${f.id}${f.severity ? ` [${f.severity}]` : ""}: ${f.summary}${f.files?.length ? ` (${f.files.join(", ")})` : ""}`);
+  return [
+    "",
+    "## Open review findings (final repair, not re-reviewed)",
+    "",
+    `Review ${cur(e).review_changes ?? 0} of ${reviewRounds(e.cfg)} requested these changes. The Implementer repaired them and the gates passed, but no further review ran (limits.review_rounds):`,
+    "",
+    ...(lines.length ? lines : ["- (none recorded)"]),
+    "",
+  ].join("\n");
 }
 
 function sameSet(a: string[], b: string[]): boolean {
@@ -1051,7 +1099,8 @@ function acceptHandover(e: Engine, run: RunRecord, r: RoleResult, artifact: stri
     .replace("{{gate_runs}}", Object.values(gates.latest).map((id) => {
       const g = gates.runs.find((x) => x.gate_run_id === id)!;
       return `- ${g.gate_id}: ${g.gate_run_id}, ${g.ok ? "passed" : "failed"}, tests ${g.evidence.tests}, evidence sha256 ${g.evidence.sha256 ?? "-"}, tree ${g.snapshot_tree}`;
-    }).join("\n"));
+    }).join("\n"))
+    .replace("{{unreviewed}}", reviewsExhausted(e) ? unreviewedSection(e, c.review_findings) : "");
   const path = writeArtifact(e, "handover.md", `${artifact.trim()}\n${extra}`);
   c.snapshots.handover = snap;
   ev(e, { type: "handover.accepted", run_id: run.run_id, data: { files: actual } });
@@ -1069,7 +1118,7 @@ export function applyGates(e: Engine, outcome: GatesOutcome): void {
   ev(e, { type: "gates.run", data: { all_passed: outcome.all_passed, snapshot: outcome.snapshot_tree } });
   if (outcome.all_passed && c.tester_verdict === "pass") {
     c.snapshots.gates = outcome.snapshot_tree;
-    transition(e, "reviewing");
+    afterGatesPassed(e);
     return;
   }
   const findings: Finding[] = outcome.runs.filter((r) => !r.ok).map((r) => ({ id: r.gate_run_id, gate_id: r.gate_id, summary: `${r.reason ?? "failed"}${r.stdout_tail ? `\n${r.stdout_tail.split("\n").slice(-8).join("\n")}` : ""}` }));

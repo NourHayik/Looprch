@@ -102,6 +102,38 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     p.s.cleanup();
   });
 
+  test("E-4b review cap: three change requests, a final repair, then handover without a fourth review", () => {
+    const p = setupProject();
+    p.setScenario([{ role: "reviewer", phase: "P-001", decision: "changes_requested" }]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    const seq = r.actions.filter((a) => a.action === "run_role").map((a) => `${a.role}:${a.task}`);
+    assert.equal(seq.filter((x) => x === "reviewer:review").length, 3);
+    const lastReview = seq.lastIndexOf("reviewer:review");
+    assert.deepEqual(seq.slice(lastReview, lastReview + 4), ["reviewer:review", "implementer:repair", "tester:testing", "implementer:handover"]);
+    const briefs = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-reviewer-")).sort().map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8"));
+    assert.match(briefs[0]!, /Review round 1 of 3/);
+    assert.match(briefs[1]!, /re-review/);
+    assert.match(briefs[2]!, /This is the final review/);
+    const finalRepair = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-implementer-")).map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).find((b) => b.includes("Final repair round"));
+    assert.ok(finalRepair, "the last repair is told there is no further review");
+    assert.ok(events(p).some((e) => e.type === "review.skipped"));
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/handover.md"), "utf8"), /## Open review findings \(final repair, not re-reviewed\)[\s\S]*R-1 \[high\]/);
+    p.s.cleanup();
+  });
+
+  test("E-4c repair limit after a review: resume continues with the repair, not another review", () => {
+    const p = setupProject({ config: { "limits.repair_rounds": "1" } });
+    p.setScenario([{ role: "reviewer", phase: "P-001", decision: "changes_requested" }]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.code, "repair_limit");
+    assert.equal(state(p).current.stage, "repairing");
+    cli(p, ["resume", "--note", "Fix R-1"]);
+    const a = next(p);
+    assert.equal(`${a.role}:${a.task}`, "implementer:repair");
+    p.s.cleanup();
+  });
+
   test("E-5 detached run survives a killed Lead and a killed dispatcher", () => {
     const p = setupProject();
     p.setScenario([{ role: "plan_debater", sleep_ms: 4000 }]);

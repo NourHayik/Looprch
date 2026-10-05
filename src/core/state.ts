@@ -63,7 +63,7 @@ export interface Finding {
 
 /** Instructions carried into the next brief for a role (repair findings, re-ask, user note). */
 export interface Delta {
-  kind: "reask" | "repair" | "expansion" | "context_answer" | "revise" | "retry" | "switch";
+  kind: "reask" | "repair" | "rereview" | "unreviewed" | "expansion" | "context_answer" | "revise" | "retry" | "switch";
   text: string;
   findings?: Finding[];
   paths?: string[];
@@ -93,6 +93,8 @@ export interface Current {
   tester_failures: Finding[];
   review_findings: Finding[];
   repair_source: "test" | "review" | null;
+  /** Reviews in this phase that requested changes; absent in older state files. */
+  review_changes?: number;
   expansion_round: number;
   reask_count: number;
   extra_rounds: number;
@@ -208,6 +210,7 @@ export function newCurrent(phase: string, title: string, at: string): Current {
     tester_failures: [],
     review_findings: [],
     repair_source: null,
+    review_changes: 0,
     expansion_round: 0,
     reask_count: 0,
     extra_rounds: 0,

@@ -64,6 +64,23 @@ describe("briefs", () => {
     assert.match(assembleBrief(input({ role: "reviewer", task: "review" })), /You are read-only/);
   });
 
+  test("review rounds: exhaustive first pass, scoped re-review, final review", () => {
+    const review = (n: number, of = 3) => assembleBrief(input({ role: "reviewer", task: "review", reviewRound: { n, of } }));
+    const first = review(1);
+    assert.match(first, /Review round 1 of 3\./);
+    assert.match(first, /Report every finding in this one pass/);
+    assert.doesNotMatch(first, /final review/);
+    const second = review(2);
+    assert.match(second, /re-review: verify each prior finding/);
+    assert.doesNotMatch(second, /final review/);
+    const last = review(3);
+    assert.match(last, /Review round 3 of 3\./);
+    assert.match(last, /This is the final review: request changes only for high or critical defects/);
+    assert.match(review(1, 1), /This is the final review/);
+    assert.match(roleText("reviewer", "review"), /Be exhaustive on the first review/);
+    assert.match(roleText("implementer", "repair"), /same defect wherever else it occurs/);
+  });
+
   test("role text picks the task section", () => {
     const t = roleText("planner", "synthesis");
     assert.match(t, /### Task: synthesis/);

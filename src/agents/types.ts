@@ -27,6 +27,12 @@ export interface DelegateSupport {
   effortFlag: "--effort" | "--variant" | null;
   cleanEnv: boolean;
   modelFormat?: "provider/model";
+  /** Flags passed only to write runs (never with --read-only). */
+  writeFlags?: string[];
+  /** The CLI's own print-mode timeout; set to the run timeout so it does not stop earlier than the watchdog. */
+  printTimeoutFlag?: "--print-timeout";
+  /** A reported model list proves the CLI is logged in (discovery has no auth probe for it). */
+  authFromModels?: boolean;
 }
 
 export interface AgentAdapter {

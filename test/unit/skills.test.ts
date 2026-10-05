@@ -55,7 +55,7 @@ describe("status rendering", () => {
       version: "0.1.0",
       project: { id: "corebit", title: "Corebit" },
       spec: { package_fingerprint: "0a13ffff", phases_total: 89, phases_closed: 2 },
-      current: { phase: "P-003", title: "Tenant registry", index: 3, stage: "testing", round: 1, cap: 3 },
+      current: { phase: "P-003", title: "Tenant registry", index: 3, stage: "testing", round: 1, cap: 3, review_changes: 1, review_cap: 3 },
       active: { run_id: "P-003-tester-2", role: "tester", agent: "codex", mode: "delegate", effective_mode: "delegate", mode_reason: "configured", session_id: "019a1234", started_at: "", elapsed_s: 360, status: "running" },
       last_result: { role: "implementer", decision: "implemented", summary: "implementer implemented (opencode)", touched_files: 14 },
       flags: { pause_requested: false, paused: null, waiting: null, blocked: null },
@@ -67,7 +67,7 @@ describe("status rendering", () => {
       text,
       [
         "Looprch 0.1.0 · project corebit · spec 89 phases (fingerprint 0a13…) · 2 closed",
-        'Phase P-003 (3/89) "Tenant registry"  stage: testing  repair round 1/3',
+        'Phase P-003 (3/89) "Tenant registry"  stage: testing  repair round 1/3  review changes 1/3',
         "Active: tester · codex · delegate · session 019a1234 · running for 6 min",
         "Last result: implementer implemented (opencode) · 14 files touched",
         "Blockers: none    Next: run gates after the tester report",

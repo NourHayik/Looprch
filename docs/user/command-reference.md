@@ -47,7 +47,7 @@ Invocation per agent: Codex `$lr-init`, Kimi Code `/skill:lr-init`, all others `
 | `looprch config set-role <role> --mode --agent --model [--effort] [--timeout] [--context-kb] [--max-parallel]` | configure a role |
 | `looprch config add-fallback <role> --mode --agent --model ...` | add an approved fallback |
 | `looprch config clear-fallbacks <role>` | remove fallbacks |
-| `looprch config set <key> <value>` | `lead_host`, `limits.*`, `approvals.plan/merge`, `git.phase_branches`, `gates.env.<NAME>`, `context_kb.<agent>`, `integrations.commit_generated` |
+| `looprch config set <key> <value>` | `lead_host`, `limits.*` (`repair_rounds`, `review_rounds`, `run_attempts`, `quota_wait_minutes`, `dispatch_max_wait`, `expansion_rounds`), `approvals.plan/merge`, `git.phase_branches`, `gates.env.<NAME>`, `context_kb.<agent>`, `integrations.commit_generated` |
 | `looprch models <agent> [--refresh]` | models from delegate-setup discovery |
 | `looprch install-relay <agent> [--yes]` | install a delegate-skills relay globally |
 

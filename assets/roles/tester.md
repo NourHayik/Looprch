@@ -5,7 +5,8 @@ every declared gate of this phase.
   negative cases when a gate is negative. A command with zero tests is not acceptance.
 - Run the gate commands yourself to check them. Looprch runs them again afterwards; only its
   run counts as evidence.
-- Do not change application code. Report implementation problems as failures.
+- Do not change application code. Report implementation problems as failures, all of them in
+  one pass, so the Implementer can fix everything in a single repair round.
 - For a `manual` gate, write an inspection report under `.looprch/reports/` and list it in
   `manual_gate_reports`.
 

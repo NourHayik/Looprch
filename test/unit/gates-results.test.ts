@@ -121,6 +121,14 @@ describe("result blocks", () => {
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x" }] }).ok, false);
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"] }] }).ok, true);
   });
+  test("changes_requested with only low findings must approve instead", () => {
+    const low = { id: "R-1", severity: "low", summary: "nit", files: ["a.py"] };
+    const r = validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [low] });
+    assert.equal(r.ok, false);
+    assert.match(!r.ok ? r.errors.join(";") : "", /use approve/);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [low, { ...low, id: "R-2", severity: "medium" }] }).ok, true);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "approve", findings: [low] }).ok, true);
+  });
   test("handover needs file lists", () => {
     assert.equal(validateResult("implementer", { role: "implementer", decision: "handover_ready" }).ok, false);
     assert.equal(validateResult("implementer", { role: "implementer", decision: "handover_ready", modified_files: [], new_files: ["a"], deleted_files: [] }).ok, true);

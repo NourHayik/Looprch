@@ -33,6 +33,7 @@
         "active_run": { "type": ["string", "null"] },
         "tester_verdict": { "enum": [null, "pass", "fail"] },
         "repair_source": { "enum": [null, "test", "review"] },
+        "review_changes": { "type": "integer", "minimum": 0 },
         "snapshots": {
           "type": "object",
           "properties": { "gates": { "type": ["string", "null"] }, "review": { "type": ["string", "null"] }, "handover": { "type": ["string", "null"] } }

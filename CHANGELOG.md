@@ -2,6 +2,36 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.3.0 - 2026-10-05
+
+### Fixed
+
+- Antigravity (agy) can run write roles in phases. Headless `agy --print` auto-denied every tool
+  permission it could not prompt for, so Implementer and Tester runs failed. Write runs now get
+  `--dangerously-skip-permissions` (full access, reported as a `warning` event and by
+  `looprch doctor` as `agent:agy:permissions`); read-only roles keep `--read-only`.
+- agy runs get the role timeout as `--print-timeout`, so agy no longer stops itself after its
+  30-minute default.
+- A relay's `error` field (for example the agy permission denial) is shown in the failure detail
+  instead of only the stderr tail.
+- `looprch doctor` reports agy as authenticated when `agy models` listed models, instead of
+  "authentication unknown".
+- `looprch resume` after a `repair_limit` that a review caused continues with the repair, not
+  with another review.
+
+### Added
+
+- `limits.review_rounds` (default 3, optional in existing configs): the Reviewer may request
+  changes at most that many times per phase. After the last one, the Implementer makes a final
+  repair, tests and gates must pass, and the phase goes to handover without another review. A new
+  journal event `review.skipped` reports `[REVIEW SKIPPED]`, and `handover.md` lists the open
+  findings. `looprch status` gains `current.review_changes` and `current.review_cap`.
+- First-pass quality rules. The Implementer reviews its own diff against the Reviewer's criteria,
+  and repairs fix every occurrence of a defect. The first review must report every finding at
+  once. Re-reviews get the earlier findings and are limited to the repair, and the final review
+  may only request changes for high or critical defects. A reviewer `changes_requested` with
+  only `low` findings is rejected; use `approve` with notes.
+
 ## 0.2.0 - 2026-10-04
 
 ### Added

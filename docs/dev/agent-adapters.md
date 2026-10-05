@@ -11,7 +11,7 @@ One small data-and-generator object per agent in `src/agents/<id>.ts`, typed by 
 | `invoke(skill)` | how the user calls a skill (`$lr-init`, `/skill:lr-init`, `/lr-init`) |
 | `extraFiles(skills)` | extra generated files (OpenCode command shims) |
 | `direct` | `subagentFile(role, model, readOnly)`, `resumable`, `spawnHint`; absent = no Direct |
-| `delegate` | `skill`, `sessionField`, `resumeFlag`, `resumable`, `readOnly` (`enforced`/`best-effort`/`none`), `effortFlag` (`--effort`/`--variant`/null), `cleanEnv`, `modelFormat`; absent = no relay |
+| `delegate` | `skill`, `sessionField`, `resumeFlag`, `resumable`, `readOnly` (`enforced`/`best-effort`/`none`), `effortFlag` (`--effort`/`--variant`/null), `cleanEnv`, `modelFormat`, `writeFlags` (write runs only; agy `--dangerously-skip-permissions`), `printTimeoutFlag` (agy `--print-timeout`, set to the run timeout), `authFromModels` (doctor treats a reported model list as logged in; agy); absent = no relay |
 | `quotalensProvider` | QuotaLens provider id |
 | `envMarkers` | environment variables hinting the Lead runs in this host |
 | `postInstallNotes` | printed by `looprch add`, some surfaced by doctor |

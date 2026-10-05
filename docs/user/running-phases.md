@@ -85,7 +85,28 @@ instruction:
 looprch resume --note "Use the existing parser instead of a new one"
 ```
 
-or raise the limit: `looprch config set limits.repair_rounds 5`.
+or raise the limit: `looprch config set limits.repair_rounds 5`. Resuming always continues with
+the repair, never with another review.
+
+## Review limit
+
+The Reviewer may request changes at most `limits.review_rounds` times per phase (default 3).
+Looprch tries to get everything right in the first pass:
+
+- The Implementer reviews its own diff against the Reviewer's criteria before it reports, and a
+  repair fixes the root cause and every other occurrence of the same defect.
+- The first review must report every finding at once. `changes_requested` needs at least one
+  `medium`, `high` or `critical` finding; low findings are notes on an approval.
+- A re-review gets the earlier findings. It checks that they are fixed and looks for regressions
+  in the repair. It raises new findings on unchanged code only when they are high or critical.
+- The brief tells the last allowed review that it is the final one. It requests changes only for
+  high or critical defects.
+
+If the final review still requests changes, the Implementer makes one final repair, and the Tester
+and gates must pass again. The phase then goes to handover **without another review**. The
+progress line `[REVIEW SKIPPED]` reports this, and `handover.md` gets an
+"Open review findings (final repair, not re-reviewed)" section. Change the limit with
+`looprch config set limits.review_rounds 2`.
 
 ## Optional approvals
 

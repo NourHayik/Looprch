@@ -14,11 +14,18 @@ in project config. Relays are never bundled; `looprch install-relay <agent>` run
 
 ```text
 node <relay> --brief <abs brief> --cd <project> --out-dir .looprch/runs/<id>/relay --timeout <t>
-     --model <m> [--effort e | --variant e] [--read-only] [--session id | --conversation id] [--clean-env]
+     --model <m> [--effort e | --variant e] [--print-timeout <t>]
+     [--read-only | <writeFlags>] [--session id | --conversation id] [--clean-env]
 ```
 
 Flags are emitted only when the adapter supports them; unsupported effort and read-only produce
 warning events. Lanes (`--lane`) and `--resume-last` are never used (D-15).
+
+- `printTimeoutFlag` (agy): the run timeout is also passed as the CLI's own print-mode timeout,
+  so agy does not stop at its 30-minute default before the relay watchdog.
+- `writeFlags` (agy: `--dangerously-skip-permissions`): passed only to write runs, never with
+  `--read-only` (the relay rejects the pair). Headless `agy --print` cannot prompt and would
+  auto-deny tool permissions. Every such run emits a `warning` event.
 
 ## Detached dispatch
 
@@ -32,7 +39,8 @@ warning events. Lanes (`--lane`) and `--resume-last` are never used (D-15).
 Result handling (`delegate-relay.result.v1`): `completed` → parse the `looprch-result` block from
 `finalMessage`; `failed`/`timeout`/`aborted` → retry, fallback or block; `*_unavailable` →
 fallback or `cli_missing`; rate-limit wording → mark the provider; no `result.json` with exit 2
-→ `usage_error`; no result otherwise → interrupted → retry.
+→ `usage_error`; no result otherwise → interrupted → retry. The relay's `error` field (for example
+agy's headless permission denial) comes first in the failure detail, followed by `stderrTail`.
 
 ## Sessions (`src/delegate/sessions.ts`)
 

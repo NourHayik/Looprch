@@ -16,7 +16,7 @@ JSON Schemas in `schemas/` document the files; the CLI validates with hand-writt
 `project.id`, `lead_host`, `agents[]`, `roles.<role>` (`mode`, `agent`, `model`, `effort`,
 `timeout`, `context_kb`, `fallbacks[]`, `max_parallel` for worker), `context_kb.<agent>`,
 `limits` (`repair_rounds` 3, `quota_wait_minutes` 60, `run_attempts` 2, `dispatch_max_wait`
-"10m", `expansion_rounds` 2), `approvals` (`plan`, `merge`: never | high-risk | always),
+"10m", `expansion_rounds` 2, `review_rounds` 3, optional so older configs stay valid), `approvals` (`plan`, `merge`: never | high-risk | always),
 `git.phase_branches`, `gates.env`, `integrations.commit_generated`, `spec.gates_ack`
 (`manifest_sha256`, `acknowledged_at`, `commands[]`).
 
@@ -25,7 +25,7 @@ JSON Schemas in `schemas/` document the files; the CLI validates with hand-writt
 `protocol`, `core_version_at_phase_start`, `scope`, `spec` (package and source fingerprints,
 manifest hash, phases_total), `git` (`base_branch`, `baseline_commit`), `current` (phase, stage,
 round, close_step, phase_base, branch, last_commit, active_run, tester verdict and failures,
-review findings, deltas per role, assignment index per role, sessions-related counters,
+review findings, `review_changes` (reviews that requested changes; absent in older files), deltas per role, assignment index per role, sessions-related counters,
 snapshots), `flags` (`pause_requested`, `paused`, `waiting`, `blocked`), `pending_question`,
 `answers`, `pending_checkpoint`, `runs_index`, `sessions` (key `P-NNN/<role>/<agent>`),
 `assignments_history`, `quota.exhausted` (rate-limit marks), `phases.<id>` (status, tag,

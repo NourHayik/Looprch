@@ -15,6 +15,7 @@ Lead posts them unchanged.
 | `[DEBATE START]` / `[DEBATE COMPLETE]` | the plan goes to the Plan Debater / its result: changes recommended (count, severities, summary) or no changes |
 | `[PLAN UPDATE START]` / `[PLAN UPDATED]` | the Planner updates the plan after the debate or your revision |
 | `[IMPLEMENTATION …]`, `[TESTING …]`, `[GATES …]`, `[REVIEW …]`, `[REPAIR …]`, `[HANDOVER …]`, `[CLOSING START]` | each stage starts and completes, with the verdict, findings or failed gates |
+| `[REVIEW SKIPPED]` | the review limit is reached; the final repair goes to handover without another review |
 | `[TASK START]`, `[RETRY]` | a role run starts: run id, role, task, agent/model, mode, attempt, fallback reason |
 | `[ISSUE]` | a run failed, was interrupted or returned an invalid report: reason and what Looprch does next |
 | `[FALLBACK]` | a role moves to its next approved agent/model |
@@ -30,7 +31,7 @@ missing, reporting starts with the next event. The full history stays in `looprc
 
 ```text
 Looprch 0.1.0 · project corebit · spec 89 phases (fingerprint 0a13…) · 2 closed
-Phase P-003 (3/89) "Tenant registry"  stage: testing  repair round 1/3
+Phase P-003 (3/89) "Tenant registry"  stage: testing  repair round 1/3  review changes 1/3
 Active: tester · codex · delegate · session 019a1234 · running for 6 min
 Last result: implementer implemented (opencode) · 14 files touched
 Blockers: none    Next: run gates after the tester report
@@ -38,7 +39,7 @@ Blockers: none    Next: run gates after the tester report
 
 `looprch status --json` returns the same data: `version`, `project`, `spec`
 (`package_fingerprint`, `phases_total`, `phases_closed`), `current` (`phase`, `title`, `index`,
-`stage`, `round`, `cap`), `active` (`run_id`, `role`, `agent`, `mode`, `effective_mode`,
+`stage`, `round`, `cap`, `review_changes`, `review_cap`), `active` (`run_id`, `role`, `agent`, `mode`, `effective_mode`,
 `mode_reason`, `session_id`, `started_at`, `elapsed_s`), `last_result`, `flags` (`paused`,
 `waiting`, `blocked`), `pending_question`, `next`.
 

@@ -48,7 +48,8 @@ Persist each answer:
 Role keys: `planner`, `plan_debater`, `implementer`, `tester`, `reviewer`, `worker`.
 
 Optional settings, only if the user asks: `looprch config set approvals.plan high-risk`,
-`approvals.merge`, `limits.repair_rounds`, `gates.env.<NAME> <value>`, `context_kb.<agent> <KB>`.
+`approvals.merge`, `limits.repair_rounds`, `limits.review_rounds` (reviews that may request
+changes per phase, default 3), `gates.env.<NAME> <value>`, `context_kb.<agent> <KB>`.
 
 ## 4. Finish
 

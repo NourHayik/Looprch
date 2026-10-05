@@ -24,7 +24,8 @@
         "quota_wait_minutes": { "type": "integer", "minimum": 0, "maximum": 1440 },
         "run_attempts": { "type": "integer", "minimum": 1, "maximum": 5 },
         "dispatch_max_wait": { "$ref": "#/$defs/duration" },
-        "expansion_rounds": { "type": "integer", "minimum": 0, "maximum": 5 }
+        "expansion_rounds": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "review_rounds": { "type": "integer", "minimum": 1, "maximum": 10 }
       }
     },
     "approvals": {

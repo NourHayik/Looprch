@@ -47,6 +47,8 @@ export interface Config {
     run_attempts: number;
     dispatch_max_wait: string;
     expansion_rounds: number;
+    /** Reviews that may request changes in one phase; absent in older configs (default 3). */
+    review_rounds?: number;
   };
   approvals: { plan: Approval; merge: Approval };
   git: { phase_branches: boolean };
@@ -64,6 +66,12 @@ export const DEFAULT_TIMEOUTS: Record<Role, string> = {
   worker: "30m",
 };
 
+export const DEFAULT_REVIEW_ROUNDS = 3;
+
+export function reviewRounds(cfg: Config): number {
+  return cfg.limits.review_rounds ?? DEFAULT_REVIEW_ROUNDS;
+}
+
 export function defaultConfig(): Config {
   return {
     schema_version: CONFIG_SCHEMA,
@@ -72,7 +80,7 @@ export function defaultConfig(): Config {
     agents: [],
     roles: {},
     context_kb: {},
-    limits: { repair_rounds: 3, quota_wait_minutes: 60, run_attempts: 2, dispatch_max_wait: "10m", expansion_rounds: 2 },
+    limits: { repair_rounds: 3, quota_wait_minutes: 60, run_attempts: 2, dispatch_max_wait: "10m", expansion_rounds: 2, review_rounds: DEFAULT_REVIEW_ROUNDS },
     approvals: { plan: "never", merge: "never" },
     git: { phase_branches: true },
     gates: { env: {} },
@@ -180,6 +188,7 @@ export function validateConfig(raw: unknown, ctx: ValidationContext): Issues {
     if (!isInt(l.run_attempts, 1, 5)) issues.error("limits.run_attempts must be 1..5");
     if (!isDuration(l.dispatch_max_wait)) issues.error("limits.dispatch_max_wait must be a duration like 10m");
     if (!isInt(l.expansion_rounds, 0, 5)) issues.error("limits.expansion_rounds must be 0..5");
+    if (l.review_rounds !== undefined && !isInt(l.review_rounds, 1, 10)) issues.error("limits.review_rounds must be 1..10");
   }
   if (!isObject(cfg.approvals) || !oneOf(cfg.approvals.plan, APPROVALS) || !oneOf(cfg.approvals.merge, APPROVALS))
     issues.error(`approvals.plan and approvals.merge must be one of ${APPROVALS.join(", ")}`);
