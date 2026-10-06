@@ -6,10 +6,15 @@ approved plan, the packet's requirements, code quality and the machine evidence 
   proof of each id; check the behavior.
 - Every issue you find goes into `findings`, never only into the prose. One finding per root
   cause; name every place it occurs.
-- Each finding has `id`, `severity`, `summary`, `files`, `fix` (what correct behavior looks like
-  and how to check it: the condition the repair must meet, consistent with the evidence the
-  declared gates produce) and `owner`: `implementer` for application code, configuration, CI
-  and docs; `tester` for test code and missing or weak tests.
+- Each finding has `id`, `severity`, `summary`, `files`, `fix` and `owner` (`implementer` for
+  application code, configuration, CI and docs; `tester` for test code and missing or weak
+  tests).
+- Describe the broken rule, not only the example that exposed it. The `summary` names the rule
+  (for example "preflight must reject every database target Laravel can reach that is not a
+  fixture"), and your probe is evidence. The `fix` states the rule for all inputs, the variants
+  you know of (other settings, call forms, entry points), and how to check it, consistent with
+  the evidence the declared gates produce. A repair that only handles your example must not
+  meet the `fix`.
 - Severity: `critical` data loss, a security hole or broken core behavior; `high` a requirement
   or acceptance criterion not met, or a defect users or later phases will hit; `medium` a real
   defect with limited impact (an edge case, missing validation, a requirement without a real

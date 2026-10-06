@@ -972,15 +972,20 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   const head = finalRepair
     ? `Final repair round ${c.round} (review requested changes). There is no further review, so fix every finding below completely`
     : `Repair round ${c.round} (review requested changes). Fix every finding below completely`;
+  const reopened = findings.filter((f) => f.origin === "unfixed").map((f) => f.id);
+  const reopenedText = reopened.length
+    ? [`Still open after an earlier repair reported them fixed: ${reopened.join(", ")}. That repair covered the cited example only. Fix the rule in each Fix line for every variant (prefer one fail-closed path over patching cases), and try variants of the Reviewer's probe before you report fixed.`]
+    : [];
   const text = [
     `${head}: meet its Fix condition, fix the root cause and the same defect anywhere else in the phase diff, and check that the fix works with the evidence the declared gates produce. Report \`resolutions\` for: ${mine.map((f) => f.id).join(", ")}.`,
+    ...reopenedText,
     ...(theirs.length ? [`The Tester fixes these test-owned findings after you; do not change tests for them: ${theirs.map((f) => `${f.id} (${f.summary})`).join("; ")}`] : []),
   ].join("\n");
   if (mine.length) c.deltas.implementer = { kind: "repair", text, findings: mine, paths };
   else delete c.deltas.implementer;
   c.deltas.tester = {
     kind: "repair",
-    text: `Round ${c.round}: review findings. Fix the findings owned by the Tester (you own the test code). For every other finding, the Implementer's repair report in your inputs says how it was fixed: verify each one with a test that fails without the fix, or with a read-only command, against the evidence the declared gates actually produce. If a finding is not fixed, return \`fail\` with a failure whose id is the finding id. In your report, list every finding id with how you verified it.`,
+    text: `Round ${c.round}: review findings. Fix the findings owned by the Tester (you own the test code). For every other finding, the Implementer's repair report in your inputs says how it was fixed: verify each one with a test that fails without the fix, or with a read-only command, against the evidence the declared gates actually produce. Check the rule in the Fix line with at least one variant the Reviewer's example did not cover.${reopened.length ? ` ${reopened.join(", ")} came back after an earlier repair and verification: check them hardest.` : ""} If a finding is not fixed, return \`fail\` with a failure whose id is the finding id. In your report, list every finding id with how you verified it and which variants you tried.`,
     findings,
     paths,
   };
@@ -993,11 +998,13 @@ function finalReviewQuestion(e: Engine): Action {
   const c = cur(e);
   const qid = `final_review-${c.phase}-${c.review_changes ?? 0}`;
   const serious = c.review_findings.filter((f) => f.severity === "high" || f.severity === "critical").length;
+  const origins = (["unfixed", "regression", "missed"] as const).map((o) => [o, c.review_findings.filter((f) => f.origin === o).length] as const).filter(([, n]) => n > 0);
+  const originText = origins.length ? ` (${origins.map(([o, n]) => `${n} ${o}`).join(", ")})` : "";
   return ask(
     e,
     "final_review",
     qid,
-    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s), ${serious} high or critical (see .looprch/phases/${c.phase}/review.md). Normally the first review finds everything, so this needs your decision. How should Looprch continue?`,
+    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s)${originText}, ${serious} high or critical (see .looprch/phases/${c.phase}/review.md). Normally the first review finds everything, so this needs your decision. How should Looprch continue?`,
     [
       { id: "repair_and_review", label: "Repair, then run one more review" },
       { id: "repair_and_handover", label: "Repair, then hand over without another review (findings listed in handover.md)" },

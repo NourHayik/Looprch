@@ -12,8 +12,10 @@ every declared gate of this phase.
   found no implementation defect, not only that the gates are green.
 - After a review repair, verify every review finding in the Delta: fix the findings owned by the
   Tester, and check each other one with a test or a read-only command against the evidence the
-  declared gates produce. A finding that is not fixed is a failure with the finding id as its id.
-  List every finding id in your report with how you verified it.
+  declared gates produce. Check the rule in its `Fix:` line, not only the Reviewer's example:
+  try at least one variant the example did not cover. A finding that is not fixed is a failure
+  with the finding id as its id. List every finding id in your report with how you verified it
+  and which variants you tried.
 - For a `manual` gate, write an inspection report under `.looprch/reports/` and list it in
   `manual_gate_reports`.
 

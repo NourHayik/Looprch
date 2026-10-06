@@ -110,6 +110,12 @@ second is a safety net, and a third is for exceptional cases.
   a test or a command, against the evidence the gates produce. A finding that is not fixed is a
   Tester failure, so it goes back to the Implementer before the next review. Both get the
   Implementer's repair report.
+- **Repairs fix the rule, not the example.** A finding names the broken rule, and its `fix`
+  states the rule for all inputs and the known variants. The Implementer fixes the rule
+  (preferring one fail-closed path), tries variants of the Reviewer's probe and reports `fixed`
+  only when the whole rule holds. The Tester checks at least one variant the Reviewer's example
+  did not cover. A finding that a re-review reports as `unfixed` is named in the next repair and
+  Tester briefs as having come back after an earlier repair.
 - **Round 2 is the safety net.** The re-review gets the open findings, the repair reports and the
   repair diff (from the tree it last reviewed to the current one). It checks each finding against
   its fix, looks for regressions and over-fixes, and reports anything round 1 missed. Every

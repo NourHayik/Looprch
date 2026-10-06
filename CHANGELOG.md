@@ -2,6 +2,26 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.4.1 - 2026-10-06
+
+The 0.4.0 validation run on CoreBit P-001 worked as intended in round 1: 22 findings, and
+round 2 found only 2 `missed`. But 12 of the 19 findings the Implementer reported as fixed came
+back `unfixed`, and 6 were still open in round 3. Each round the Reviewer probed a new variant
+of the same defect (for example another way to reach a production database). The Implementer
+patched that one example, and the Tester re-ran only that example.
+
+### Changed
+
+- Reviewer findings describe the broken rule, not only the example that exposed it. The `fix`
+  states the rule for all inputs and the variants the Reviewer knows of.
+- The Implementer fixes the rule (preferring one fail-closed path over patching cases), tries
+  variants of the Reviewer's probe, and reports `fixed` only when the whole rule holds,
+  otherwise `not_fixed` with what remains.
+- The Tester verifies each finding with at least one variant the Reviewer's example did not
+  cover, and lists the variants it tried.
+- Findings a re-review reports as `unfixed` are named in the next repair and Tester briefs as
+  having come back after an earlier repair. The `final_review` question shows the origin counts.
+
 ## 0.4.0 - 2026-10-06
 
 Driven by the CoreBit P-001 test run on 0.3.0. It used three review rounds and still ended

@@ -90,6 +90,10 @@ describe("briefs", () => {
     assert.match(roleText("reviewer", "adhoc_review"), /Checklist:/);
     assert.match(roleText("implementer", "repair"), /same defect wherever else it occurs/);
     assert.match(roleText("implementer", "repair"), /report `resolutions`/);
+    assert.match(roleText("implementer", "repair"), /Fix the rule it\s+states, not only the example/);
+    assert.match(roleText("implementer", "repair"), /Report `fixed` only\s+when the whole rule holds/);
+    assert.match(role, /Describe the broken rule, not only the example/);
+    assert.match(roleText("tester", "testing"), /try at least one variant the example did not cover/);
   });
 
   test("output contract shows the object shapes reviewers and implementers must return", () => {

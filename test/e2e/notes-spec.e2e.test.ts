@@ -126,6 +126,23 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     p.s.cleanup();
   });
 
+  test("E-3e a finding that comes back unfixed is flagged to the Implementer and the Tester", () => {
+    const p = setupProject();
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "reviewer", phase: "P-001", nth: 2, decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "Scripted finding", files: ["noteapp.py"], fix: "Reject every variant", owner: "implementer", origin: "unfixed" }] },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    const briefs = (role: string) => readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith(`P-001-${role}-`)).sort().map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8"));
+    const repairs = briefs("implementer").filter((b) => /task=repair/.test(b));
+    assert.equal(repairs.length, 2);
+    assert.doesNotMatch(repairs[0]!, /Still open after an earlier repair/);
+    assert.match(repairs[1]!, /Still open after an earlier repair reported them fixed: R-1\. That repair covered the cited example only/);
+    assert.ok(briefs("tester").some((b) => /R-1 came back after an earlier repair and verification: check them hardest/.test(b)));
+    p.s.cleanup();
+  });
+
   test("E-3d the final review blocks only on high/critical; approval notes reach the handover", () => {
     const p = setupProject({ config: { "limits.review_rounds": "1" } });
     const medium = { id: "R-1", severity: "medium", summary: "Edge case", files: ["noteapp.py"] };

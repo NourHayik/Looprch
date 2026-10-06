@@ -20,12 +20,18 @@ Fix the problems in the Delta (failing gates, tester failures or review findings
 cause, and fix the same defect wherever else it occurs in the phase diff, not only at the cited
 line. Leave no finding partly fixed. Change nothing unrelated.
 
-- A review finding's `Fix:` line is the condition your repair must meet. Meet it without
-  over-correcting: check that the fixed code still works with the real inputs and with the
+- A review finding's `Fix:` line is the condition your repair must meet. Fix the rule it
+  states, not only the example the Reviewer used: list the variants (other inputs, settings, call
+  forms, entry points) and prefer designs that fail closed for all of them, such as an allowlist
+  or one validated path, over patching each known case. Then try to break your fix with variants
+  of the Reviewer's probe.
+- Do not over-correct: check that the fixed code still works with the real inputs and with the
   evidence the declared gates produce (run the affected command on that evidence).
 - Findings owned by the Tester are listed for your information; do not change tests for them.
 - After review findings, report `resolutions`: one entry per finding assigned to you, `fixed`
-  or `not_fixed` with a note on what you changed or why it is not fixed.
+  or `not_fixed` with a note on what you changed or why it is not fixed. Report `fixed` only
+  when the whole rule holds; if part of it is out of reach in this phase, report `not_fixed`
+  and say what remains. An honest `not_fixed` costs less than another review round.
 
 Decision: `implemented` (or `needs_context`).
 
