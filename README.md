@@ -5,7 +5,7 @@ project; Looprch coordinates the Planner, Plan Debater, Implementer, Tester and 
 build and verify it, checks machine evidence for every gate, and keeps the execution state in
 plain files inside your project.
 
-Status: 0.4.1, on npm as [`looprch`](https://www.npmjs.com/package/looprch). Linux and macOS
+Status: 0.4.2, on npm as [`looprch`](https://www.npmjs.com/package/looprch). Linux and macOS
 (Windows through WSL).
 
 ## Quickstart

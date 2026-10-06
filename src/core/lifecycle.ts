@@ -451,7 +451,7 @@ function runInputs(e: Engine, role: Role, task: Task, phase: PhaseDef): { path: 
   const out = existingInputs(e, list);
   if (task === "testing" || task === "review")
     for (const p of c.repair_reports ?? []) out.push({ path: p, why: "Implementer repair report: how each finding was fixed (resolutions, limitations)" });
-  for (const a of c.addenda) out.push({ path: a, why: "Planner answer to an Implementer context request" });
+  for (const a of c.addenda) out.push({ path: a, why: "Planner addendum (context answer or repair design); binding for this phase" });
   if (task === "planning" || task === "implementation" || task === "review") out.push(...closedHandovers(e, phase));
   if (role === "tester" || role === "reviewer") {
     const gates = phase.gates.map((g) => `${g.id}: ${g.command.join(" ")} [${g.kind}${g.negative ? ", negative" : ""}, evidence ${g.evidence.format}]`).join("; ");
@@ -973,8 +973,9 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
     ? `Final repair round ${c.round} (review requested changes). There is no further review, so fix every finding below completely`
     : `Repair round ${c.round} (review requested changes). Fix every finding below completely`;
   const reopened = findings.filter((f) => f.origin === "unfixed").map((f) => f.id);
-  const reopenedText = reopened.length
-    ? [`Still open after an earlier repair reported them fixed: ${reopened.join(", ")}. That repair covered the cited example only. Fix the rule in each Fix line for every variant (prefer one fail-closed path over patching cases), and try variants of the Reviewer's probe before you report fixed.`]
+  const reopenedMine = mine.filter((f) => f.origin === "unfixed").map((f) => f.id);
+  const reopenedText = reopenedMine.length
+    ? [`Still open after an earlier repair reported them fixed: ${reopenedMine.join(", ")}. That repair covered the cited example only. Fix the rule in each Fix line for every variant (prefer one fail-closed path over patching cases), and try variants of the Reviewer's probe before you report fixed.`]
     : [];
   const text = [
     `${head}: meet its Fix condition, fix the root cause and the same defect anywhere else in the phase diff, and check that the fix works with the evidence the declared gates produce. Report \`resolutions\` for: ${mine.map((f) => f.id).join(", ")}.`,
@@ -983,6 +984,20 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   ].join("\n");
   if (mine.length) c.deltas.implementer = { kind: "repair", text, findings: mine, paths };
   else delete c.deltas.implementer;
+  if (reopenedMine.length) {
+    c.context_request = {
+      question: `Repair design for review findings that came back unfixed: ${reopenedMine.join(", ")}`,
+      reason: "An earlier repair reported them fixed; the re-review found the rule still broken.",
+      documents: [],
+      phases: [],
+    };
+    c.deltas.planner = {
+      kind: "context_answer",
+      text: `Repair design: the review findings below came back unfixed after a repair that patched the cited examples. For each one, decide the approach the Implementer must take within this phase: the rule to enforce and the packet requirement behind it, the single code path that enforces it, and what must fail closed (for example \`dependency_unavailable\`) where the full rule needs something a later phase delivers. Do not write code.`,
+      findings: mine.filter((f) => f.origin === "unfixed"),
+      paths,
+    };
+  }
   c.deltas.tester = {
     kind: "repair",
     text: `Round ${c.round}: review findings. Fix the findings owned by the Tester (you own the test code). For every other finding, the Implementer's repair report in your inputs says how it was fixed: verify each one with a test that fails without the fix, or with a read-only command, against the evidence the declared gates actually produce. Check the rule in the Fix line with at least one variant the Reviewer's example did not cover.${reopened.length ? ` ${reopened.join(", ")} came back after an earlier repair and verification: check them hardest.` : ""} If a finding is not fixed, return \`fail\` with a failure whose id is the finding id. In your report, list every finding id with how you verified it and which variants you tried.`,

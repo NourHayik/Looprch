@@ -2,6 +2,24 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.4.2 - 2026-10-06
+
+With 0.4.1 the CoreBit run went into a fourth review (allowed by the user). The same four
+findings came back `unfixed` again, each reported `fixed` by the Implementer and verified by
+the Tester. They need a design decision, not another patch. For example, P-001 has no trusted
+authentication source, so the rule can only be enforced by failing closed until a later phase
+adds one.
+
+### Changed
+
+- Implementer findings that a re-review reports as `unfixed` now go to the Planner first. In the
+  same session, the Planner writes a repair design addendum (`plan-addendum-N.md`) through the
+  existing `context_answer` path. For each finding it gives the rule, the requirement, the single
+  code path that enforces it, and what fails closed in this phase. The Implementer, Tester and
+  Reviewer get the addendum as a binding input.
+- The Implementer's "still open" list names only its own findings, not Tester-owned ones.
+- `[CONTEXT ANSWERED]` says whether the addendum is a context answer or a repair design.
+
 ## 0.4.1 - 2026-10-06
 
 The 0.4.0 validation run on CoreBit P-001 worked as intended in round 1: 22 findings, and

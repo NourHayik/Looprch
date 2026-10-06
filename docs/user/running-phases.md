@@ -116,6 +116,11 @@ second is a safety net, and a third is for exceptional cases.
   only when the whole rule holds. The Tester checks at least one variant the Reviewer's example
   did not cover. A finding that a re-review reports as `unfixed` is named in the next repair and
   Tester briefs as having come back after an earlier repair.
+- **Findings that come back get a repair design.** Before the Implementer repairs a finding that
+  a re-review reports as `unfixed`, the Planner (same session) writes a repair design addendum.
+  For each such finding it gives the rule, the requirement behind it, the single code path that
+  enforces it, and what fails closed in this phase when the full rule needs a later phase. The
+  Implementer, Tester and Reviewer all get the addendum (`[CONTEXT ANSWERED]`).
 - **Round 2 is the safety net.** The re-review gets the open findings, the repair reports and the
   repair diff (from the tree it last reviewed to the current one). It checks each finding against
   its fix, looks for regressions and over-fixes, and reports anything round 1 missed. Every

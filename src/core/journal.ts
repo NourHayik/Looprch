@@ -447,7 +447,7 @@ function acceptedLine(e: LrEvent): string | null {
     case "revise":
       return `[PLAN UPDATED] The Planner revised the plan as you asked: .looprch/phases/${phase}/plan.md`;
     case "context_answer":
-      return "[CONTEXT ANSWERED] The Planner answered the Implementer's context request.";
+      return "[CONTEXT ANSWERED] The Planner wrote an addendum for the Implementer (context answer or repair design).";
     case "implementation":
     case "repair":
       if (decision === "needs_context") return "[CONTEXT NEEDED] The Implementer asked the Planner for missing context.";

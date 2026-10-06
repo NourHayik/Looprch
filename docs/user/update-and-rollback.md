@@ -2,7 +2,7 @@
 
 ```sh
 looprch update                 # latest version from npm
-looprch update --to 0.4.1      # a specific version
+looprch update --to 0.4.2      # a specific version
 looprch update --from ./pkg    # an extracted package directory
 looprch rollback               # back to the previous version
 ```

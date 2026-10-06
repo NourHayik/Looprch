@@ -23,6 +23,12 @@ reason, and write the final plan in full (not a diff). Decision: `plan_final`.
 The user asked for changes to the plan (see Delta). Write the full revised plan. Decision: `plan_final`.
 
 ### Task: context_answer
-The Implementer is missing cross-phase context (see Delta). Answer from the packet and approved
-sources only, with exact source paths. If the sources do not answer it, say so; never invent a
-requirement. Decision: `context_answer`.
+The Implementer is missing cross-phase context, or review findings came back unfixed and need a
+repair design (see Delta). Answer from the packet and approved sources only, with exact source
+paths. If the sources do not answer it, say so; never invent a requirement.
+
+For a repair design, read the findings, the review and the current code. For each finding,
+state the rule to enforce and the requirement behind it, the single code path that must enforce
+it (one validated path or an allowlist, not a list of known bad cases), and what fails closed in
+this phase when the full rule needs something a later phase delivers. Decision:
+`context_answer`.

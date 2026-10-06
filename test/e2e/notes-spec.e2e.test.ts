@@ -126,7 +126,7 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     p.s.cleanup();
   });
 
-  test("E-3e a finding that comes back unfixed is flagged to the Implementer and the Tester", () => {
+  test("E-3e a finding that comes back unfixed gets a Planner repair design and is flagged to the Implementer and the Tester", () => {
     const p = setupProject();
     p.setScenario([
       { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
@@ -139,7 +139,17 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.equal(repairs.length, 2);
     assert.doesNotMatch(repairs[0]!, /Still open after an earlier repair/);
     assert.match(repairs[1]!, /Still open after an earlier repair reported them fixed: R-1\. That repair covered the cited example only/);
+    assert.match(repairs[1]!, /The Planner answered your context request \(Repair design for review findings that came back unfixed: R-1\)/);
+    assert.match(repairs[1]!, /plan-addendum-1\.md/);
+    assert.match(repairs[1]!, /Report `resolutions` for: R-1\./);
+    const seq = r.actions.filter((a) => a.action === "run_role").map((a) => `${a.role}:${a.task}`);
+    const second = seq.indexOf("reviewer:review", seq.indexOf("reviewer:review") + 1);
+    assert.deepEqual(seq.slice(second, second + 3), ["reviewer:review", "planner:context_answer", "implementer:repair"]);
+    const design = briefs("planner").find((b) => /task=context_answer/.test(b))!;
+    assert.match(design, /Repair design: the review findings below came back unfixed/);
+    assert.match(design, /- R-1 \[high, owner implementer, unfixed\]/);
     assert.ok(briefs("tester").some((b) => /R-1 came back after an earlier repair and verification: check them hardest/.test(b)));
+    assert.match(briefs("reviewer").at(-1)!, /plan-addendum-1\.md` — Planner addendum/);
     p.s.cleanup();
   });
 
