@@ -38,7 +38,9 @@ Then the usage policy may pick a fallback (see [quota-and-fallbacks.md](quota-an
 
 `--effort` is passed as `--effort` (Codex, Antigravity, Grok) or `--variant` (OpenCode). Cursor
 and Kimi relays have no effort flag; Looprch records a warning and runs without it. Every
-Delegate run gets `--timeout` (default 60m, Implementer 2h, Worker 30m).
+Delegate run gets `--timeout` (default 60m, Implementer 2h, Worker 30m). Review rounds get more
+time each round: round n runs with the Reviewer timeout × (1 + 0.5 × (n − 1)), so 60m, 90m and 2h
+by default; the brief states the budget, also for Direct runs.
 
 ## Sessions
 

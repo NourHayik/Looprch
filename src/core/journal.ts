@@ -222,6 +222,7 @@ const QUESTIONS: Record<QuestionKind, string> = {
   context_over_budget: "A packet is above the agent's context budget: continue or use a fallback?",
   host_conflict: "Which agent is the Lead running in?",
   rate_limit_long: "An agent has been rate-limited for a long time: keep waiting or pause?",
+  final_review: "The final review still requests changes: repair and review once more, repair and hand over, or pause?",
 };
 
 const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined || v === null ? "" : JSON.stringify(v));
@@ -252,6 +253,19 @@ function findingsText(d: Record<string, unknown>): string {
   const shown = list.slice(0, 3).map((f) => `${f.id}${f.severity ? ` (${f.severity})` : ""}: ${clip(str(f.summary), 140)}`);
   if (total > shown.length) shown.push(`${total - shown.length} more`);
   return shown.join("; ") || "see the report";
+}
+
+function originsText(d: Record<string, unknown>): string {
+  const counts: Record<string, number> = {};
+  for (const f of arr<{ origin?: string }>(d.findings)) if (f.origin) counts[f.origin] = (counts[f.origin] ?? 0) + 1;
+  return ["unfixed", "regression", "missed"].filter((o) => counts[o]).map((o) => `${counts[o]} ${o}`).join(", ");
+}
+
+function resolutionsText(d: Record<string, unknown>): string {
+  const list = arr<{ id: string; status: string }>(d.resolutions);
+  if (!list.length) return "";
+  const open = list.filter((r) => r.status !== "fixed").map((r) => r.id);
+  return ` Resolutions: ${list.length - open.length} fixed${open.length ? `, not fixed: ${open.join(", ")}` : ""}.`;
 }
 
 /** Workflow progress lines for the Lead to post in the chat; low-level events give none. */
@@ -323,7 +337,7 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
     case "blocked":
       return block("[BLOCKED]", `Reason (${str(d.code)}): ${str(d.reason)}`, ...(d.hint ? [`Fix: ${str(d.hint)}`] : []));
     case "review.skipped":
-      return block("[REVIEW SKIPPED]", `The review limit (${str(d.limit)}) is reached; the final repair goes to handover without another review.`, `Open findings recorded in the handover: ${arr<string>(d.findings).join(", ") || "none"}`);
+      return block("[REVIEW SKIPPED]", `The review limit (${str(d.limit)}) is reached; as you chose, the final repair goes to handover without another review.`, `Open findings recorded in the handover: ${arr<string>(d.findings).join(", ") || "none"}`);
     case "handover.accepted":
       return "[HANDOVER COMPLETE] Handover accepted; its file lists match git.";
     case "phase.closed":
@@ -407,7 +421,8 @@ function issuedLine(e: LrEvent): string {
   const d = e.data;
   const attempt = num(d.attempt) ?? 1;
   const why = MODE_REASONS[str(d.mode_reason) as ModeReason];
-  const details = [`${e.agent}${d.model ? `/${str(d.model)}` : ""}`, str(d.mode), ...(attempt > 1 ? [`attempt ${attempt}`] : []), ...(why ? [why] : [])];
+  const review = num(d.review_round) ? [`review round ${num(d.review_round)} of ${num(d.review_cap) ?? "?"}`, `time budget ${str(d.timeout)}`] : [];
+  const details = [`${e.agent}${d.model ? `/${str(d.model)}` : ""}`, str(d.mode), ...review, ...(attempt > 1 ? [`attempt ${attempt}`] : []), ...(why ? [why] : [])];
   return `${attempt > 1 ? "[RETRY]" : "[TASK START]"} ${e.run_id}: ${roleName(e.role)} (${str(d.task)}) on ${details.filter(Boolean).join(" · ")}`;
 }
 
@@ -436,13 +451,16 @@ function acceptedLine(e: LrEvent): string | null {
     case "implementation":
     case "repair":
       if (decision === "needs_context") return "[CONTEXT NEEDED] The Implementer asked the Planner for missing context.";
-      return `[${task === "implementation" ? "IMPLEMENTATION" : "REPAIR"} COMPLETE] The ${by} finished; ${plural(num(d.touched) ?? 0, "file")} touched.`;
+      return `[${task === "implementation" ? "IMPLEMENTATION" : "REPAIR"} COMPLETE] The ${by} finished; ${plural(num(d.touched) ?? 0, "file")} touched.${resolutionsText(d)}`;
     case "testing":
       return decision === "pass" ? `[TESTING COMPLETE] Tester verdict: pass (${e.agent}).` : block("[TESTING COMPLETE]", `Tester verdict: fail (${plural(total, "failure")}).`, `Failures: ${findingsText(d)}`);
-    case "review":
-      return decision === "approve"
-        ? `[REVIEW COMPLETE] Approved by the ${by}.`
-        : block("[REVIEW COMPLETE]", `Result: Changes requested (${plural(total, "finding")}${severities(d.severities)}).`, `Findings: ${findingsText(d)}`);
+    case "review": {
+      const round = num(d.review_round) ? ` (review round ${num(d.review_round)} of ${num(d.review_cap) ?? "?"})` : "";
+      const origins = originsText(d);
+      if (decision === "approve")
+        return total ? block(`[REVIEW COMPLETE] Approved by the ${by}${round}.`, `Notes (not repaired, listed in the handover): ${findingsText(d)}`) : `[REVIEW COMPLETE] Approved by the ${by}${round}.`;
+      return block(`[REVIEW COMPLETE]${round}`, `Result: Changes requested (${plural(total, "finding")}${severities(d.severities)}).`, ...(origins ? [`Origin: ${origins}`] : []), `Findings: ${findingsText(d)}`);
+    }
     case "handover":
       return null;
     case "adhoc_review":

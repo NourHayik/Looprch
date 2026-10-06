@@ -25,6 +25,11 @@
         "role": { "const": "implementer" },
         "decision": { "enum": ["implemented", "needs_context", "handover_ready"] },
         "files_changed": { "$ref": "#/$defs/paths" },
+        "resolutions": {
+          "description": "Repair after a review: one entry per finding the Delta assigns to the Implementer",
+          "type": "array",
+          "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" } } }
+        },
         "context_request": {
           "type": "object",
           "required": ["question", "reason"],
@@ -77,7 +82,10 @@
         "summary": { "type": "string" },
         "files": { "type": "array", "items": { "type": "string" } },
         "section": { "type": "string" },
-        "requirement_ids": { "type": "array", "items": { "type": "string" } }
+        "requirement_ids": { "type": "array", "items": { "type": "string" } },
+        "fix": { "type": "string", "description": "Reviewer: the acceptance condition of the repair" },
+        "owner": { "enum": ["implementer", "tester"], "description": "Reviewer: the role that fixes it (default implementer)" },
+        "origin": { "enum": ["unfixed", "regression", "missed"], "description": "Reviewer, re-reviews only" }
       }
     },
     "expansion": {

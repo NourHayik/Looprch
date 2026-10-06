@@ -129,6 +129,16 @@ describe("result blocks", () => {
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [low, { ...low, id: "R-2", severity: "medium" }] }).ok, true);
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "approve", findings: [low] }).ok, true);
   });
+  test("review finding fields and implementer resolutions are validated", () => {
+    const f = { id: "R-1", severity: "high", summary: "x", files: ["a.py"], fix: "y", owner: "tester", origin: "missed" };
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [f] }).ok, true);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, owner: "planner" }] }).ok, false);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, origin: "new" }] }).ok, false);
+    const strings = validateResult("reviewer", { role: "reviewer", decision: "approve", manual_gate_reports: [".looprch/reports/t.json"] });
+    assert.match(!strings.ok ? strings.errors.join(";") : "", /needs gate_id and path/);
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "fixed", note: "done" }] }).ok, true);
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "partly" }] }).ok, false);
+  });
   test("handover needs file lists", () => {
     assert.equal(validateResult("implementer", { role: "implementer", decision: "handover_ready" }).ok, false);
     assert.equal(validateResult("implementer", { role: "implementer", decision: "handover_ready", modified_files: [], new_files: ["a"], deleted_files: [] }).ok, true);

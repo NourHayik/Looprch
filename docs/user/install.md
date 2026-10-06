@@ -12,14 +12,14 @@
 
 ```sh
 npx looprch@latest install
-npx looprch@0.3.0 install      # a specific version
+npx looprch@0.4.0 install      # a specific version
 ```
 
 ## From GitHub
 
 ```sh
 npx github:NourHayik/Looprch install            # latest main
-npx github:NourHayik/Looprch#v0.3.0 install     # a tagged version
+npx github:NourHayik/Looprch#v0.4.0 install     # a tagged version
 ```
 
 npm clones the repository, installs the build tools, builds `dist/` through the `prepare`
@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/NourHayik/Looprch/main/install.sh |
 
 `install.sh` only checks the prerequisites above and runs `npx -y <spec> install`, where the spec
 is `looprch@<version>` when the package is on npm and `github:NourHayik/Looprch[#v<version>]`
-otherwise. Set `LOOPRCH_VERSION=0.3.0` to pin a version.
+otherwise. Set `LOOPRCH_VERSION=0.4.0` to pin a version.
 
 ## From a checkout
 

@@ -12,14 +12,14 @@ describe("install / update / rollback / uninstall", () => {
     const s = sandbox();
     const r = runCli(["install", "--from", REPO, "--json"], { env: s.env });
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.json.version, "0.3.0");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.3.0");
-    assert.ok(existsSync(join(s.lrHome, "versions/0.3.0/dist/looprch.mjs")));
+    assert.equal(r.json.version, "0.4.0");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.4.0");
+    assert.ok(existsSync(join(s.lrHome, "versions/0.4.0/dist/looprch.mjs")));
     assert.match(readFileSync(join(s.home, ".local/bin/looprch"), "utf8"), /looprch shim/);
     assert.equal(r.json.on_path, false);
     assert.match(r.json.path_hint, /\.local\/bin/);
     const v = spawnSync(join(s.home, ".local/bin/looprch"), ["version"], { env: { ...process.env, ...s.env }, encoding: "utf8" });
-    assert.match(v.stdout, /looprch 0\.3\.0/);
+    assert.match(v.stdout, /looprch 0\.4\.0/);
     s.cleanup();
   });
 
@@ -34,49 +34,49 @@ describe("install / update / rollback / uninstall", () => {
   test("a manifest mismatch is rejected and current is unchanged", () => {
     const s = sandbox();
     runCli(["install", "--from", REPO], { env: s.env });
-    const bad = makePackage("0.4.0");
+    const bad = makePackage("0.5.0");
     appendFileSync(join(bad, "assets/templates/agents-md-block.md"), "tampered");
     const r = runCli(["install", "--from", bad, "--json"], { env: s.env });
     assert.equal(r.code, 1);
     assert.equal(r.json.error.code, "manifest_mismatch");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.3.0");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.4.0");
     s.cleanup();
   });
 
   test("update switches, keeps the previous version and rollback returns", () => {
     const s = sandbox();
     runCli(["install", "--from", REPO], { env: s.env });
-    const pkg = makePackage("0.4.0");
+    const pkg = makePackage("0.5.0");
     const u = runCli(["update", "--from", pkg, "--yes", "--json"], { env: s.env });
     assert.equal(u.code, 0, u.stdout + u.stderr);
-    assert.equal(u.json.from, "0.3.0");
-    assert.equal(u.json.to, "0.4.0");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.4.0");
-    assert.ok(existsSync(join(s.lrHome, "versions/0.3.0")));
+    assert.equal(u.json.from, "0.4.0");
+    assert.equal(u.json.to, "0.5.0");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.5.0");
+    assert.ok(existsSync(join(s.lrHome, "versions/0.4.0")));
     const rb = runCli(["rollback", "--json"], { env: s.env });
     assert.equal(rb.code, 0);
-    assert.equal(rb.json.to, "0.3.0");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.3.0");
+    assert.equal(rb.json.to, "0.4.0");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.4.0");
     s.cleanup();
   });
 
   test("a failing self-test leaves current unchanged", () => {
     const s = sandbox();
     runCli(["install", "--from", REPO], { env: s.env });
-    const pkg = makePackage("0.5.0", (dir) => appendFileSync(join(dir, "vendor/sev3-toolkit/1.2.0/sev3lib.py"), "\n# tampered\n"));
+    const pkg = makePackage("0.6.0", (dir) => appendFileSync(join(dir, "vendor/sev3-toolkit/1.2.0/sev3lib.py"), "\n# tampered\n"));
     const u = runCli(["update", "--from", pkg, "--yes", "--json"], { env: s.env });
     assert.equal(u.code, 1);
     assert.equal(u.json.error.code, "self_test_failed");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.3.0");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.4.0");
     s.cleanup();
   });
 
   test("prune keeps two versions", () => {
     const s = sandbox();
     runCli(["install", "--from", REPO], { env: s.env });
-    for (const v of ["0.4.0", "0.5.0", "0.6.0"]) assert.equal(runCli(["update", "--from", makePackage(v), "--yes"], { env: s.env }).code, 0);
+    for (const v of ["0.5.0", "0.6.0", "0.7.0"]) assert.equal(runCli(["update", "--from", makePackage(v), "--yes"], { env: s.env }).code, 0);
     const versions = spawnSync("ls", [join(s.lrHome, "versions")], { encoding: "utf8" }).stdout.trim().split("\n");
-    assert.deepEqual(versions, ["0.5.0", "0.6.0"]);
+    assert.deepEqual(versions, ["0.6.0", "0.7.0"]);
     s.cleanup();
   });
 
@@ -133,8 +133,8 @@ describe("install / update / rollback / uninstall", () => {
 
   test("update falls back to the GitHub repository when looprch is not on npm", () => {
     assert.equal(packageSpec(undefined, true), "looprch@latest");
-    assert.equal(packageSpec("0.3.0", true), "looprch@0.3.0");
+    assert.equal(packageSpec("0.4.0", true), "looprch@0.4.0");
     assert.equal(packageSpec(undefined, false), "github:NourHayik/Looprch");
-    assert.equal(packageSpec("0.3.0", false), "github:NourHayik/Looprch#v0.3.0");
+    assert.equal(packageSpec("0.4.0", false), "github:NourHayik/Looprch#v0.4.0");
   });
 });

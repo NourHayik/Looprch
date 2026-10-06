@@ -81,6 +81,63 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     const i = seq.indexOf("reviewer:review");
     assert.deepEqual(seq.slice(i, i + 4), ["reviewer:review", "implementer:repair", "tester:testing", "reviewer:review"]);
     assert.ok(existsSync(join(p.root, ".looprch/phases/P-001/review.r0.md")));
+    const run = (id: string) => readJson(join(p.root, `.looprch/runs/${id}/run.json`));
+    const brief = (id: string) => readFileSync(join(p.root, `.looprch/runs/${id}/brief.md`), "utf8");
+    assert.equal(run("P-001-reviewer-1").timeout, "60m");
+    assert.equal(run("P-001-reviewer-2").timeout, "90m", "the second review round gets more time");
+    assert.match(brief("P-001-reviewer-1"), /Time budget: up to 60m/);
+    const reReview = brief("P-001-reviewer-2");
+    assert.match(reReview, /Repair since your last review: `git diff --stat [0-9a-f]{40} [0-9a-f]{40}`/);
+    assert.match(reReview, /P-001-implementer-2\/final\.md` — Implementer repair report/);
+    assert.match(brief("P-001-implementer-2"), /Report `resolutions` for: R-1\./);
+    assert.match(brief("P-001-implementer-2"), /Fix: Scripted fix condition/);
+    const tester = brief("P-001-tester-2");
+    assert.match(tester, /verify each one with a test that fails without the fix/);
+    assert.match(tester, /P-001-implementer-2\/final\.md/);
+    const repair = events(p).find((e) => e.type === "result.accepted" && e.data.task === "repair");
+    assert.deepEqual(repair.data.resolutions, [{ id: "R-1", status: "fixed" }]);
+    assert.ok(r.progress.some((l) => /review round 2 of 3 · time budget 90m/.test(l)));
+    p.s.cleanup();
+  });
+
+  test("E-3b a test-owned review finding goes to the Tester; the Implementer is skipped", () => {
+    const p = setupProject();
+    p.setScenario([{ role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested", findings: [{ id: "R-7", severity: "medium", summary: "Concurrency test missing", files: ["test_noteapp.py"], fix: "two-connection test", owner: "tester" }] }]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    const seq = r.actions.filter((a) => a.action === "run_role").map((a) => `${a.role}:${a.task}`);
+    const i = seq.indexOf("reviewer:review");
+    assert.deepEqual(seq.slice(i, i + 3), ["reviewer:review", "tester:testing", "reviewer:review"]);
+    assert.match(readFileSync(join(p.root, ".looprch/runs/P-001-tester-2/brief.md"), "utf8"), /R-7 \[medium, owner tester\]: Concurrency test missing/);
+    p.s.cleanup();
+  });
+
+  test("E-3c a repair without resolutions for every assigned finding is re-asked", () => {
+    const p = setupProject();
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "implementer", phase: "P-001", task: "repair", nth: 1, omit_resolutions: true },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    const reask = events(p).find((e) => e.type === "result.rejected" && e.role === "implementer");
+    assert.match(reask.data.errors.join(";"), /resolutions must list every finding assigned to you.*missing: R-1/);
+    assert.equal(calls(p).filter((c) => c.role === "implementer" && c.task === "repair").length, 2);
+    p.s.cleanup();
+  });
+
+  test("E-3d the final review blocks only on high/critical; approval notes reach the handover", () => {
+    const p = setupProject({ config: { "limits.review_rounds": "1" } });
+    const medium = { id: "R-1", severity: "medium", summary: "Edge case", files: ["noteapp.py"] };
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested", findings: [medium] },
+      { role: "reviewer", phase: "P-001", nth: 2, decision: "approve", findings: [{ ...medium, id: "R-9", summary: "Edge case left as a note" }] },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    const rejected = events(p).find((e) => e.type === "result.rejected" && e.role === "reviewer");
+    assert.match(rejected.data.errors.join(";"), /final review: changes_requested needs a high or critical finding/);
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/handover.md"), "utf8"), /## Open review notes \(approved, not repaired\)[\s\S]*R-9 \[medium\]: Edge case left as a note/);
     p.s.cleanup();
   });
 
@@ -102,13 +159,20 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     p.s.cleanup();
   });
 
-  test("E-4b review cap: three change requests, a final repair, then handover without a fourth review", () => {
+  test("E-4b review cap: the final review still requests changes, the user hands over without a fourth review", () => {
     const p = setupProject();
     p.setScenario([{ role: "reviewer", phase: "P-001", decision: "changes_requested" }]);
-    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    const r = drive({ root: p.root, env: p.env, scope: "phase", answers: { final_review: "repair_and_handover" } });
     assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    const asked = r.actions.filter((a) => a.action === "ask_user" && a.kind === "final_review");
+    assert.equal(asked.length, 1, "the user decides after the final review");
+    assert.deepEqual(asked[0].options.map((o: any) => o.id), ["repair_and_review", "repair_and_handover", "pause"]);
     const seq = r.actions.filter((a) => a.action === "run_role").map((a) => `${a.role}:${a.task}`);
     assert.equal(seq.filter((x) => x === "reviewer:review").length, 3);
+    assert.deepEqual(
+      ["P-001-reviewer-1", "P-001-reviewer-2", "P-001-reviewer-3"].map((id) => readJson(join(p.root, `.looprch/runs/${id}/run.json`)).timeout),
+      ["60m", "90m", "2h"],
+    );
     const lastReview = seq.lastIndexOf("reviewer:review");
     assert.deepEqual(seq.slice(lastReview, lastReview + 4), ["reviewer:review", "implementer:repair", "tester:testing", "implementer:handover"]);
     const briefs = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-reviewer-")).sort().map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8"));
@@ -122,15 +186,53 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     p.s.cleanup();
   });
 
-  test("E-4c repair limit after a review: resume continues with the repair, not another review", () => {
+  test("E-4c review repairs do not use the test repair limit; at that limit resume continues with the repair", () => {
     const p = setupProject({ config: { "limits.repair_rounds": "1" } });
-    p.setScenario([{ role: "reviewer", phase: "P-001", decision: "changes_requested" }]);
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "tester", phase: "P-001", nth: 2, decision: "fail" },
+      { role: "tester", phase: "P-001", nth: 3, decision: "fail" },
+    ]);
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r.last.code, "repair_limit");
-    assert.equal(state(p).current.stage, "repairing");
-    cli(p, ["resume", "--note", "Fix R-1"]);
+    const st = state(p).current;
+    assert.equal(st.stage, "repairing");
+    assert.equal(st.review_changes, 1);
+    assert.equal(st.test_repairs, 2);
+    assert.equal(st.round, 3, "one review repair and two test repairs");
+    cli(p, ["resume", "--note", "Fix T-1"]);
     const a = next(p);
     assert.equal(`${a.role}:${a.task}`, "implementer:repair");
+    p.s.cleanup();
+  });
+
+  test("E-4d after the final review the user can allow one more review", () => {
+    const p = setupProject({ config: { "limits.review_rounds": "2" } });
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "reviewer", phase: "P-001", nth: 2, decision: "changes_requested" },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase", answers: { final_review: "repair_and_review" } });
+    assert.equal(r.last.action, "phase_closed");
+    const reviews = r.actions.filter((a) => a.action === "run_role" && a.role === "reviewer");
+    assert.equal(reviews.length, 3);
+    const third = readFileSync(join(p.root, `.looprch/${reviews[2].brief.replace(/^\.looprch\//, "")}`), "utf8");
+    assert.match(third, /Review round 3 of 3\./);
+    assert.match(third, /This is the final review/);
+    assert.ok(!events(p).some((e) => e.type === "review.skipped"));
+    assert.doesNotMatch(readFileSync(join(p.root, ".looprch/phases/P-001/handover.md"), "utf8"), /Open review findings/);
+    p.s.cleanup();
+  });
+
+  test("E-4e pausing at the final review decision asks again after resume", () => {
+    const p = setupProject({ config: { "limits.review_rounds": "1" } });
+    p.setScenario([{ role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" }]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase", answers: { final_review: "pause" } });
+    assert.equal(r.last.action, "paused");
+    cli(p, ["resume"]);
+    const a = next(p);
+    assert.equal(a.action, "ask_user");
+    assert.equal(a.kind, "final_review");
     p.s.cleanup();
   });
 

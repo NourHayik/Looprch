@@ -37,8 +37,8 @@ export interface BriefInput {
   resume: boolean;
   question?: string;
   gateIds: string[];
-  /** Phase review number and the review limit (task review only). */
-  reviewRound?: { n: number; of: number };
+  /** Task review only: round number, review limit, reviewed tree, tree of the previous review, time budget. */
+  reviewRound?: { n: number; of: number; tree: string | null; prevTree: string | null; timeout: string };
 }
 
 const ROLE_FILE: Record<Role, string> = {
@@ -69,9 +69,10 @@ const FIELDS: Record<Role, string> = {
   planner: '"expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]   (only with needs_expansion)',
   plan_debater: '"findings": [{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…"}]',
   implementer:
-    '"files_changed": ["…"]; with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]',
+    '"files_changed": ["…"]; after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed","note":"…"}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]',
   tester: '"tests_written": ["…"], "failures": [{"id":"T-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]',
-  reviewer: '"findings": [{"id":"R-1","severity":"high","summary":"…","files":["…"]}], "manual_gate_reports": []',
+  reviewer:
+    '"findings": [{"id":"R-1","severity":"high","summary":"…","files":["…"],"fix":"…","owner":"implementer|tester","origin":"unfixed|regression|missed (re-reviews only)"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]',
   worker: '"evidence": [{"path":"…","lines":"10-20","note":"…"}]',
 };
 
@@ -113,16 +114,28 @@ function taskText(input: BriefInput): string {
     case "testing":
       lines.push(`Write or update the tests for the declared gates: ${input.gateIds.join(", ") || "(none)"}. Looprch reruns every gate after you finish.`);
       break;
-    case "review":
-      lines.push(`Review the implementation of ${input.phase}: actual code, the phase diff since \`${input.phaseBase ?? "the phase base"}\`, the test report and gates.json.`);
-      if (input.reviewRound) {
-        const { n, of } = input.reviewRound;
-        lines.push(`Review round ${n} of ${of}.`);
-        if (n === 1) lines.push("Report every finding in this one pass; findings held back for a later round waste a repair round.");
-        else lines.push("This is a re-review: verify each prior finding (see Delta) is fixed and check the repair diff for regressions. Do not raise new findings on code the repair did not change unless they are high or critical.");
-        if (n >= of) lines.push("This is the final review: request changes only for high or critical defects; list the rest as notes and approve. There is no review after this one.");
-      }
+    case "review": {
+      const base = input.phaseBase ?? "<phase_base>";
+      lines.push(`Review the implementation of ${input.phase}: actual code, the phase diff, the test report and gates.json.`);
+      const r = input.reviewRound;
+      if (r) {
+        const tree = r.tree ?? "<tree>";
+        lines.push(
+          `Review round ${r.n} of ${r.of}. Time budget: up to ${r.timeout}. Use the time a complete review needs; do not stop early.`,
+          "",
+          `- Whole phase: \`git diff --stat ${base} ${tree}\`, one file: \`git diff ${base} ${tree} -- <path>\`. \`${tree}\` is the tree the gates ran on, including uncommitted and new files.`,
+        );
+        if (r.n > 1 && r.prevTree) lines.push(`- Repair since your last review: \`git diff --stat ${r.prevTree} ${tree}\`.`);
+        lines.push("");
+        if (r.n === 1) lines.push("This is the first review: follow the first-review procedure and checklist and report every finding in this one pass.");
+        else lines.push("This is a re-review: follow the re-review rules. Verify every finding in the Delta against its fix, check the repair diff for regressions, and report anything the earlier review missed.");
+        if (r.n >= r.of)
+          lines.push(
+            "This is the final review. Still put every remaining issue in `findings`. Request changes only for high or critical defects; with only medium or low findings, approve: Looprch records them as open review notes in the handover. If you request changes, the user decides how to continue.",
+          );
+      } else lines.push(`Phase diff: \`git diff --stat ${base}\` plus untracked files (\`git status --short\`).`);
       break;
+    }
     case "adhoc_review":
       lines.push(`Independent review of ${input.phase} requested by the user. Diff source is listed in the inputs.`);
       break;
@@ -142,7 +155,11 @@ function deltaText(d: Delta | null, note: string | null): string {
   const lines = ["", "## Delta", ""];
   if (d) {
     lines.push(d.text);
-    for (const f of d.findings ?? []) lines.push(`- ${f.id}${f.severity ? ` [${f.severity}]` : ""}${f.gate_id ? ` (${f.gate_id})` : ""}: ${f.summary}${f.files?.length ? ` — ${f.files.join(", ")}` : ""}`);
+    for (const f of d.findings ?? []) {
+      const tags = [f.severity, f.owner ? `owner ${f.owner}` : null, f.origin].filter(Boolean).join(", ");
+      lines.push(`- ${f.id}${tags ? ` [${tags}]` : ""}${f.gate_id ? ` (${f.gate_id})` : ""}: ${f.summary}${f.files?.length ? ` — ${f.files.join(", ")}` : ""}`);
+      if (f.fix) lines.push(`  Fix: ${f.fix}`);
+    }
     for (const p of d.paths ?? []) lines.push(`- read: \`${p}\``);
   }
   if (note) lines.push("", `User note: ${note}`);
@@ -195,7 +212,11 @@ export function assembleBrief(input: BriefInput): string {
     role_text: roleText(input.role, input.task),
     root: input.root,
     write_rule: writeRule,
-    session_note: input.resume ? "- You are continuing an earlier session for this phase; re-read inputs only where the Delta requires it." : "",
+    session_note: !input.resume
+      ? ""
+      : input.role === "reviewer" || input.role === "tester"
+        ? "- You are continuing an earlier session for this phase. The code changed since your last run: inspect the current files and the diff, not your memory."
+        : "- You are continuing an earlier session for this phase; re-read inputs only where the Delta requires it.",
     inputs: inputs.join("\n") || "(none)",
     task_text: taskText(input),
     delta: deltaText(input.delta, input.userNote),

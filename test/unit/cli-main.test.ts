@@ -12,7 +12,7 @@ test("version --json has every field", () => {
   const r = runCli(["version", "--json"]);
   assert.equal(r.code, 0);
   for (const k of ["version", "protocol", "toolkit_version", "node", "platform", "home"]) assert.ok(k in r.json, k);
-  assert.equal(r.json.version, "0.3.0");
+  assert.equal(r.json.version, "0.4.0");
   assert.equal(r.json.toolkit_version, "1.2.0");
 });
 

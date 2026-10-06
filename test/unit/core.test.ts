@@ -13,6 +13,7 @@ import { migrate } from "../../src/core/migrations.js";
 import { initialState, loadState, saveState } from "../../src/core/state.js";
 import { projectPaths } from "../../src/core/paths.js";
 import { LrError } from "../../src/core/errors.js";
+import { formatDuration, reviewTimeout } from "../../src/core/clock.js";
 
 const caps: Record<AgentId, AgentCaps> = {
   codex: { direct: true, delegate: true, readOnly: "enforced" },
@@ -192,6 +193,27 @@ describe("core/journal progress lines", () => {
       ev("quota.fallback", { data: {} }),
     ]);
     assert.deepEqual(lines, ["[GATES COMPLETE]\nResult: 1/2 gates passed.\nFailed: G-2 (exit 1)"]);
+  });
+
+  test("review lines name the round, time budget, origins and resolutions", () => {
+    const lines = renderProgress([
+      ev("run.issued", { role: "reviewer", agent: "codex", run_id: "P-003-reviewer-2", data: { task: "review", mode: "delegate", mode_reason: "configured", model: "gpt", attempt: 1, timeout: "90m", review_round: 2, review_cap: 3 } }),
+      ev("result.accepted", {
+        role: "reviewer",
+        agent: "codex",
+        data: { task: "review", decision: "changes_requested", review_round: 2, review_cap: 3, findings_total: 2, severities: { high: 1, medium: 1 }, findings: [{ id: "R-2", severity: "high", origin: "unfixed", summary: "still open" }, { id: "R-11", severity: "medium", origin: "regression", summary: "broke" }] },
+      }),
+      ev("result.accepted", { role: "implementer", agent: "cursor", data: { task: "repair", decision: "implemented", touched: 3, resolutions: [{ id: "R-2", status: "fixed" }, { id: "R-11", status: "not_fixed" }] } }),
+    ]);
+    assert.equal(lines[0], "[TASK START] P-003-reviewer-2: Reviewer (review) on codex/gpt · delegate · review round 2 of 3 · time budget 90m");
+    assert.equal(lines[1], "[REVIEW COMPLETE] (review round 2 of 3)\nResult: Changes requested (2 findings: 1 high, 1 medium).\nOrigin: 1 unfixed, 1 regression\nFindings: R-2 (high): still open; R-11 (medium): broke");
+    assert.equal(lines[2], "[REPAIR COMPLETE] The Implementer on cursor finished; 3 files touched. Resolutions: 1 fixed, not fixed: R-11.");
+  });
+
+  test("review timeouts grow with each round", () => {
+    assert.deepEqual([1, 2, 3, 4].map((n) => reviewTimeout("60m", n)), ["60m", "90m", "2h", "150m"]);
+    assert.equal(reviewTimeout("45s", 2), "68s");
+    assert.equal(formatDuration(5_400_000), "90m");
   });
 
   test("events written before 0.2.0 still render", () => {

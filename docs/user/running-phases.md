@@ -77,9 +77,9 @@ the full list.
 
 ## Repair limit
 
-Test and review repairs share a per-phase limit (`limits.repair_rounds`, default 3). At the limit
-the phase is `blocked: repair limit` with a summary. Continue with one more round and an
-instruction:
+Repairs after failing tests or gates have a per-phase limit (`limits.repair_rounds`, default 3).
+Repairs after a review do not count against it; the review limit bounds them. At the limit the
+phase is `blocked: repair limit` with a summary. Continue with one more round and an instruction:
 
 ```sh
 looprch resume --note "Use the existing parser instead of a new one"
@@ -88,25 +88,49 @@ looprch resume --note "Use the existing parser instead of a new one"
 or raise the limit: `looprch config set limits.repair_rounds 5`. Resuming always continues with
 the repair, never with another review.
 
-## Review limit
+## Review rounds
 
 The Reviewer may request changes at most `limits.review_rounds` times per phase (default 3).
-Looprch tries to get everything right in the first pass:
+That is a defensive maximum, not a target: the first review is built to find everything, the
+second is a safety net, and a third is for exceptional cases.
 
-- The Implementer reviews its own diff against the Reviewer's criteria before it reports, and a
-  repair fixes the root cause and every other occurrence of the same defect.
-- The first review must report every finding at once. `changes_requested` needs at least one
-  `medium`, `high` or `critical` finding; low findings are notes on an approval.
-- A re-review gets the earlier findings. It checks that they are fixed and looks for regressions
-  in the repair. It raises new findings on unchanged code only when they are high or critical.
-- The brief tells the last allowed review that it is the final one. It requests changes only for
-  high or critical defects.
+- **Round 1 is comprehensive.** The Reviewer reads every changed file (the diff includes the
+  Tester's new files), walks every plan step and requirement id, and checks a fixed list:
+  requirements and acceptance criteria, plan compliance, completeness, correctness, integration
+  and cross-phase contracts, regressions, edge cases and error handling, security, performance,
+  maintainability, tests, build and runtime, and production readiness. The report starts with a
+  `## Coverage` section saying what was checked for each area.
+- **Every finding is actionable.** It has a severity, the files, a `fix` (the condition the repair
+  must meet) and an `owner`: the Implementer for application code, the Tester for test code.
+  `changes_requested` needs at least one `medium`, `high` or `critical` finding; low findings
+  are notes on an approval. Every issue goes into the findings list, not only into the prose.
+- **Repairs are accounted for and verified.** The Implementer fixes the findings it owns and
+  reports a `resolutions` entry (`fixed` or `not_fixed`) for each one; a repair without them is
+  re-asked. The Tester then fixes the test-owned findings and verifies every other finding with
+  a test or a command, against the evidence the gates produce. A finding that is not fixed is a
+  Tester failure, so it goes back to the Implementer before the next review. Both get the
+  Implementer's repair report.
+- **Round 2 is the safety net.** The re-review gets the open findings, the repair reports and the
+  repair diff (from the tree it last reviewed to the current one). It checks each finding against
+  its fix, looks for regressions and over-fixes, and reports anything round 1 missed. Every
+  re-review finding says whether it is `unfixed`, a `regression` or `missed`; the progress line
+  `[REVIEW COMPLETE]` shows these counts.
+- **Each round gets more time.** Review round n runs with the Reviewer timeout × (1 + 0.5 ×
+  (n − 1)): with the default 60m that is 60m, 90m and 2h. The brief states the time budget.
+- **The final review** (round `limits.review_rounds`) still lists every remaining issue but
+  requests changes only for high or critical defects. If it approves, its medium and low findings
+  go into `handover.md` under "Open review notes (approved, not repaired)".
 
-If the final review still requests changes, the Implementer makes one final repair, and the Tester
-and gates must pass again. The phase then goes to handover **without another review**. The
-progress line `[REVIEW SKIPPED]` reports this, and `handover.md` gets an
-"Open review findings (final repair, not re-reviewed)" section. Change the limit with
-`looprch config set limits.review_rounds 2`.
+If the final review still requests changes, Looprch stops and asks you (`[DECISION NEEDED]`):
+
+| Option | What happens |
+|---|---|
+| `repair_and_review` | the Implementer repairs, tests and gates run, then one more review (the new final one) |
+| `repair_and_handover` | the Implementer makes a final repair, tests and gates must pass, then the phase goes to handover **without another review**: `[REVIEW SKIPPED]`, and `handover.md` gets an "Open review findings (final repair, not re-reviewed)" section |
+| `pause` | the phase pauses; `looprch resume` asks again |
+
+Reaching this question means the earlier rounds missed something, so look at the review reports
+before you answer. Change the limit with `looprch config set limits.review_rounds 2`.
 
 ## Optional approvals
 

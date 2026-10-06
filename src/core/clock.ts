@@ -21,6 +21,23 @@ export function parseDuration(text: string): number {
   return n * (unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : 1000);
 }
 
+/** Shortest exact duration text for `ms` (whole hours, minutes or seconds, rounded up to a second). */
+export function formatDuration(ms: number): string {
+  const s = Math.ceil(ms / 1000);
+  if (s % 3600 === 0) return `${s / 3600}h`;
+  if (s % 60 === 0) return `${s / 60}m`;
+  return `${s}s`;
+}
+
+export function scaleDuration(text: string, factor: number): string {
+  return formatDuration(parseDuration(text) * factor);
+}
+
+/** Review round n gets 1x, 1.5x, 2x, ... of the base Reviewer timeout. */
+export function reviewTimeout(base: string, round: number): string {
+  return round <= 1 ? base : scaleDuration(base, 1 + 0.5 * (round - 1));
+}
+
 export function isDuration(text: unknown): text is string {
   return typeof text === "string" && /^\d+[hms]$/.test(text);
 }

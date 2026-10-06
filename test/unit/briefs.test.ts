@@ -64,21 +64,47 @@ describe("briefs", () => {
     assert.match(assembleBrief(input({ role: "reviewer", task: "review" })), /You are read-only/);
   });
 
-  test("review rounds: exhaustive first pass, scoped re-review, final review", () => {
-    const review = (n: number, of = 3) => assembleBrief(input({ role: "reviewer", task: "review", reviewRound: { n, of } }));
+  test("review rounds: comprehensive first pass, safety-net re-review, final review", () => {
+    const timeouts = ["60m", "90m", "2h"];
+    const review = (n: number, of = 3, resume = false) =>
+      assembleBrief(input({ role: "reviewer", task: "review", resume, reviewRound: { n, of, tree: "tree3", prevTree: n > 1 ? "tree2" : null, timeout: timeouts[n - 1] ?? "2h" } }));
     const first = review(1);
-    assert.match(first, /Review round 1 of 3\./);
-    assert.match(first, /Report every finding in this one pass/);
-    assert.doesNotMatch(first, /final review/);
-    const second = review(2);
-    assert.match(second, /re-review: verify each prior finding/);
-    assert.doesNotMatch(second, /final review/);
+    assert.match(first, /Review round 1 of 3\. Time budget: up to 60m\./);
+    assert.match(first, /`git diff --stat abc123 tree3`/);
+    assert.match(first, /follow the first-review procedure and checklist and report every finding in this one pass/);
+    assert.doesNotMatch(first, /Repair since your last review/);
+    assert.doesNotMatch(first, /This is the final review/);
+    const second = review(2, 3, true);
+    assert.match(second, /Time budget: up to 90m/);
+    assert.match(second, /Repair since your last review: `git diff --stat tree2 tree3`/);
+    assert.match(second, /report anything the earlier review missed/);
+    assert.doesNotMatch(second, /unless they are high or critical/);
+    assert.match(second, /The code changed since your last run: inspect the current files/);
+    assert.doesNotMatch(second, /This is the final review/);
     const last = review(3);
     assert.match(last, /Review round 3 of 3\./);
-    assert.match(last, /This is the final review: request changes only for high or critical defects/);
+    assert.match(last, /This is the final review\. Still put every remaining issue in `findings`/);
     assert.match(review(1, 1), /This is the final review/);
-    assert.match(roleText("reviewer", "review"), /Be exhaustive on the first review/);
+    const role = roleText("reviewer", "review");
+    for (const s of [/## Coverage/, /Walk every plan step and every requirement id/, /Security: trust boundaries/, /"origin": "missed"/, /`owner`/]) assert.match(role, s);
+    assert.match(roleText("reviewer", "adhoc_review"), /Checklist:/);
     assert.match(roleText("implementer", "repair"), /same defect wherever else it occurs/);
+    assert.match(roleText("implementer", "repair"), /report `resolutions`/);
+  });
+
+  test("output contract shows the object shapes reviewers and implementers must return", () => {
+    const r = assembleBrief(input({ role: "reviewer", task: "review" }));
+    assert.match(r, /"manual_gate_reports": \[\{"gate_id":"…","path":"\.looprch\/reports\/…"\}\]/);
+    assert.match(r, /"owner":"implementer\|tester"/);
+    assert.match(assembleBrief(input({ role: "implementer", task: "repair" })), /"resolutions": \[\{"id":"R-1","status":"fixed\|not_fixed"/);
+  });
+
+  test("delta findings show owner, origin and the fix condition", () => {
+    const b = assembleBrief(
+      input({ role: "tester", task: "testing", delta: { kind: "repair", text: "Verify:", findings: [{ id: "R-7", severity: "medium", owner: "tester", origin: "unfixed", summary: "missing tests", fix: "two-connection test" }] } }),
+    );
+    assert.match(b, /- R-7 \[medium, owner tester, unfixed\]: missing tests/);
+    assert.match(b, /  Fix: two-connection test/);
   });
 
   test("role text picks the task section", () => {

@@ -6,7 +6,7 @@
 // Behaviour keys: status ("completed"|"failed"|"timeout"|"aborted"|"unavailable"), decision,
 // variant (fixture subfolder to copy, default "app"/"tests"), sleep_ms, stderr, no_session,
 // read_only_violation, touch (path to create), usage_error, omit_block, omit_new_file,
-// findings, failures, final (literal final message), kill_self.
+// findings, failures, final (literal final message), kill_self, omit_resolutions.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -119,6 +119,8 @@ switch (role) {
       copyFixture(rule.variant || "app");
       if (decision === "needs_context") extra.context_request = { question: "Which error type?", reason: "Contract unclear" };
       extra.files_changed = [];
+      const owed = /Report `resolutions` for: ([^\n]*?)\.?\n/.exec(brief);
+      if (owed && !rule.omit_resolutions) extra.resolutions = owed[1].split(",").map((id) => id.trim()).filter(Boolean).map((id) => ({ id, status: "fixed", note: "scripted" }));
     }
     break;
   case "tester":
@@ -129,7 +131,8 @@ switch (role) {
     break;
   case "reviewer":
     decision ||= "approve";
-    if (decision === "changes_requested") extra.findings = rule.findings || [{ id: "R-1", severity: "high", summary: "Scripted finding", files: ["noteapp.py"] }];
+    if (decision === "changes_requested") extra.findings = rule.findings || [{ id: "R-1", severity: "high", summary: "Scripted finding", files: ["noteapp.py"], fix: "Scripted fix condition", owner: "implementer" }];
+    else if (rule.findings) extra.findings = rule.findings;
     break;
   default:
     decision ||= "answered";

@@ -34,6 +34,7 @@ export const QUESTION_KINDS = [
   "context_over_budget",
   "host_conflict",
   "rate_limit_long",
+  "final_review",
 ] as const;
 export type QuestionKind = (typeof QUESTION_KINDS)[number];
 
@@ -53,17 +54,27 @@ export interface BlockedFlag {
   at: string;
 }
 
+export const FINDING_OWNERS = ["implementer", "tester"] as const;
+export type FindingOwner = (typeof FINDING_OWNERS)[number];
+export const FINDING_ORIGINS = ["unfixed", "regression", "missed"] as const;
+export type FindingOrigin = (typeof FINDING_ORIGINS)[number];
+
 export interface Finding {
   id: string;
   severity?: string;
   summary: string;
   files?: string[];
   gate_id?: string;
+  /** Review findings: the acceptance condition of the repair. */
+  fix?: string;
+  owner?: FindingOwner;
+  /** Re-review findings only. */
+  origin?: FindingOrigin;
 }
 
 /** Instructions carried into the next brief for a role (repair findings, re-ask, user note). */
 export interface Delta {
-  kind: "reask" | "repair" | "rereview" | "unreviewed" | "expansion" | "context_answer" | "revise" | "retry" | "switch";
+  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "revise" | "retry" | "switch";
   text: string;
   findings?: Finding[];
   paths?: string[];
@@ -95,6 +106,18 @@ export interface Current {
   repair_source: "test" | "review" | null;
   /** Reviews in this phase that requested changes; absent in older state files. */
   review_changes?: number;
+  /** Repairs caused by failing tests or gates (bounded by limits.repair_rounds); absent in older state files. */
+  test_repairs?: number;
+  /** Reviews the user allowed beyond limits.review_rounds (final_review answers). */
+  extra_reviews?: number;
+  /** The final allowed review requested changes; the user decides how to continue. */
+  final_review_pending?: boolean;
+  /** Tree the last review that requested changes looked at (re-reviews diff against it). */
+  reviewed_tree?: string | null;
+  /** final.md of the Implementer repair runs since the last review. */
+  repair_reports?: string[];
+  /** Findings of an approving review (notes), listed in the handover. */
+  review_notes?: Finding[];
   expansion_round: number;
   reask_count: number;
   extra_rounds: number;
@@ -211,6 +234,12 @@ export function newCurrent(phase: string, title: string, at: string): Current {
     review_findings: [],
     repair_source: null,
     review_changes: 0,
+    test_repairs: 0,
+    extra_reviews: 0,
+    final_review_pending: false,
+    reviewed_tree: null,
+    repair_reports: [],
+    review_notes: [],
     expansion_round: 0,
     reask_count: 0,
     extra_rounds: 0,

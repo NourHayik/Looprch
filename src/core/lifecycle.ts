@@ -5,7 +5,7 @@ import type { AgentId, Approval, Assignment, Config } from "./config.js";
 import { loadConfig, reviewRounds } from "./config.js";
 import type { Action, RunRoleAction } from "./actions.js";
 import { assembleBrief, writeBrief, type Task } from "./briefs.js";
-import { now, nowIso } from "./clock.js";
+import { now, nowIso, reviewTimeout } from "./clock.js";
 import { LrError, errorMessage } from "./errors.js";
 import { ensureDir, writeFileAtomic } from "./fsx.js";
 import { appendEvent, type EventInput } from "./journal.js";
@@ -215,6 +215,7 @@ function step(e: Engine): Action | null {
     case "gating":
       return { ...base(e, `Run the ${phase.gates.length} declared gate(s) of ${c.phase}`), action: "run_gates", command: ["looprch", "gates", "run", "--phase", c.phase] };
     case "reviewing": {
+      if (c.final_review_pending) return finalReviewQuestion(e);
       const snap = snapshotTree(e.root);
       if (snap !== c.snapshots.gates) {
         ev(e, { type: "warning", data: { message: "Working tree changed after the gates ran; re-running gates" } });
@@ -431,6 +432,7 @@ function runInputs(e: Engine, role: Role, task: Task, phase: PhaseDef): { path: 
     case "testing":
       list.push(plan);
       if (c.round > 0) list.push(["gates.json", "earlier gate runs"]);
+      if (c.repair_source === "review") list.push(["review.md", "review findings to verify"]);
       break;
     case "review":
       list.push(plan, ["test-report.md", "Tester report"], ["gates.json", "machine evidence (bound to the reviewed snapshot)"]);
@@ -447,6 +449,8 @@ function runInputs(e: Engine, role: Role, task: Task, phase: PhaseDef): { path: 
     }
   }
   const out = existingInputs(e, list);
+  if (task === "testing" || task === "review")
+    for (const p of c.repair_reports ?? []) out.push({ path: p, why: "Implementer repair report: how each finding was fixed (resolutions, limitations)" });
   for (const a of c.addenda) out.push({ path: a, why: "Planner answer to an Implementer context request" });
   if (task === "planning" || task === "implementation" || task === "review") out.push(...closedHandovers(e, phase));
   if (role === "tester" || role === "reviewer") {
@@ -551,6 +555,9 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
     for (const r of previousFinals(e, role)) inputs.push({ path: r, why: "an earlier final message for this role" });
   }
   const readOnly = READ_ONLY_ROLES.includes(role);
+  const baseTimeout = chosen.timeout ?? e.cfg.roles[role]?.timeout ?? "60m";
+  const reviewN = task === "review" ? (c.review_changes ?? 0) + 1 : 0;
+  const timeout = task === "review" ? reviewTimeout(baseTimeout, reviewN) : baseTimeout;
   const brief = assembleBrief({
     root: e.root,
     runId,
@@ -567,7 +574,7 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
     userNote: c.user_note,
     resume: !!sessionId,
     gateIds: phase.gates.map((g) => g.id),
-    ...(task === "review" ? { reviewRound: { n: (c.review_changes ?? 0) + 1, of: reviewRounds(e.cfg) } } : {}),
+    ...(task === "review" ? { reviewRound: { n: reviewN, of: reviewCap(e), tree: c.snapshots.gates, prevTree: reviewN > 1 ? (c.reviewed_tree ?? null) : null, timeout } } : {}),
   });
   const briefPath = writeBrief(e.root, runId, brief);
   c.user_note = null;
@@ -583,7 +590,7 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
     agent: chosen.agent,
     model: chosen.model,
     effort: chosen.effort ?? null,
-    timeout: chosen.timeout ?? e.cfg.roles[role]?.timeout ?? "60m",
+    timeout,
     session_in: sessionId,
     resume: !!sessionId,
     attempt,
@@ -608,7 +615,13 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
   st.runs_index[runId] = { role, status: "issued", attempt, side: false };
   c.active_run = runId;
   c.last_agent[role] = chosen.agent;
-  ev(e, { type: "run.issued", role, agent: chosen.agent, run_id: runId, data: { task, mode: effective!, mode_reason: modeReason, model: chosen.model, session: sessionId, packet_bytes: packet?.bytes ?? null, attempt } });
+  ev(e, {
+    type: "run.issued",
+    role,
+    agent: chosen.agent,
+    run_id: runId,
+    data: { task, mode: effective!, mode_reason: modeReason, model: chosen.model, session: sessionId, packet_bytes: packet?.bytes ?? null, attempt, timeout, ...(reviewN ? { review_round: reviewN, review_cap: reviewCap(e) } : {}) },
+  });
   if (modeReason === "d05_auto_delegate") ev(e, { type: "mode.auto_delegate", role, agent: chosen.agent, run_id: runId, data: { host: e.host } });
   return runRoleAction(e, run);
 }
@@ -833,6 +846,13 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessage: string, se
     else if (!TASK_DECISIONS[run.task].includes(v.result.decision)) errors = [`decision "${v.result.decision}" is not valid for this task; use one of ${TASK_DECISIONS[run.task].join(", ")}`];
     else result = v.result;
   }
+  if (result && !run.side) {
+    const why = phaseRuleViolation(e, run, result);
+    if (why) {
+      errors = [why];
+      result = null;
+    }
+  }
   if (!result) {
     finish("rejected");
     ev(e, { type: "result.rejected", role: run.role, agent: run.agent, run_id: run.run_id, data: { errors } });
@@ -861,7 +881,9 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessage: string, se
       task: run.task,
       findings_total: reported.length,
       severities: severityCounts(reported),
-      findings: reported.slice(0, 5).map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), summary: f.summary.slice(0, 300) })),
+      findings: reported.map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), ...(f.owner ? { owner: f.owner } : {}), ...(f.origin ? { origin: f.origin } : {}), summary: f.summary.slice(0, 300) })),
+      ...(run.task === "review" && !run.side ? { review_round: (st.current?.review_changes ?? 0) + 1, review_cap: reviewCap(e) } : {}),
+      ...(result.resolutions ? { resolutions: result.resolutions.map((r) => ({ id: r.id, status: r.status })) } : {}),
     },
   });
   if (run.side) return { status: "accepted", decision: result.decision, artifact: writeSideOutput(e, run, ex.artifact, result), errors: [] };
@@ -872,6 +894,22 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessage: string, se
   delete c.deltas[run.role];
   const artifact = applyResult(e, run, result, ex.artifact, priorDelta ?? null);
   return { status: "accepted", decision: result.decision, artifact, errors: [] };
+}
+
+/** Checks that need the phase state: resolutions cover the assigned findings; the final review blocks only on high/critical. */
+function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult): string | null {
+  const c = e.st.current;
+  if (!c) return null;
+  if (run.task === "repair" && r.decision === "implemented" && c.repair_source === "review") {
+    const got = new Set((r.resolutions ?? []).map((x) => x.id));
+    const missing = (c.deltas.implementer?.findings ?? []).map((f) => f.id).filter((id) => !got.has(id));
+    if (missing.length) return `resolutions must list every finding assigned to you ({"id","status":"fixed|not_fixed","note"}); missing: ${missing.join(", ")}`;
+  }
+  if (run.task === "review" && r.decision === "changes_requested" && (c.review_changes ?? 0) + 1 >= reviewCap(e)) {
+    if (!(r.findings ?? []).some((f) => f.severity === "high" || f.severity === "critical"))
+      return "this is the final review: changes_requested needs a high or critical finding; approve and keep the medium and low findings in findings";
+  }
+  return null;
 }
 
 function writeSideOutput(e: Engine, run: RunRecord, artifact: string, result: RoleResult): string {
@@ -896,37 +934,88 @@ function executeExpansions(e: Engine, role: Role, requests: ExpansionRequest[]):
   return paths;
 }
 
-function canRepair(e: Engine): boolean {
-  const c = cur(e);
-  return c.round < e.cfg.limits.repair_rounds + c.extra_rounds;
+/** Reviews that may request changes in this phase: the configured limit plus the user's extra reviews. */
+function reviewCap(e: Engine): number {
+  return reviewRounds(e.cfg) + (e.st.current?.extra_reviews ?? 0);
 }
 
 function reviewsExhausted(e: Engine): boolean {
-  return (cur(e).review_changes ?? 0) >= reviewRounds(e.cfg);
+  return (cur(e).review_changes ?? 0) >= reviewCap(e);
+}
+
+function findingSummary(list: Finding[]): string {
+  return list.map((f) => f.summary).join("; ");
 }
 
 /**
- * Enter the repair stage with the findings. At the repair limit it blocks there, so
+ * Enter the repair stage with the findings. Review repairs are bounded by the review limit;
+ * test/gate repairs by limits.repair_rounds. At that limit it blocks in the repair stage, so
  * `looprch resume` (one extra round) continues with the repair, never with another review.
  */
 function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[], paths: string[], summary: string): void {
   const c = cur(e);
-  const allowed = canRepair(e);
-  const used = c.round;
-  const finalRepair = reviewsExhausted(e);
   c.round++;
   c.repair_source = source;
-  const why = source === "test" ? "tests/gates failed" : "review requested changes";
-  const text = finalRepair
-    ? `Final repair round ${c.round} (${why}). The review limit is reached: there is no further review, so fix every finding completely, including the same defect anywhere else in the phase diff:`
-    : `Repair round ${c.round} (${why}). Fix every problem below completely, including the same defect anywhere else in the phase diff:`;
-  c.deltas.implementer = { kind: "repair", text, findings, paths };
-  if (source === "test") c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer repaired the problems below. Re-verify, keep the tests honest and update them only where they were wrong.`, findings };
-  else c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer addressed review findings. Re-verify the affected behavior and gates.`, findings };
-  if (source === "review" && !finalRepair)
-    c.deltas.reviewer = { kind: "rereview", text: "Your previous review requested the changes below. Verify each one is fixed and check the repair diff for regressions. Do not raise new findings on code the repair did not change unless they are high or critical.", findings, paths };
-  transition(e, "repairing");
-  if (!allowed) block(e, "repair_limit", `Repair limit reached (${used} round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
+  if (source === "test") {
+    const used = c.test_repairs ?? 0;
+    c.test_repairs = used + 1;
+    c.deltas.implementer = { kind: "repair", text: `Repair round ${c.round} (tests/gates failed). Fix every problem below completely, including the same defect anywhere else in the phase diff:`, findings, paths };
+    c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer repaired the problems below. Re-verify, keep the tests honest and update them only where they were wrong.`, findings };
+    transition(e, "repairing");
+    if (used >= e.cfg.limits.repair_rounds + c.extra_rounds)
+      block(e, "repair_limit", `Repair limit reached (${used} test/gate repair round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
+    return;
+  }
+  const finalRepair = reviewsExhausted(e);
+  const mine = findings.filter((f) => f.owner !== "tester");
+  const theirs = findings.filter((f) => f.owner === "tester");
+  const head = finalRepair
+    ? `Final repair round ${c.round} (review requested changes). There is no further review, so fix every finding below completely`
+    : `Repair round ${c.round} (review requested changes). Fix every finding below completely`;
+  const text = [
+    `${head}: meet its Fix condition, fix the root cause and the same defect anywhere else in the phase diff, and check that the fix works with the evidence the declared gates produce. Report \`resolutions\` for: ${mine.map((f) => f.id).join(", ")}.`,
+    ...(theirs.length ? [`The Tester fixes these test-owned findings after you; do not change tests for them: ${theirs.map((f) => `${f.id} (${f.summary})`).join("; ")}`] : []),
+  ].join("\n");
+  if (mine.length) c.deltas.implementer = { kind: "repair", text, findings: mine, paths };
+  else delete c.deltas.implementer;
+  c.deltas.tester = {
+    kind: "repair",
+    text: `Round ${c.round}: review findings. Fix the findings owned by the Tester (you own the test code). For every other finding, the Implementer's repair report in your inputs says how it was fixed: verify each one with a test that fails without the fix, or with a read-only command, against the evidence the declared gates actually produce. If a finding is not fixed, return \`fail\` with a failure whose id is the finding id. In your report, list every finding id with how you verified it.`,
+    findings,
+    paths,
+  };
+  if (finalRepair) delete c.deltas.reviewer;
+  else c.deltas.reviewer = { kind: "rereview", text: "Your previous review requested the changes below. Follow the re-review rules: verify each one against its fix, check the repair diff for regressions and report what the earlier review missed.", findings, paths };
+  transition(e, mine.length ? "repairing" : "testing");
+}
+
+function finalReviewQuestion(e: Engine): Action {
+  const c = cur(e);
+  const qid = `final_review-${c.phase}-${c.review_changes ?? 0}`;
+  const serious = c.review_findings.filter((f) => f.severity === "high" || f.severity === "critical").length;
+  return ask(
+    e,
+    "final_review",
+    qid,
+    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s), ${serious} high or critical (see .looprch/phases/${c.phase}/review.md). Normally the first review finds everything, so this needs your decision. How should Looprch continue?`,
+    [
+      { id: "repair_and_review", label: "Repair, then run one more review" },
+      { id: "repair_and_handover", label: "Repair, then hand over without another review (findings listed in handover.md)" },
+      { id: "pause", label: "Pause" },
+    ],
+  );
+}
+
+function answerFinalReview(e: Engine, qid: string, option: string): void {
+  const c = cur(e);
+  if (option === "pause") {
+    delete e.st.answers[qid];
+    e.st.flags.paused = { reason: "paused at the final review decision; run looprch resume to decide", at: nowIso() };
+    return;
+  }
+  c.final_review_pending = false;
+  if (option === "repair_and_review") c.extra_reviews = (c.extra_reviews ?? 0) + 1;
+  repairOrBlock(e, "review", c.review_findings, [rel(e, phaseFile(e, "review.md"))], findingSummary(c.review_findings));
 }
 
 /** After passing gates: review, or go straight to handover once the review limit is reached. */
@@ -939,7 +1028,7 @@ function afterGatesPassed(e: Engine): void {
   c.snapshots.review = null;
   delete c.deltas.reviewer;
   c.deltas.implementer = { kind: "unreviewed", text: "The final review requested the changes below; they were repaired but not reviewed again. In Limitations, say for each finding whether it is fully fixed.", findings: c.review_findings };
-  ev(e, { type: "review.skipped", data: { limit: reviewRounds(e.cfg), findings: c.review_findings.map((f) => f.id) } });
+  ev(e, { type: "review.skipped", data: { limit: reviewCap(e), findings: c.review_findings.map((f) => f.id) } });
   transition(e, "handover");
 }
 
@@ -993,7 +1082,9 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       const n = c.addenda.length + 1;
       const path = writeArtifact(e, `plan-addendum-${n}.md`, artifact);
       c.addenda.push(path);
-      c.deltas.implementer = { kind: "context_answer", text: `The Planner answered your context request (${c.context_request?.question ?? ""}). Continue.`, paths: [path] };
+      const prior = c.deltas.implementer;
+      const answered = `The Planner answered your context request (${c.context_request?.question ?? ""}). Continue.`;
+      c.deltas.implementer = { ...prior, kind: "context_answer", text: prior?.text ? `${answered}\n\n${prior.text}` : answered, paths: [...(prior?.paths ?? []), path] };
       c.context_request = null;
       return path;
     }
@@ -1006,6 +1097,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         return null;
       }
       recordImplementer(e, run);
+      if (run.task === "repair") c.repair_reports = [...(c.repair_reports ?? []), rel(e, join(projectPaths(e.root).run(run.run_id), "final.md"))];
       e.st.pending_checkpoint = { label: run.task === "implementation" ? "implementation" : `repair ${c.round}` };
       transition(e, "testing");
       return null;
@@ -1021,14 +1113,20 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
     case "review": {
       const path = writeArtifact(e, "review.md", artifact);
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
+      const findings: Finding[] = (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary, files: f.files, ...(f.fix ? { fix: f.fix } : {}), ...(f.owner ? { owner: f.owner } : {}), ...(f.origin ? { origin: f.origin } : {}) }));
+      c.repair_reports = [];
       if (r.decision === "approve") {
         c.snapshots.review = c.snapshots.gates;
         c.review_findings = [];
+        c.review_notes = findings;
+        if (findings.length) c.deltas.implementer = { kind: "notes", text: "The Reviewer approved with the notes below; they are not repaired. List each one in Limitations.", findings };
         transition(e, "handover");
       } else {
-        c.review_findings = (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary, files: f.files }));
+        c.review_findings = findings;
         c.review_changes = (c.review_changes ?? 0) + 1;
-        repairOrBlock(e, "review", c.review_findings, [path], c.review_findings.map((f) => f.summary).join("; "));
+        c.reviewed_tree = c.snapshots.gates;
+        if (reviewsExhausted(e)) c.final_review_pending = true;
+        else repairOrBlock(e, "review", findings, [path], findingSummary(findings));
       }
       return path;
     }
@@ -1045,16 +1143,25 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
 }
 
 function unreviewedSection(e: Engine, findings: Finding[]): string {
-  const lines = findings.map((f) => `- ${f.id}${f.severity ? ` [${f.severity}]` : ""}: ${f.summary}${f.files?.length ? ` (${f.files.join(", ")})` : ""}`);
+  const lines = findingLines(findings);
   return [
     "",
     "## Open review findings (final repair, not re-reviewed)",
     "",
-    `Review ${cur(e).review_changes ?? 0} of ${reviewRounds(e.cfg)} requested these changes. The Implementer repaired them and the gates passed, but no further review ran (limits.review_rounds):`,
+    `Review ${cur(e).review_changes ?? 0} of ${reviewCap(e)} requested these changes. The Implementer repaired them and the gates passed, but no further review ran (you chose to hand over):`,
     "",
     ...(lines.length ? lines : ["- (none recorded)"]),
     "",
   ].join("\n");
+}
+
+function findingLines(findings: Finding[]): string[] {
+  return findings.map((f) => `- ${f.id}${f.severity ? ` [${f.severity}]` : ""}: ${f.summary}${f.files?.length ? ` (${f.files.join(", ")})` : ""}`);
+}
+
+function notesSection(findings: Finding[]): string {
+  if (!findings.length) return "";
+  return ["", "## Open review notes (approved, not repaired)", "", "The approving review listed these findings without requesting changes:", "", ...findingLines(findings), ""].join("\n");
 }
 
 function sameSet(a: string[], b: string[]): boolean {
@@ -1100,7 +1207,7 @@ function acceptHandover(e: Engine, run: RunRecord, r: RoleResult, artifact: stri
       const g = gates.runs.find((x) => x.gate_run_id === id)!;
       return `- ${g.gate_id}: ${g.gate_run_id}, ${g.ok ? "passed" : "failed"}, tests ${g.evidence.tests}, evidence sha256 ${g.evidence.sha256 ?? "-"}, tree ${g.snapshot_tree}`;
     }).join("\n"))
-    .replace("{{unreviewed}}", reviewsExhausted(e) ? unreviewedSection(e, c.review_findings) : "");
+    .replace("{{unreviewed}}", `${c.snapshots.review ? "" : unreviewedSection(e, c.review_findings)}${notesSection(c.review_notes ?? [])}`);
   const path = writeArtifact(e, "handover.md", `${artifact.trim()}\n${extra}`);
   c.snapshots.handover = snap;
   ev(e, { type: "handover.accepted", run_id: run.run_id, data: { files: actual } });
@@ -1384,6 +1491,9 @@ export function answer(e: Engine, qid: string, option: string, text: string | nu
     case "rate_limit_long":
       if (option === "keep_waiting") e.st.quota.rate_limit_wait_started = nowIso();
       else e.st.flags.paused = { reason: "paused after a long rate limit", at: nowIso() };
+      break;
+    case "final_review":
+      answerFinalReview(e, qid, option);
       break;
     default: {
       const never: never = q.kind;

@@ -1,6 +1,8 @@
 import { isNonEmptyString, isObject, isStringArray, oneOf } from "./validate.js";
+import { FINDING_ORIGINS, FINDING_OWNERS, type FindingOrigin, type FindingOwner } from "./state.js";
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
+export const RESOLUTION_STATUSES = ["fixed", "not_fixed"] as const;
 
 export const DECISIONS = {
   planner: ["plan_ready", "plan_final", "needs_expansion", "context_answer"],
@@ -24,7 +26,8 @@ export interface RoleResult {
   role: ResultRole;
   decision: string;
   run_id?: string;
-  findings?: { id: string; severity?: string; summary: string; files?: string[]; section?: string; requirement_ids?: string[] }[];
+  findings?: { id: string; severity?: string; summary: string; files?: string[]; section?: string; requirement_ids?: string[]; fix?: string; owner?: FindingOwner; origin?: FindingOrigin }[];
+  resolutions?: { id: string; status: (typeof RESOLUTION_STATUSES)[number]; note?: string }[];
   failures?: { id: string; gate_id?: string; summary: string; files?: string[] }[];
   expansion_requests?: ExpansionRequest[];
   files_changed?: string[];
@@ -84,6 +87,16 @@ const finding = (requireFiles: boolean) => (x: unknown) => {
   if (!isNonEmptyString(x.summary)) return "summary is required";
   if (x.severity !== undefined && !oneOf(x.severity, SEVERITIES)) return `severity must be one of ${SEVERITIES.join(", ")}`;
   if (requireFiles && !isStringArray(x.files)) return "files must be a list of paths";
+  if (x.fix !== undefined && typeof x.fix !== "string") return "fix must be a string";
+  if (x.owner !== undefined && !oneOf(x.owner, FINDING_OWNERS)) return `owner must be one of ${FINDING_OWNERS.join(", ")}`;
+  if (x.origin !== undefined && !oneOf(x.origin, FINDING_ORIGINS)) return `origin must be one of ${FINDING_ORIGINS.join(", ")}`;
+  return null;
+};
+
+const resolution = (x: unknown) => {
+  if (!isObject(x) || !isNonEmptyString(x.id)) return "needs id";
+  if (!oneOf(x.status, RESOLUTION_STATUSES)) return `status must be one of ${RESOLUTION_STATUSES.join(", ")}`;
+  if (x.note !== undefined && typeof x.note !== "string") return "note must be a string";
   return null;
 };
 
@@ -113,6 +126,7 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       break;
     case "implementer":
       checkList(errors, raw, "files_changed", strings);
+      checkList(errors, raw, "resolutions", resolution);
       if (raw.decision === "needs_context") {
         const cr = raw.context_request;
         if (!isObject(cr) || !isNonEmptyString(cr.question) || !isNonEmptyString(cr.reason)) errors.push("needs_context requires context_request {question, reason}");

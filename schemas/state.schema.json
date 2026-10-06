@@ -34,6 +34,12 @@
         "tester_verdict": { "enum": [null, "pass", "fail"] },
         "repair_source": { "enum": [null, "test", "review"] },
         "review_changes": { "type": "integer", "minimum": 0 },
+        "test_repairs": { "type": "integer", "minimum": 0, "description": "Repairs after failing tests or gates (limits.repair_rounds); absent in older files" },
+        "extra_reviews": { "type": "integer", "minimum": 0, "description": "Reviews the user allowed beyond limits.review_rounds" },
+        "final_review_pending": { "type": "boolean", "description": "The final allowed review requested changes; a final_review question decides" },
+        "reviewed_tree": { "type": ["string", "null"], "description": "Tree of the last review that requested changes" },
+        "repair_reports": { "type": "array", "items": { "type": "string" }, "description": "final.md of Implementer repairs since the last review" },
+        "review_notes": { "type": "array", "description": "Findings of an approving review, listed in the handover" },
         "snapshots": {
           "type": "object",
           "properties": { "gates": { "type": ["string", "null"] }, "review": { "type": ["string", "null"] }, "handover": { "type": ["string", "null"] } }
@@ -54,7 +60,7 @@
       "type": ["object", "null"],
       "required": ["id", "kind", "question", "options"],
       "properties": {
-        "kind": { "enum": ["commit_baseline", "ack_gates", "approve_plan", "approve_merge", "context_over_budget", "host_conflict", "rate_limit_long"] }
+        "kind": { "enum": ["commit_baseline", "ack_gates", "approve_plan", "approve_merge", "context_over_budget", "host_conflict", "rate_limit_long", "final_review"] }
       }
     },
     "sessions": {

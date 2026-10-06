@@ -8,7 +8,7 @@ hint; after fixing the cause run `looprch resume` (or `/lr-resume`).
 | `spec_changed` | The SEV3 package no longer matches the recorded fingerprint, or fails verification | Never edit generated files. Reseal an authorized amendment with SEV3, then `looprch init discover --accept-fingerprint`. Closed evidence is never rewritten. |
 | `toolkit_untrusted` | `phases/tools/` differs from Looprch's SEV3 toolkit 1.2.0 | Restore the original toolkit files |
 | `not_initialized` | The package was never discovered | `/lr-init` or `looprch init discover` |
-| `repair_limit` | Repairs reached `limits.repair_rounds` | `looprch resume --note "<instruction>"` (one more round) or raise the limit |
+| `repair_limit` | Repairs after failing tests or gates reached `limits.repair_rounds` (review repairs do not count) | `looprch resume --note "<instruction>"` (one more round) or raise the limit |
 | `merge_conflict` | The phase branch conflicts with the base branch | Resolve as in [handover-and-git.md](handover-and-git.md) |
 | `head_mismatch` | You switched branches or committed during a phase | `git switch looprch/P-NNN`, undo foreign commits yourself |
 | `dirty_tree` | Uncommitted files before a phase | Commit or remove them |

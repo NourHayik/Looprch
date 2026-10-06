@@ -2,6 +2,63 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.4.0 - 2026-10-06
+
+Driven by the CoreBit P-001 test run on 0.3.0. It used three review rounds and still ended
+blocked with a high finding open. Round 1 missed four defects that existed at the
+implementation commit. Rounds 2 and 3 mostly found incomplete fixes and a regression from an
+over-fix. A test-owned finding went to the Implementer, who may not edit tests.
+
+### Changed
+
+- The first review is a structured, comprehensive pass. The Reviewer reads every changed file,
+  walks every plan step and requirement id, and checks a fixed list: requirements, plan
+  compliance, completeness, correctness, integration, regressions, edge cases and error
+  handling, security, performance, maintainability, tests, build and runtime, and production
+  readiness. The report starts with a `## Coverage` section. The brief gives the exact diff
+  command against the tree the gates ran on, which includes the Tester's new files.
+- Re-reviews are a safety net, not a narrow check. They get the repair diff (from the last
+  reviewed tree), the open findings and the Implementer's repair reports. They report unfixed
+  findings, regressions and anything round 1 missed, and tag each with
+  `origin: unfixed | regression | missed`. The rules "no new findings on unchanged code unless
+  high or critical" and "do not reopen settled code" are gone.
+- Review findings carry `fix` (the condition the repair must meet) and `owner` (`implementer` or
+  `tester`). The Implementer gets only its own findings. Findings owned by the Tester go to the
+  Tester, and when every finding is test-owned the Implementer run is skipped.
+- A repair after a review must return `resolutions` (`fixed` or `not_fixed`) for every finding
+  assigned to it; a missing one is re-asked. The Tester verifies every finding with a test or a
+  command against the evidence the gates produce, and returns `fail` with the finding id when
+  one is not fixed. The Tester and the next Reviewer get the repair reports.
+- `limits.repair_rounds` now counts only repairs after failing tests or gates. Review repairs are
+  bounded by `limits.review_rounds`, so a test failure can no longer use up the repair that
+  follows a review.
+- When the final allowed review still requests changes, Looprch asks you (`final_review`):
+  `repair_and_review` (one more review), `repair_and_handover` (the 0.3.0 path: a final
+  repair, then handover without review, with the open findings listed), or `pause`. Before,
+  the unreviewed handover happened automatically.
+- The final review lists every remaining issue in `findings`. Its `changes_requested` needs a
+  high or critical finding (else the re-ask). An approval's findings are listed in
+  `handover.md` as "Open review notes (approved, not repaired)".
+- Review rounds get more time each round: round n runs with the Reviewer timeout × (1 + 0.5 ×
+  (n − 1)), 60m, 90m and 2h by default, passed as the relay `--timeout`. The brief states the
+  time budget.
+
+### Fixed
+
+- The reviewer output contract showed `"manual_gate_reports": []` without the
+  `{gate_id, path}` shape. Reviews that listed plain paths were rejected; in CoreBit that cost a
+  10-minute first review and discarded an 11-finding ad hoc review.
+- `result.accepted` kept only the first five findings; it now keeps all of them, with `owner`
+  and `origin`, plus `review_round`, `review_cap` and `resolutions`. `run.issued` gains
+  `timeout`, `review_round` and `review_cap`. `[REVIEW COMPLETE]` shows the round and the origin
+  counts, and `[REPAIR COMPLETE]` shows the resolutions.
+- A Planner context answer during a repair no longer drops the repair's findings from the
+  Implementer's delta.
+- Resumed Reviewer and Tester sessions are told to inspect the current code, not to re-read
+  only what the delta names.
+- `looprch status --json` adds `current.test_repairs` and `current.final_review_pending`;
+  `review_cap` includes the extra reviews you allowed.
+
 ## 0.3.0 - 2026-10-05
 
 ### Fixed

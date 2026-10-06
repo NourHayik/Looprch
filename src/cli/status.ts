@@ -25,7 +25,20 @@ export function buildStatus(root: string) {
     version: VERSION,
     project: { id: manifest?.project.id ?? cfg.project.id, title: manifest?.project.title ?? null },
     spec: { package_fingerprint: st.spec.package_fingerprint, phases_total: manifest?.phases.length ?? st.spec.phases_total, phases_closed: closed },
-    current: c ? { phase: c.phase, title: c.title, index, stage: c.stage, round: c.round, cap: cfg.limits.repair_rounds + c.extra_rounds, review_changes: c.review_changes ?? 0, review_cap: reviewRounds(cfg) } : null,
+    current: c
+      ? {
+          phase: c.phase,
+          title: c.title,
+          index,
+          stage: c.stage,
+          round: c.round,
+          cap: cfg.limits.repair_rounds + c.extra_rounds,
+          test_repairs: c.test_repairs ?? 0,
+          review_changes: c.review_changes ?? 0,
+          review_cap: reviewRounds(cfg) + (c.extra_reviews ?? 0),
+          final_review_pending: !!c.final_review_pending,
+        }
+      : null,
     active: run
       ? { run_id: run.run_id, role: run.role, agent: run.agent, mode: run.mode, effective_mode: run.effective_mode, mode_reason: run.mode_reason, session_id: run.session_in, started_at: run.started_at, elapsed_s: Math.round((now() - Date.parse(run.started_at)) / 1000), status: run.status }
       : null,
@@ -39,7 +52,7 @@ export function buildStatus(root: string) {
 
 export function humanStatus(s: ReturnType<typeof buildStatus>): string {
   const lines = [`Looprch ${s.version} · project ${s.project.id ?? "?"} · spec ${s.spec.phases_total} phases (fingerprint ${s.spec.package_fingerprint?.slice(0, 4) ?? "—"}…) · ${s.spec.phases_closed} closed`];
-  if (s.current) lines.push(`Phase ${s.current.phase} (${s.current.index}/${s.spec.phases_total}) "${s.current.title}"  stage: ${s.current.stage}  repair round ${s.current.round}/${s.current.cap}  review changes ${s.current.review_changes}/${s.current.review_cap}`);
+  if (s.current) lines.push(`Phase ${s.current.phase} (${s.current.index}/${s.spec.phases_total}) "${s.current.title}"  stage: ${s.current.stage}  repair round ${s.current.round} (test/gate repairs ${s.current.test_repairs}/${s.current.cap})  review changes ${s.current.review_changes}/${s.current.review_cap}`);
   else lines.push(s.project_status === "done" ? "Project complete." : "No phase in progress.");
   if (s.active) {
     const mode = s.active.mode_reason === "d05_auto_delegate" ? "direct→delegate" : s.active.effective_mode;

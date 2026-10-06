@@ -25,7 +25,8 @@ JSON Schemas in `schemas/` document the files; the CLI validates with hand-writt
 `protocol`, `core_version_at_phase_start`, `scope`, `spec` (package and source fingerprints,
 manifest hash, phases_total), `git` (`base_branch`, `baseline_commit`), `current` (phase, stage,
 round, close_step, phase_base, branch, last_commit, active_run, tester verdict and failures,
-review findings, `review_changes` (reviews that requested changes; absent in older files), deltas per role, assignment index per role, sessions-related counters,
+review findings, `review_changes` (reviews that requested changes; absent in older files), `test_repairs`,
+`extra_reviews`, `final_review_pending`, `reviewed_tree`, `repair_reports`, `review_notes` (all optional), deltas per role, assignment index per role, sessions-related counters,
 snapshots), `flags` (`pause_requested`, `paused`, `waiting`, `blocked`), `pending_question`,
 `answers`, `pending_checkpoint`, `runs_index`, `sessions` (key `P-NNN/<role>/<agent>`),
 `assignments_history`, `quota.exhausted` (rate-limit marks), `phases.<id>` (status, tag,
@@ -40,9 +41,9 @@ fields: `role`, `decision`, optional `run_id`. Decisions per role:
 |---|---|---|
 | planner | `plan_ready`, `plan_final`, `needs_expansion`, `context_answer` | `expansion_requests[]` |
 | plan_debater | `findings`, `no_findings`, `needs_expansion` | `findings[{id, severity, summary, section}]` |
-| implementer | `implemented`, `needs_context`, `handover_ready` | `files_changed[]`; `context_request{question, reason}`; handover: `modified_files`, `new_files`, `deleted_files`, `renamed[{from,to}]`, `verification_ids`, `limitations` |
+| implementer | `implemented`, `needs_context`, `handover_ready` | `files_changed[]`; after a review: `resolutions[{id, status: fixed or not_fixed, note}]`, one per finding in the delta; `context_request{question, reason}`; handover: `modified_files`, `new_files`, `deleted_files`, `renamed[{from,to}]`, `verification_ids`, `limitations` |
 | tester | `pass`, `fail` | `tests_written[]`, `failures[{id, gate_id, summary}]`, `manual_gate_reports[{gate_id, path}]` |
-| reviewer | `approve`, `changes_requested` | `findings[{id, severity, summary, files[]}]`, `manual_gate_reports[]` |
+| reviewer | `approve`, `changes_requested` | `findings[{id, severity, summary, files[], fix, owner: implementer or tester, origin: unfixed, regression or missed (re-reviews)}]`, `manual_gate_reports[{gate_id, path}]` |
 | worker | `answered` | `evidence[{path, lines, note}]` |
 
 Expansion request: `{kind: "document"|"phase", id, question, reason}`.

@@ -28,7 +28,7 @@
     "run_id": { "type": ["string", "null"] },
     "data": {
       "type": "object",
-      "description": "Free-form per type. Fields read by the progress lines: stage.entered {round}; run.issued {task, mode, mode_reason, model, attempt}; result.accepted {decision, touched, task, findings_total, severities, findings[{id, severity?, summary}]}; assignment.changed {from, to, reason}; blocked {code, reason, hint}."
+      "description": "Free-form per type. Fields read by the progress lines: stage.entered {round}; run.issued {task, mode, mode_reason, model, attempt, timeout, review_round?, review_cap?}; result.accepted {decision, touched, task, findings_total, severities, findings[{id, severity?, owner?, origin?, summary}] (all findings), review_round?, review_cap?, resolutions?[{id, status}]}; assignment.changed {from, to, reason}; blocked {code, reason, hint}."
     }
   }
 }

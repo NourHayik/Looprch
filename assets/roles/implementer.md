@@ -18,8 +18,16 @@ Decision: `implemented` (or `needs_context`).
 ### Task: repair
 Fix the problems in the Delta (failing gates, tester failures or review findings). Fix the root
 cause, and fix the same defect wherever else it occurs in the phase diff, not only at the cited
-line. Leave no finding partly fixed. Change nothing unrelated. Decision: `implemented` (or
-`needs_context`).
+line. Leave no finding partly fixed. Change nothing unrelated.
+
+- A review finding's `Fix:` line is the condition your repair must meet. Meet it without
+  over-correcting: check that the fixed code still works with the real inputs and with the
+  evidence the declared gates produce (run the affected command on that evidence).
+- Findings owned by the Tester are listed for your information; do not change tests for them.
+- After review findings, report `resolutions`: one entry per finding assigned to you, `fixed`
+  or `not_fixed` with a note on what you changed or why it is not fixed.
+
+Decision: `implemented` (or `needs_context`).
 
 ### Task: handover
 Write the final handover for this phase, with these headings: Phase Summary; Key Decisions &
