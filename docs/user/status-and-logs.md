@@ -16,6 +16,7 @@ Lead posts them unchanged.
 | `[PLAN UPDATE START]` / `[PLAN UPDATED]` | the Planner updates the plan after the debate or your revision |
 | `[CONTRACT]`, `[CONTRACT AMENDED]` | the phase contract was accepted (obligations, deferrals, dispositioned debate findings) / amended by a repair design or context answer |
 | `[REPAIR DESIGN]`, `[DESIGN DEBATE COMPLETE]` | the Planner designs a repair before the Implementer runs (and why); the Plan Debater's challenge of that design |
+| `[PACKAGE DONE]` | the Implementer finished a work package or repair package (n of N); a checkpoint commit follows |
 | `[EVIDENCE MISMATCH]` | Tester verifications that no passing testcase of the gate run backs; the Tester gets the round |
 | `[IMPLEMENTATION …]`, `[TESTING …]`, `[GATES …]`, `[REVIEW …]`, `[REPAIR …]`, `[HANDOVER …]`, `[CLOSING START]` | each stage starts and completes, with the verdict, findings or failed gates |
 | `[REVIEW COMPLETE]` | the review round (n of N), the decision, the findings by severity and, for re-reviews, how many are `unfixed`, `regression` or `missed`; an approval lists its notes |

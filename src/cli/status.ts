@@ -40,6 +40,7 @@ export function buildStatus(root: string) {
           final_review_pending: !!c.final_review_pending,
           contract_revision: loadContract(root, c.phase)?.revision ?? null,
           design: c.design ?? null,
+          work: c.work ? { kind: c.work.kind, total: c.work.items.length, done: c.work.done, next: c.work.items.find((w) => !c.work!.done.includes(w.id))?.id ?? null } : null,
           finding_ledger: c.finding_ledger ?? {},
         }
       : null,

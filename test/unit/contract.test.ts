@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { amend, contractProblems, dispositionProblems, newContract, unresolvedByAmendment, type ContractBody } from "../../src/core/contract.js";
+import { amend, contractProblems, dispositionProblems, newContract, orderWork, repairPackageProblems, unresolvedByAmendment, workPackageProblems, type ContractBody, type WorkItem } from "../../src/core/contract.js";
 import { junitCases } from "../../src/gates/junit.js";
 import { unittestCases } from "../../src/gates/unittest.js";
 import { staleClaims, unbackedTests, type CaseIndex } from "../../src/gates/runner.js";
@@ -65,6 +65,37 @@ describe("phase contract", () => {
     assert.equal(n.obligations[0]!.statement, "new");
     assert.deepEqual(unresolvedByAmendment(a, ["R-4", "R-8"]), ["R-8"]);
     assert.deepEqual(unresolvedByAmendment(undefined, ["R-4"]), ["R-4"]);
+  });
+});
+
+describe("work and repair packages", () => {
+  const w = (id: string, extra: Partial<WorkItem> = {}): WorkItem => ({ id, title: id, obligations: ["O-1"], files: [{ path: "a.php", action: "create", content: "class A { public function f(): int }" }], steps: ["write A"], done_when: ["php -l a.php"], ...extra });
+
+  test("every obligation is implemented by a package; ids, dependencies and order are checked", () => {
+    const obs = [ob("O-1", ["R-1.01"]), ob("O-2", ["R-1.02"])];
+    assert.match(workPackageProblems([w("WP-1")], obs).join(";"), /none for: O-2/);
+    assert.match(workPackageProblems([w("WP-1", { obligations: ["O-9"] })], obs).join(";"), /unknown obligations or deferrals: O-9/);
+    assert.match(workPackageProblems([w("WP-1"), w("WP-1", { obligations: ["O-2"] })], obs).join(";"), /duplicate work package ids: WP-1/);
+    assert.match(workPackageProblems([w("WP-1", { depends_on: ["WP-2"] }), w("WP-2", { depends_on: ["WP-1"], obligations: ["O-2"] })], obs).join(";"), /cycle/);
+    assert.match(workPackageProblems([w("WP-1", { depends_on: ["WP-7"] }), w("WP-2", { obligations: ["O-2"] })], obs).join(";"), /unknown work packages: WP-1 -> WP-7/);
+    assert.match(workPackageProblems([], obs).join(";"), /no work_packages/);
+    assert.deepEqual(workPackageProblems([w("WP-1")], obs, false), [], "an amendment's new obligations are built by repair packages");
+    assert.deepEqual(orderWork([w("WP-2", { depends_on: ["WP-1"] }), w("WP-1"), w("WP-3")])!.map((x) => x.id), ["WP-1", "WP-2", "WP-3"]);
+  });
+
+  test("retiring an obligation removes it from the packages; packages may build deferral interims or scaffolding", () => {
+    const c = newContract("P-001", { obligations: [ob("O-1", ["R-1.01"]), ob("O-2", ["R-1.02"])], deferrals: [{ id: "X-1", requirements: [], what: "auth", to_phase: "P-002", interim: "dependency_unavailable" }], work_packages: [w("WP-1"), w("WP-2", { obligations: ["O-2", "X-1"] }), w("WP-0", { obligations: [] })] });
+    const n = amend(c, { obligations: [ob("O-3", ["R-1.02"], { resolves: ["R-4"] })], retire: ["O-2"] });
+    assert.deepEqual(n.work_packages!.find((x) => x.id === "WP-2")!.obligations, ["X-1"]);
+    assert.deepEqual(contractProblems(n, ctx, { amended: true }), []);
+    assert.match(contractProblems(n, ctx).join(";"), /none for: O-3/, "outside a repair design a new obligation needs a package");
+  });
+
+  test("a repair design repairs every finding in bounded packages", () => {
+    assert.match(repairPackageProblems([w("RP-1", { findings: ["R-1", "R-9"] })], ["R-1"]).join(";"), /may only repair this design's findings .*not: R-9/);
+    assert.match(repairPackageProblems(undefined, ["R-1"]).join(";"), /returns "repair_packages"/);
+    assert.match(repairPackageProblems([w("RP-1", { findings: ["R-1"] })], ["R-1", "R-2"]).join(";"), /missing: R-2/);
+    assert.deepEqual(repairPackageProblems([w("RP-1", { findings: ["R-1"] }), w("RP-2", { findings: ["R-2"], depends_on: ["RP-1"] })], ["R-1", "R-2"]), []);
   });
 });
 

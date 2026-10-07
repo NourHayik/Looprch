@@ -106,10 +106,18 @@ missing failure behavior and deferrals, places where the Implementer would have 
 design). The synthesis must accept or reject every debate finding; an accepted one names the
 obligations that carry it.
 
+The contract also carries **work packages**: the Planner's breakdown of the implementation into
+small, ordered packages, each with the exact files (and what each contains: classes, signatures,
+schemas, keys), ordered steps and `done_when` checks. Every obligation must be built by a package,
+and no package may exceed 25 steps or 25 files. The idea is that the expensive model you
+configure as Planner makes every design decision, and a cheaper model as Implementer executes
+them literally.
+
 The same contract is the input of every later role:
 
-- the **Implementer** implements each obligation at its enforcement point and asks the Planner
-  (`needs_context`) instead of inventing a design the contract leaves open;
+- the **Implementer** runs once per work package, in order (`[PACKAGE DONE]`, one checkpoint
+  commit per package), and asks the Planner (`needs_context`) instead of inventing a design a
+  package leaves open;
 - the **Tester** returns a verification for every obligation and deferral, naming the testcases
   that prove it. After the gates, Looprch matches those names against the passing testcases of
   its own gate run; a claim it cannot match goes back to the Tester alone (`[EVIDENCE MISMATCH]`);
@@ -152,11 +160,12 @@ second is a safety net, and a third is for exceptional cases.
   A testcase that already passed on the tree where the Reviewer found the defect cannot prove the
   repair, so Looprch requires at least one cited testcase per check that did not pass there; a
   claim without one goes back to the Tester (`[EVIDENCE MISMATCH]`).
-- **Design defects go to the Planner, not to another patch.** Before the Implementer repairs, the
-  Planner writes a repair design (an amendment of the contract that defines the enforcement) for
-  findings the Reviewer traced to the plan, a missed requirement or a later phase, for findings a
-  re-review reports as `unfixed`, for `related` findings, and for `needs_design` resolutions
-  (`[REPAIR DESIGN]`). When the design covers a high or critical finding, or replaces a design
+- **The Planner designs every repair; the Implementer executes it.** Before the Implementer
+  repairs, the Planner turns the review's findings into repair packages (at most 5 findings
+  each, with exact files, steps and checks), and the Implementer executes one package per run
+  (`[REPAIR DESIGN]`, `[PACKAGE DONE]`). For findings the Reviewer traced to the plan, a missed
+  requirement or a later phase, findings a re-review reports as `unfixed`, `related` findings,
+  and `needs_design` resolutions, the design also amends the contract to define the enforcement. When the design covers a high or critical finding, or replaces a design
   that did not hold, the Plan Debater challenges it once (`[DESIGN DEBATE COMPLETE]`) and the
   Planner revises it if needed. The Implementer, Tester and Reviewer get the amended contract.
 - **Round 2 is the safety net.** The re-review gets the open findings, the repair reports and the

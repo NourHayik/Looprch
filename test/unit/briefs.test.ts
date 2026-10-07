@@ -99,7 +99,11 @@ describe("briefs", () => {
     assert.match(roleText("tester", "testing"), /cover at least one input class the Implementer did not mention/);
     assert.match(roleText("tester", "testing"), /Derive the test obligations from `contract\.json`/);
     assert.match(roleText("planner", "planning"), /Enforceability/);
-    assert.match(roleText("planner", "context_answer"), /return `contract_amendment`/);
+    assert.match(roleText("planner", "context_answer"), /`contract_amendment` with the obligation/);
+    assert.match(roleText("planner", "context_answer"), /Return `repair_packages`/);
+    assert.match(roleText("planner", "planning"), /written for a literal executor/);
+    assert.match(roleText("plan_debater", "debate"), /Executability: the Implementer is a cheaper model/);
+    assert.match(roleText("implementer", "implementation"), /You execute the Planner's design; you do not redesign it/);
     assert.match(roleText("plan_debater", "design_review"), /### Task: design_review/);
   });
 

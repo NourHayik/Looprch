@@ -6,6 +6,8 @@ import { ensureDir, readJsonIfExists, writeFileAtomic, writeJsonAtomic } from ".
 import { nowIso } from "../core/clock.js";
 import { projectPaths } from "../core/paths.js";
 import { sha256 } from "../install/manifest.js";
+import { VERSION } from "../core/constants.js";
+import { head } from "../git/git.js";
 import type { Gate, PhaseDef } from "../sev3/manifest.js";
 import { junitCases, parseJunit } from "./junit.js";
 import { parseUnittest, unittestCases, type Counts, type TestCase } from "./unittest.js";
@@ -18,7 +20,14 @@ export interface GateRun {
   argv: string[];
   cwd: ".";
   started_at: string;
+  finished_at?: string;
   duration_ms: number;
+  /** The program that ran the gate and judged its evidence. */
+  runner?: { name: "looprch"; version: string };
+  /** HEAD when the gate ran; `snapshot_tree` also covers uncommitted and new files. */
+  head_commit?: string | null;
+  stdout_sha256?: string;
+  stderr_sha256?: string;
   exit_code: number | null;
   signal: string | null;
   timed_out: boolean;
@@ -52,7 +61,7 @@ function tail(text: string, lines = 20): string {
 }
 
 /** Run one gate as argv (no shell) and judge it by machine evidence only. */
-export function runGate(root: string, cfg: Config, gate: Gate, gateRunId: string, outDir: string, snapshot: string, manualReport: string | null): GateRun {
+export function runGate(root: string, cfg: Config, gate: Gate, gateRunId: string, outDir: string, snapshot: string, manualReport: string | null, headCommit: string | null = null): GateRun {
   const started = Date.now();
   const startedAt = nowIso();
   const timeoutMs = (gate.timeout_seconds ?? 300) * 1000;
@@ -78,7 +87,12 @@ export function runGate(root: string, cfg: Config, gate: Gate, gateRunId: string
     argv: gate.command,
     cwd: ".",
     started_at: startedAt,
+    finished_at: nowIso(),
     duration_ms: Date.now() - started,
+    runner: { name: "looprch", version: VERSION },
+    head_commit: headCommit,
+    stdout_sha256: sha256(stdout),
+    stderr_sha256: sha256(stderr),
     exit_code: res.status,
     signal: res.signal ?? null,
     timed_out: timedOut,
@@ -279,9 +293,10 @@ export function runPhaseGates(root: string, cfg: Config, phase: PhaseDef, snapsh
   ensureDir(outDir);
   const runs: GateRun[] = [];
   let n = file.runs.length;
+  const headCommit = head(root);
   for (const gate of phase.gates) {
     n++;
-    const r = runGate(root, cfg, gate, `${phase.id}-g-${n}`, outDir, snapshot, manualReports[gate.id] ?? null);
+    const r = runGate(root, cfg, gate, `${phase.id}-g-${n}`, outDir, snapshot, manualReports[gate.id] ?? null, headCommit);
     runs.push(r);
     file.runs.push(r);
     file.latest[gate.id] = r.gate_run_id;

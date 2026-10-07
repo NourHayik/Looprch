@@ -9,7 +9,8 @@
 // findings, failures, final (literal final message), kill_self, omit_resolutions; contract keys:
 // drop_requirement, deferrals, contract, omit_dispositions, omit_amendment, contract_amendment,
 // no_change, resolution_status, verifications, omit_verifications, bad_tests, raw_findings,
-// omit_prior, prior, contract_review, omit_contract_review, no_test_change, omit_checks.
+// omit_prior, prior, contract_review, omit_contract_review, no_test_change, omit_checks,
+// two_packages, omit_work_packages, omit_repair_packages, package_size, omit_work_package.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -135,6 +136,8 @@ function defaultContract() {
   };
   if (rule.drop_requirement) contract.obligations[0].requirements = contract.obligations[0].requirements.filter((r) => r !== rule.drop_requirement);
   if (rule.deferrals) contract.deferrals = rule.deferrals;
+  const wp = (id, deps) => ({ id, title: `Package ${id}`, depends_on: deps, obligations: ["O-1"], files: [{ path: "noteapp.py", action: "create", content: "validate_id(s) -> str" }], steps: ["Write noteapp.py as specified."], done_when: ["python3 -c 'import noteapp' exits 0"] });
+  contract.work_packages = rule.omit_work_packages ? [] : rule.two_packages ? [wp("WP-1", []), wp("WP-2", ["WP-1"])] : [wp("WP-1", [])];
   return rule.contract ?? contract;
 }
 function testRef() {
@@ -158,10 +161,17 @@ switch (role) {
     }
     if (task === "context_answer") {
       const design = /Repair design for ([^:]+):/.exec(brief);
+      const amendFor = /\nFor ([^\n]+?), also amend the contract/.exec(brief);
       if (rule.contract_amendment) extra.contract_amendment = rule.contract_amendment;
-      else if (design && !rule.omit_amendment) {
-        const ids = design[1].split(",").map((s) => s.trim()).filter(Boolean);
+      else if (design && amendFor && !rule.omit_amendment) {
+        const ids = amendFor[1].split(",").map((s) => s.trim()).filter(Boolean);
         extra.contract_amendment = { obligations: [{ id: `O-D${nth}`, requirements: manifestPhase.requirements.slice(0, 1), kind: "invariant", statement: `Repair rule for ${ids.join(", ")}`, enforcement: "noteapp.py validate_id", verify: "negative and variant cases", gates: manifestPhase.gates.map((g) => g.id).slice(0, 1), resolves: ids }] };
+      }
+      if (design && !rule.omit_repair_packages) {
+        const ids = design[1].split(",").map((s) => s.trim()).filter(Boolean);
+        const groups = [];
+        for (let i = 0; i < ids.length; i += rule.package_size ?? 5) groups.push(ids.slice(i, i + (rule.package_size ?? 5)));
+        extra.repair_packages = groups.map((g, i) => ({ id: `RP-${i + 1}`, title: `Repair ${g.join(", ")}`, findings: g, files: [{ path: "noteapp.py", action: "modify", content: "validate_id rejects the cases in the Checks" }], steps: [`Repair ${g.join(", ")} in noteapp.py.`], done_when: ["python3 -m unittest exits 0"] }));
       }
     }
     break;
@@ -181,6 +191,8 @@ switch (role) {
       copyFixture(rule.variant || "app");
       if (decision === "needs_context") extra.context_request = { question: "Which error type?", reason: "Contract unclear" };
       extra.files_changed = [];
+      const pkg = /Report "work_package": "([^"]+)"/.exec(brief);
+      if (pkg && !rule.omit_work_package) extra.work_package = pkg[1];
       const owed = /Report `resolutions` for: ([^\n]*?)\.?\n/.exec(brief);
       if (owed && !rule.omit_resolutions) {
         const app = join(cwd, "noteapp.py");

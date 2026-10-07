@@ -2,6 +2,52 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.6.0 - 2026-10-07
+
+Looprch's goal is that an expensive model (the Planner, Plan Debater and Reviewer) makes every
+design decision and judges the result, while a cheaper model executes the plan literally. On
+0.5.x, the fresh CoreBit P-001 run did the opposite.
+
+The plan was an architect's brief: 48 lines of prose and 30 obligations whose `enforcement`
+averaged 9 words ("one complete module-graph and source-ownership validator driven by the module
+registry"). It named no classes, signatures, schemas or algorithms. One Implementer run then
+designed and wrote 382 files in 47 minutes, and round 1 found 27 of 43 contract items unmet.
+One repair run then received 25 serious findings with about 90 acceptance checks; 3 were fixed.
+
+Protocol 3: a phase in progress pauses until `looprch resume`.
+
+### Added
+
+- **Work packages.** The contract carries `work_packages`: ordered packages with `depends_on`,
+  the obligations they build, every file with what it contains afterwards (classes, signatures,
+  schemas, keys), concrete steps, and `done_when` checks the Implementer runs itself. Looprch
+  checks that:
+  - every obligation is built by a package;
+  - ids are unique and the order is acyclic;
+  - no package exceeds 25 steps or 25 files.
+
+  The Planner writes for a literal executor: two cheap models following a package should write
+  the same code. The Plan Debater has a new executability check.
+- **One package per Implementer run.** The Implementer gets one package per run, in order, and
+  names it in `work_package`. Each package ends with a checkpoint commit ("implementation WP-n")
+  and the progress line `[PACKAGE DONE]`.
+- **Repair packages for every review round.** Before the Implementer repairs, the Planner turns
+  the findings into `repair_packages`: at most 5 findings each, with exact files, steps and
+  checks. The Implementer executes one package per run and resolves only that package's
+  findings. A contract amendment is still required for design causes, repeated findings and
+  `needs_design`. The Plan Debater challenges a design only when it amends the contract for a
+  high or critical finding, or replaces a design that did not hold.
+- `status --json` shows `current.work`.
+- Gate provenance in `gates.json`. CoreBit's spec needs, for each gate, the runner and its
+  version, start and finish time, source commit and output hashes; Looprch did not record all of
+  them (CoreBit finding R-19). Each gate run now adds `finished_at`, `runner` (`looprch` and its
+  version), `head_commit`, `stdout_sha256` and `stderr_sha256`.
+
+### Fixed
+
+- A `needs_design` resolution could not open a design for a finding that already had the
+  round's design; it now gets one design per round.
+
 ## 0.5.3 - 2026-10-07
 
 ### Fixed

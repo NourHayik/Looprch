@@ -1,6 +1,6 @@
 import { isNonEmptyString, isObject, isStringArray, oneOf } from "./validate.js";
 import { FINDING_CAUSES, FINDING_ORIGINS, FINDING_OWNERS, type FindingCause, type FindingOrigin, type FindingOwner, type Verification } from "./state.js";
-import { amendmentShapeErrors, contractShapeErrors, dispositionShape, type Amendment, type ContractBody, type Disposition } from "./contract.js";
+import { amendmentShapeErrors, contractShapeErrors, dispositionShape, workItemShape, type Amendment, type ContractBody, type Disposition, type WorkItem } from "./contract.js";
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export const RESOLUTION_STATUSES = ["fixed", "not_fixed", "needs_design"] as const;
@@ -73,6 +73,8 @@ export interface RoleResult {
   contract?: ContractBody;
   debate_dispositions?: Disposition[];
   contract_amendment?: Amendment;
+  repair_packages?: WorkItem[];
+  work_package?: string;
   verifications?: Verification[];
   contract_review?: { id: string; status: "met" | "not_met"; note?: string }[];
   prior?: { id: string; status: "fixed" | "unfixed"; note?: string; failed_checks?: number[] }[];
@@ -184,6 +186,7 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       if (raw.decision === "plan_ready" || raw.decision === "plan_final") errors.push(...contractShapeErrors(raw.contract));
       checkList(errors, raw, "debate_dispositions", dispositionShape);
       if (raw.contract_amendment !== undefined) errors.push(...amendmentShapeErrors(raw.contract_amendment));
+      checkList(errors, raw, "repair_packages", workItemShape("repair"));
       break;
     case "plan_debater":
       checkList(errors, raw, "findings", finding(false));
@@ -192,6 +195,7 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
     case "implementer":
       checkList(errors, raw, "files_changed", strings);
       checkList(errors, raw, "resolutions", resolution);
+      if (raw.work_package !== undefined && !isNonEmptyString(raw.work_package)) errors.push("work_package must be the id of the package you implemented");
       if (raw.decision === "needs_context") {
         const cr = raw.context_request;
         if (!isObject(cr) || !isNonEmptyString(cr.question) || !isNonEmptyString(cr.reason)) errors.push("needs_context requires context_request {question, reason}");

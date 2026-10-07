@@ -15,7 +15,7 @@ import { preflightChecks } from "./preflight.js";
 import { extractResultBlock, validateResult, type ExpansionRequest, type RoleResult } from "./results.js";
 import { loadRun, relayOutDir, saveRun, type RunRecord, type RunStatus } from "./runs.js";
 import { loadState, markPhaseStart, newCurrent, saveState, type AssignmentChange, type Delta, type DesignState, type Finding, type LedgerEntry, type QuestionKind, type Scope, type Stage, type State, type Verification } from "./state.js";
-import { amend, contractIds, contractProblems, dispositionProblems, incomingDeferrals, loadContract, newContract, saveContract, unresolvedByAmendment, type Contract } from "./contract.js";
+import { amend, contractIds, contractProblems, dispositionProblems, incomingDeferrals, loadContract, newContract, orderWork, repairPackageProblems, saveContract, unresolvedByAmendment, WORK_LIMITS, type Contract, type WorkItem } from "./contract.js";
 import { adapterFor } from "../agents/index.js";
 import { readRelayResult } from "../delegate/result.js";
 import { forgetSession, recordSession, resumableSession, sessionKey } from "../delegate/sessions.js";
@@ -204,6 +204,9 @@ function step(e: Engine): Action | null {
         if (!ans) return ask(e, "approve_plan", qid, `Approve the plan for ${c.phase} "${c.title}"? Read .looprch/phases/${c.phase}/plan.md first.`, [{ id: "approve", label: "Approve and implement" }, { id: "revise", label: "Ask the Planner to revise (add --text)" }]);
       }
       st.pending_checkpoint = { label: "plan approved" };
+      const wps = loadContract(e.root, c.phase)?.work_packages;
+      const ordered = wps?.length ? orderWork(wps) : null;
+      c.work = ordered ? { kind: "implementation", items: ordered, done: [] } : null;
       transition(e, "implementing");
       return null;
     }
@@ -565,7 +568,8 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
   const runId = `${c.phase}-${role}-${seq}`;
   const attempt = (c.attempts[role] ?? 0) + 1;
   const inputs = runInputs(e, role, task, phase);
-  const delta = c.deltas[role] ?? null;
+  const item = role === "implementer" && (task === "implementation" || task === "repair") ? currentWorkItem(c) : null;
+  const delta = item ? workDelta(c, c.deltas[role] ?? null, item) : (c.deltas[role] ?? null);
   if (delta?.kind === "switch" && c.phase_base) {
     const diffPath = join(projectPaths(e.root).run(runId), "diff.patch");
     writeFileAtomic(diffPath, gitOk(e.root, ["diff", c.phase_base, "HEAD"]));
@@ -642,6 +646,36 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
   });
   if (modeReason === "d05_auto_delegate") ev(e, { type: "mode.auto_delegate", role, agent: chosen.agent, run_id: runId, data: { host: e.host } });
   return runRoleAction(e, run);
+}
+
+/** The next package of the work queue, or null when there is none (or no queue). */
+function currentWorkItem(c: NonNullable<State["current"]>): WorkItem | null {
+  return c.work?.items.find((w) => !c.work!.done.includes(w.id)) ?? null;
+}
+
+/** The Implementer's delta for one package: the package rendered as literal instructions, plus the round's findings it repairs. */
+function workDelta(c: NonNullable<State["current"]>, base: Delta | null, item: WorkItem): Delta {
+  const work = c.work!;
+  const n = work.items.findIndex((w) => w.id === item.id) + 1;
+  const what = work.kind === "implementation" ? "Work package" : "Repair package";
+  const lines = [
+    `## ${what} ${item.id} (${n} of ${work.items.length}): ${item.title}`,
+    "",
+    `Implement exactly this package and nothing else; the other packages run separately${work.done.length ? ` (done: ${work.done.join(", ")})` : ""}. Follow the steps in order and literally. If a step is ambiguous, contradicts the code or the contract, or needs a decision the package does not make, do not guess: return needs_context (or needs_design for a finding) and say which step. Report "work_package": "${item.id}" in the result block.`,
+    "",
+    ...(item.obligations?.length ? [`Obligations: ${item.obligations.join(", ")}`] : []),
+    ...(item.findings?.length ? [`Findings: ${item.findings.join(", ")}`] : []),
+    "Files:",
+    ...item.files.map((f) => `- ${f.action} \`${f.path}\`: ${f.content}`),
+    "Steps:",
+    ...item.steps.map((s, i) => `${i + 1}. ${s}`),
+    "Done when (check each yourself before you report implemented):",
+    ...item.done_when.map((d) => `- ${d}`),
+  ];
+  const own = new Set(item.findings ?? []);
+  const findings = item.findings ? (base?.findings ?? []).filter((f) => own.has(f.id)) : base?.findings;
+  const text = base?.text ? `${base.text}\n\n${lines.join("\n")}` : lines.join("\n");
+  return { ...(base ?? {}), kind: base?.kind ?? "repair", text: item.findings ? text.replace(/Report `resolutions` for: [^\n]*/, `Report \`resolutions\` for: ${item.findings.join(", ")}.`) : text, ...(findings ? { findings } : {}) };
 }
 
 function previousFinals(e: Engine, role: Role): string[] {
@@ -975,18 +1009,27 @@ function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: 
       break;
     }
     case "context_answer": {
-      if (contract && r.contract_amendment) problems.push(...contractProblems(amend(contract, r.contract_amendment), contractContext(e)).map((p) => `after the amendment: ${p}`));
+      const building = c.work?.kind === "implementation" && !c.design;
+      if (contract && r.contract_amendment)
+        problems.push(...contractProblems(amend(contract, r.contract_amendment), contractContext(e), { amended: !building }).map((p) => `after the amendment: ${p}${building ? " (during implementation, a new obligation needs a work package in contract_amendment.work_packages)" : ""}`));
       if (c.design) {
-        if (!r.contract_amendment) problems.push('a repair design must amend the contract: return "contract_amendment" with the obligations (or deferrals) that define each repair, each listing the finding ids it answers in "resolves"');
-        const open = unresolvedByAmendment(r.contract_amendment, c.design.findings);
-        if (r.contract_amendment && open.length) problems.push(`every finding of the repair design needs an amended obligation or deferral that lists it in "resolves"; missing: ${open.join(", ")}`);
+        problems.push(...repairPackageProblems(r.repair_packages, c.design.findings));
+        const mustAmend = c.design.amend ?? c.design.findings;
+        if (mustAmend.length && !r.contract_amendment)
+          problems.push(`the design must amend the contract for ${mustAmend.join(", ")}: return "contract_amendment" with the obligations (or deferrals) that define each repair, each listing the finding ids it answers in "resolves"`);
+        const open = unresolvedByAmendment(r.contract_amendment, mustAmend);
+        if (r.contract_amendment && open.length) problems.push(`every finding the design amends the contract for needs an amended obligation or deferral that lists it in "resolves"; missing: ${open.join(", ")}`);
       }
       break;
     }
+    case "implementation":
     case "repair": {
-      if (r.decision !== "implemented" || c.repair_source !== "review") break;
+      const item = currentWorkItem(c);
+      if (item && r.decision === "implemented" && r.work_package !== item.id) problems.push(`report "work_package": "${item.id}" (the package this run implemented)`);
+      if (run.task !== "repair" || r.decision !== "implemented" || c.repair_source !== "review") break;
       const got = new Map((r.resolutions ?? []).map((x) => [x.id, x]));
-      const missing = (c.deltas.implementer?.findings ?? []).map((f) => f.id).filter((id) => !got.has(id));
+      const assigned = item?.findings ?? (c.deltas.implementer?.findings ?? []).map((f) => f.id);
+      const missing = assigned.filter((id) => !got.has(id));
       if (missing.length) problems.push(`resolutions must list every finding assigned to you ({"id","status":"fixed|not_fixed|needs_design","note","files"}); missing: ${missing.join(", ")}`);
       if (c.reviewed_tree) {
         const changed = new Set(changedBetween(e.root, c.reviewed_tree, snapshotTree(e.root)));
@@ -1157,43 +1200,64 @@ function designReason(c: NonNullable<State["current"]>, f: Finding): DesignState
 }
 
 /**
- * Open a Planner repair design (a contract amendment). The Plan Debater challenges it once when
- * a finding is high or critical, or when its lineage already had a design that did not hold.
+ * Open a Planner repair design. The Planner (the expensive model) turns the findings into repair
+ * packages the Implementer executes literally, and amends the contract for findings whose correct
+ * behavior the contract does not define (design causes, repeated findings, needs_design). The
+ * Plan Debater challenges the design once when it amends the contract for a high or critical
+ * finding, or replaces a design that did not hold.
  */
 function startDesign(e: Engine, ids: string[], reason: DesignState["reason"]): void {
   const c = cur(e);
   const list = ids.map((id) => c.review_findings.find((f) => f.id === id) ?? { id, summary: id }).filter(Boolean) as Finding[];
   const redesign = list.filter((f) => lineageEntries(c, lineageOf(c, f.id)).some((l) => l.designs > 0)).map((f) => f.id);
-  const debate = redesign.length > 0 || list.some((f) => f.severity === "high" || f.severity === "critical");
-  c.design = { findings: ids, step: "design", debate, reason };
+  const amendIds = list.filter((f) => reason === "needs_design" || designReason(c, f) !== null).map((f) => f.id);
+  const debate = redesign.length > 0 || list.some((f) => amendIds.includes(f.id) && (f.severity === "high" || f.severity === "critical"));
+  c.design = { findings: ids, step: "design", debate, reason, amend: amendIds };
+  c.pending_repair_packages = null;
   const why: Record<DesignState["reason"], string> = {
-    plan_cause: "the Reviewer traced them to the plan or contract (a missing or wrong design decision, a missed requirement, or a cross-phase dependency)",
-    unfixed: "an earlier repair reported them fixed and the re-review found the Fix condition still unmet",
-    related: "they are new ways to break a rule an earlier finding already reported, so the rule's enforcement is not complete",
+    plan_cause: "some were traced by the Reviewer to the plan or contract (a missing or wrong design decision, a missed requirement, or a cross-phase dependency)",
+    unfixed: "some came back after an earlier repair reported them fixed: the Fix condition is still unmet",
+    related: "some are new ways to break a rule an earlier finding already reported, so the rule's enforcement is not complete",
     needs_design: "the Implementer reported that the contract does not define how to repair them",
+    repair_plan: "the Reviewer requested changes; the Implementer executes your repair packages literally",
   };
   c.deltas.planner = {
     kind: "context_answer",
     text: [
       `Repair design for ${ids.join(", ")}: ${why[reason]}. Do not write code.`,
-      `For each finding, amend the contract (contract_amendment): add or replace the obligation that defines the correct behavior, with the rule, the requirement behind it, the single enforcement point whose completeness can be checked (an allowlist, one validated path, a structural constraint or a type, never a list of known bad cases), what the Tester must prove (negative cases and variants), and the gates. Where the full rule needs something a later phase delivers, add a deferral with to_phase and the fail-closed interim behavior. Each amended obligation or deferral lists the finding ids it answers in "resolves".`,
-      ...(redesign.length ? [`${redesign.join(", ")} already had a repair design that did not hold: do not repeat it; change the enforcement design or narrow the rule.`] : []),
+      `Read the review, the findings' Fix and Check lines, the contract and the current code. Return "repair_packages": small, ordered packages (at most ${WORK_LIMITS.findings} findings and ${WORK_LIMITS.steps} steps each) that a cheaper model can execute literally: the exact files, what each one contains afterwards (classes, functions with signatures, keys, columns), ordered steps that leave no design decision open, and done_when checks the Implementer can run itself. Every finding above is listed in "findings" of a package. Repair the rule at its enforcement point for every Check, not the cited example.`,
+      ...(amendIds.length
+        ? [`For ${amendIds.join(", ")}, also amend the contract (contract_amendment): add or replace the obligation that defines the correct behavior, with the rule, the requirement behind it, the single enforcement point whose completeness can be checked (an allowlist, one validated path, a structural constraint or a type, never a list of known bad cases), what the Tester must prove, and the gates. Where the full rule needs something a later phase delivers, add a deferral with to_phase and the fail-closed interim behavior. Each amended obligation or deferral lists the finding ids it answers in "resolves".`]
+        : []),
+      ...(redesign.length ? [`${redesign.join(", ")} already had a repair design that did not hold: do not repeat it; change the enforcement design, make the steps more concrete, or narrow the rule.`] : []),
     ].join("\n"),
     findings: list,
   };
-  ev(e, { type: "design.escalated", data: { findings: ids, reason, debate, redesign } });
+  ev(e, { type: "design.escalated", data: { findings: ids, reason, debate, redesign, amend: amendIds } });
 }
 
+/** End a repair design: queue its repair packages for the Implementer (replacing the current package after needs_design). */
 function finishDesign(e: Engine): void {
   const c = cur(e);
   const d = c.design;
   if (!d) return;
-  c.designed_this_round = [...new Set([...(c.designed_this_round ?? []), ...d.findings])];
-  for (const id of d.findings) {
+  if (d.reason === "needs_design") c.designed_this_round = [...new Set([...(c.designed_this_round ?? []), ...d.findings])];
+  for (const id of d.amend ?? d.findings) {
     const l = c.finding_ledger?.[id];
     if (l) l.designs++;
   }
+  const pkgs = orderWork(c.pending_repair_packages ?? []) ?? [];
+  c.pending_repair_packages = null;
   c.design = null;
+  if (!pkgs.length) return;
+  const active = c.work?.kind === "repair" ? currentWorkItem(c) : null;
+  if (c.work && active) {
+    const taken = new Set(c.work.items.map((w) => w.id));
+    const fresh = pkgs.map((p) => (taken.has(p.id) ? { ...p, id: `${p.id}.${c.work!.done.length + 1}` } : p));
+    const i = c.work.items.findIndex((w) => w.id === active.id);
+    c.work.items.splice(i, 1, ...fresh);
+    c.work.base = c.deltas.implementer ?? c.work.base ?? null;
+  } else c.work = { kind: "repair", items: pkgs, done: [], base: c.deltas.implementer ?? null };
 }
 
 /**
@@ -1208,6 +1272,7 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   c.repair_source = source;
   c.designed_this_round = [];
   if (source === "test") {
+    c.work = null;
     const used = c.test_repairs ?? 0;
     c.test_repairs = used + 1;
     if (testerOnly) {
@@ -1246,13 +1311,9 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   ].join("\n");
   if (mine.length) c.deltas.implementer = { kind: "repair", text, findings: mine, paths };
   else delete c.deltas.implementer;
-  const byReason = new Map<DesignState["reason"], string[]>();
-  for (const f of mine) {
-    const why = designReason(c, f);
-    if (why) byReason.set(why, [...(byReason.get(why) ?? []), f.id]);
-  }
-  const designIds = [...byReason.values()].flat();
-  if (designIds.length) startDesign(e, designIds, byReason.has("plan_cause") ? "plan_cause" : byReason.has("unfixed") ? "unfixed" : "related");
+  c.work = null;
+  const reasons = new Set(mine.map((f) => designReason(c, f)).filter((x): x is DesignState["reason"] => !!x));
+  if (mine.length) startDesign(e, mine.map((f) => f.id), reasons.has("plan_cause") ? "plan_cause" : reasons.has("unfixed") ? "unfixed" : reasons.has("related") ? "related" : "repair_plan");
   c.deltas.tester = {
     kind: "repair",
     text: [
@@ -1384,7 +1445,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         d.step = "revise";
         c.deltas.planner = {
           kind: "context_answer",
-          text: `The Plan Debater challenged your repair design (read it in your inputs). Revise the design: answer each challenge, and return the complete contract_amendment again (each repair obligation lists the finding ids it answers in "resolves"). Do not write code.`,
+          text: `The Plan Debater challenged your repair design (read it in your inputs). Revise the design: answer each challenge, and return the complete "repair_packages" again (every finding of the design in a package) and, for ${(d.amend ?? []).join(", ") || "no finding"}, the complete contract_amendment (each repair obligation lists the finding ids it answers in "resolves"). Do not write code.`,
           findings: (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary })),
           paths: [path],
         };
@@ -1401,12 +1462,19 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         saveContract(e.root, c.phase, next);
         const kept = new Set(contractIds(next));
         c.retired_obligations = [...new Set([...(c.retired_obligations ?? []), ...(r.contract_amendment.retire ?? [])])].filter((id) => !kept.has(id));
+        if (c.work?.kind === "implementation" && !c.design && r.contract_amendment.work_packages?.length) {
+          const work = c.work;
+          const upd = new Map(r.contract_amendment.work_packages.map((w) => [w.id, w]));
+          const pending = [...work.items.filter((w) => !work.done.includes(w.id)).map((w) => upd.get(w.id) ?? w), ...r.contract_amendment.work_packages.filter((w) => !work.items.some((x) => x.id === w.id))];
+          work.items = [...work.items.filter((w) => work.done.includes(w.id)), ...(orderWork(pending) ?? pending)];
+        }
         ev(e, { type: "contract.amended", role: "planner", run_id: run.run_id, data: { revision: next.revision, obligations: (r.contract_amendment.obligations ?? []).map((o) => o.id), deferrals: (r.contract_amendment.deferrals ?? []).map((x) => x.id), retired: r.contract_amendment.retire ?? [], design: c.design?.findings ?? null } });
       }
       const prior = c.deltas.implementer;
       const design = c.design;
+      if (design) c.pending_repair_packages = r.repair_packages ?? null;
       const answered = design
-        ? `The Planner wrote a repair design (${path.split("/").pop()}) and amended contract.json for: ${design.findings.join(", ")}. The amended obligations are binding: implement each one at its enforcement point exactly as defined; do not patch around it.`
+        ? `The Planner wrote a repair design (${path.split("/").pop()}) for: ${design.findings.join(", ")}${r.contract_amendment ? ", and amended contract.json" : ""}. Its repair packages run one at a time; the package for this run is below. The design and any amended obligations are binding: implement them exactly as defined; do not patch around them.`
         : `The Planner answered your context request (${c.context_request?.question ?? ""}). Continue.`;
       const rest = prior?.text?.startsWith("The Planner wrote a repair design") ? prior.text.split("\n\n").slice(1).join("\n\n") : prior?.text;
       c.deltas.implementer = { ...prior, kind: "context_answer", text: rest ? `${answered}\n\n${rest}` : answered, paths: [...(prior?.paths ?? []), path] };
@@ -1415,7 +1483,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
           design.step = "debate";
           c.deltas.plan_debater = {
             kind: "design_review",
-            text: `Challenge the Planner's repair design (${path.split("/").pop()}) and its contract amendment once, for: ${design.findings.join(", ")}. For each: is the rule decidable and complete at its single enforcement point (no list of known bad cases), testable, feasible in this phase (or deferred with a fail-closed interim), and consistent with the contract and the packet? Would the Implementer still have to invent a decision?`,
+            text: `Challenge the Planner's repair design (${path.split("/").pop()}) and its contract amendment once, for: ${design.findings.join(", ")}. For each: is the rule decidable and complete at its single enforcement point (no list of known bad cases), testable, feasible in this phase (or deferred with a fail-closed interim), and consistent with the contract and the packet? Could a cheaper model execute each repair package literally, or would it still have to invent a decision (name the step)?`,
             findings: design.findings.map((id) => c.review_findings.find((f) => f.id === id)).filter((f): f is Finding => !!f),
             paths: [path],
           };
@@ -1443,14 +1511,29 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       }
       if (run.task === "repair" && c.repair_source === "review") {
         const done = new Set(c.designed_this_round ?? []);
-        const ask = (r.resolutions ?? []).filter((x) => x.status === "needs_design" && !done.has(x.id)).map((x) => x.id);
+        const scope = new Set(currentWorkItem(c)?.findings ?? (priorDelta?.findings ?? []).map((f) => f.id));
+        const mine = (r.resolutions ?? []).filter((x) => scope.has(x.id));
+        const ask = mine.filter((x) => x.status === "needs_design" && !done.has(x.id)).map((x) => x.id);
         if (ask.length) {
-          startDesign(e, ask, "needs_design");
+          const pending = mine.filter((x) => x.status === "not_fixed" && !done.has(x.id)).map((x) => x.id);
+          startDesign(e, [...ask, ...pending], "needs_design");
           if (priorDelta) c.deltas.implementer = priorDelta;
           return null;
         }
       }
-      e.st.pending_checkpoint = { label: run.task === "implementation" ? "implementation" : `repair ${c.round}` };
+      const label = run.task === "implementation" ? "implementation" : `repair ${c.round}`;
+      const item = currentWorkItem(c);
+      if (item) {
+        c.work!.done.push(item.id);
+        ev(e, { type: "work.done", role: "implementer", run_id: run.run_id, data: { kind: c.work!.kind, id: item.id, done: c.work!.done.length, total: c.work!.items.length } });
+        if (currentWorkItem(c)) {
+          e.st.pending_checkpoint = { label: `${label} ${item.id}` };
+          if (c.work!.base) c.deltas.implementer = c.work!.base;
+          return null;
+        }
+        c.work = null;
+      }
+      e.st.pending_checkpoint = { label: item ? `${label} ${item.id}` : label };
       transition(e, "testing");
       return null;
     }

@@ -3,6 +3,7 @@ import { PROTOCOL, STATE_SCHEMA, VERSION } from "./constants.js";
 import type { AgentId, Assignment, Mode } from "./config.js";
 import { readJson, writeJsonAtomic } from "./fsx.js";
 import { migrate, type Migration } from "./migrations.js";
+import type { WorkItem } from "./contract.js";
 import { projectPaths } from "./paths.js";
 
 export const STAGES = [
@@ -105,7 +106,9 @@ export interface DesignState {
   findings: string[];
   step: "design" | "debate" | "revise";
   debate: boolean;
-  reason: "plan_cause" | "unfixed" | "related" | "needs_design";
+  reason: "plan_cause" | "unfixed" | "related" | "needs_design" | "repair_plan";
+  /** Findings whose design must also amend the contract (the others only need repair packages). */
+  amend?: string[];
 }
 
 export interface Verification {
@@ -176,10 +179,14 @@ export interface Current {
   finding_ledger?: Record<string, LedgerEntry>;
   /** Planner repair design in progress. */
   design?: DesignState | null;
-  /** Finding ids that already got a repair design in the current repair round. */
+  /** Finding ids that already got a needs_design repair design in the current repair round. */
   designed_this_round?: string[];
   /** The Tester's verifications of its last run (checked against the gate evidence). */
   tester_verifications?: Verification[];
+  /** Packages the Implementer executes one run at a time: the plan's work packages, or a review round's repair packages. */
+  work?: { kind: "implementation" | "repair"; items: WorkItem[]; done: string[]; base?: Delta | null } | null;
+  /** Repair packages of the repair design in progress (the latest Planner answer). */
+  pending_repair_packages?: WorkItem[] | null;
   /** Ids the Implementer's latest resolution reports as not_fixed since the last review (carried to the review, not into test repairs). */
   acknowledged_open?: string[];
   /** Testcases that passed in the latest passing gate batch. */

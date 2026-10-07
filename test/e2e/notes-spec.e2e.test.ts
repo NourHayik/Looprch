@@ -79,7 +79,7 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.equal(r.last.action, "phase_closed");
     const seq = r.actions.filter((a) => a.action === "run_role").map((a) => `${a.role}:${a.task}`);
     const i = seq.indexOf("reviewer:review");
-    assert.deepEqual(seq.slice(i, i + 4), ["reviewer:review", "implementer:repair", "tester:testing", "reviewer:review"]);
+    assert.deepEqual(seq.slice(i, i + 5), ["reviewer:review", "planner:context_answer", "implementer:repair", "tester:testing", "reviewer:review"], "the Planner turns the findings into repair packages first");
     assert.ok(existsSync(join(p.root, ".looprch/phases/P-001/review.r0.md")));
     const run = (id: string) => readJson(join(p.root, `.looprch/runs/${id}/run.json`));
     const brief = (id: string) => readFileSync(join(p.root, `.looprch/runs/${id}/brief.md`), "utf8");
@@ -142,14 +142,15 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.equal(repairs.length, 2);
     assert.doesNotMatch(repairs[0]!, /Still open after an earlier repair/);
     assert.match(repairs[1]!, /Still open after an earlier repair reported them fixed: R-1\. The Fix condition is unchanged/);
-    assert.match(repairs[1]!, /The Planner wrote a repair design \(plan-addendum-1\.md\) and amended contract\.json for: R-1/);
+    assert.match(repairs[1]!, /The Planner wrote a repair design \(plan-addendum-2\.md\) for: R-1, and amended contract\.json/);
+    assert.match(repairs[1]!, /## Repair package RP-1 \(1 of 1\): Repair R-1/);
     assert.match(repairs[1]!, /plan-addendum-1\.md/);
     assert.match(repairs[1]!, /Report `resolutions` for: R-1\./);
     const seq = r.actions.filter((a) => a.action === "run_role").map((a) => `${a.role}:${a.task}`);
     const second = seq.indexOf("reviewer:review", seq.indexOf("reviewer:review") + 1);
     assert.deepEqual(seq.slice(second, second + 4), ["reviewer:review", "planner:context_answer", "plan_debater:design_review", "implementer:repair"], "a high finding's repair design is challenged once");
-    const design = briefs("planner").find((b) => /task=context_answer/.test(b))!;
-    assert.match(design, /Repair design for R-1: an earlier repair reported them fixed/);
+    const design = briefs("planner").filter((b) => /task=context_answer/.test(b))[1]!;
+    assert.match(design, /Repair design for R-1: some came back after an earlier repair reported them fixed/);
     assert.match(design, /- R-1 \[high, owner implementer, cause implementation, unfixed\]/);
     assert.match(design, /"contract_amendment"/);
     const contract = readJson(join(p.root, ".looprch/phases/P-001/contract.json"));
@@ -159,6 +160,7 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.ok(briefs("tester").some((b) => /R-1 came back after an earlier repair and verification: check them hardest/.test(b)));
     assert.match(briefs("reviewer").at(-1)!, /plan-addendum-1\.md` — Planner addendum/);
     assert.ok(events(p).some((e) => e.type === "design.escalated" && e.data.reason === "unfixed" && e.data.debate === true));
+    assert.ok(events(p).some((e) => e.type === "design.escalated" && e.data.reason === "repair_plan" && e.data.debate === false), "round 1: plain repair packages, no debate");
     assert.ok(r.progress.some((l) => /\[REPAIR DESIGN\]/.test(l)));
     assert.ok(r.progress.some((l) => /\[DESIGN DEBATE COMPLETE\] Result: the repair design holds\./.test(l)));
     p.s.cleanup();
@@ -524,8 +526,11 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     ]);
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r.last.action, "phase_closed");
-    assert.deepEqual(after(roleSeq(r), "reviewer:review").slice(0, 2), ["reviewer:review", "implementer:repair"]);
-    assert.ok(!events(p).some((e) => e.type === "design.escalated"));
+    assert.deepEqual(after(roleSeq(r), "reviewer:review").slice(0, 3), ["reviewer:review", "planner:context_answer", "implementer:repair"]);
+    const design = events(p).find((e) => e.type === "design.escalated");
+    assert.equal(design.data.reason, "repair_plan");
+    assert.deepEqual(design.data.amend, [], "a violated obligation needs repair packages, not a contract amendment");
+    assert.equal(design.data.debate, false);
     const review = events(p).find((e) => e.type === "result.accepted" && e.data.task === "review");
     assert.deepEqual(review.data.contract_unmet, ["O-1"]);
     const repair = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-implementer-")).map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).find((b) => /task=repair/.test(b))!;
@@ -590,9 +595,10 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     const r = drive({ root: p.root, env: p.env, scope: "phase", answers: { final_review: "repair_and_handover" } });
     assert.equal(r.last.action, "phase_closed");
     assert.match(rejected(p, "reviewer")[0]!, /a re-review lists every earlier finding in "prior".*missing: R-1/);
-    const design = events(p).find((e) => e.type === "design.escalated");
+    const design = events(p).find((e) => e.type === "design.escalated" && e.data.findings.includes("R-2"));
     assert.equal(design.data.reason, "related");
     assert.deepEqual(design.data.findings, ["R-2"]);
+    assert.deepEqual(design.data.amend, ["R-2"]);
     p.s.cleanup();
   });
 
@@ -616,8 +622,8 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     ]);
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r.last.action, "phase_closed");
-    assert.deepEqual(after(roleSeq(r), "reviewer:review").slice(0, 5), ["reviewer:review", "implementer:repair", "planner:context_answer", "plan_debater:design_review", "implementer:repair"]);
-    assert.equal(events(p).find((e) => e.type === "design.escalated").data.reason, "needs_design");
+    assert.deepEqual(after(roleSeq(r), "reviewer:review").slice(0, 6), ["reviewer:review", "planner:context_answer", "implementer:repair", "planner:context_answer", "plan_debater:design_review", "implementer:repair"]);
+    assert.ok(events(p).some((e) => e.type === "design.escalated" && e.data.reason === "needs_design"));
     const repairs = calls(p).filter((c) => c.role === "implementer" && c.task === "repair");
     assert.equal(repairs.length, 2);
     assert.ok(repairs[1].session, "the second repair resumes a session");
@@ -636,12 +642,13 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     const r = drive({ root: p.root, env: p.env, scope: "phase", answers: { final_review: "repair_and_handover" } });
     assert.equal(r.last.action, "phase_closed");
     const designs = events(p).filter((e) => e.type === "design.escalated");
-    assert.equal(designs.length, 2);
+    assert.equal(designs.length, 3, "routine repair packages, then a redesign after each unfixed report");
+    assert.equal(designs[0].data.reason, "repair_plan");
     assert.equal(designs[0].data.debate, false, "medium, first design");
-    assert.equal(designs[1].data.debate, true);
-    assert.deepEqual(designs[1].data.redesign, ["R-1"]);
+    assert.equal(designs[2].data.debate, true);
+    assert.deepEqual(designs[2].data.redesign, ["R-1"]);
     const final = r.actions.find((a) => a.action === "ask_user" && a.kind === "final_review");
-    assert.match(final.question, /Repeated: R-1 reported 3x, 1 repair design\(s\)/);
+    assert.match(final.question, /Repeated: R-1 reported 3x, 1 repair design\(s\)/, "routine repair packages are not counted as designs; the contract amendment is");
     const repairBriefs = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-implementer-")).sort().map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).filter((b) => /task=repair/.test(b));
     assert.ok(repairBriefs.slice(1).every((b) => /Fix: Reject invalid ids/.test(b) && !/moved goalpost/.test(b)), "an unfixed finding keeps its first Fix");
     const planner = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-planner-")).map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).filter((b) => /task=context_answer/.test(b));
@@ -653,7 +660,17 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     const p = setupProject();
     p.setScenario([
       { role: "planner", phase: "P-001", task: "planning", deferrals: [{ id: "X-1", requirements: ["R-ID"], what: "Id reuse across notes", to_phase: "P-002", interim: "reject reuse" }] },
-      { role: "planner", phase: "P-002", task: "planning", nth: 1, contract: { obligations: [{ id: "O-1", requirements: ["G-001", "R-ID", "R-NOTE"], kind: "behavior", statement: "notes", enforcement: "noteapp.py", verify: "tests", gates: ["GATE-P-002-negative"] }], deferrals: [] } },
+      {
+        role: "planner",
+        phase: "P-002",
+        task: "planning",
+        nth: 1,
+        contract: {
+          obligations: [{ id: "O-1", requirements: ["G-001", "R-ID", "R-NOTE"], kind: "behavior", statement: "notes", enforcement: "noteapp.py", verify: "tests", gates: ["GATE-P-002-negative"] }],
+          deferrals: [],
+          work_packages: [{ id: "WP-1", title: "notes", obligations: ["O-1"], files: [{ path: "noteapp.py", action: "modify", content: "notes" }], steps: ["s"], done_when: ["d"] }],
+        },
+      },
     ]);
     drive({ root: p.root, env: p.env, scope: "phase" });
     assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/handover.md"), "utf8"), /### Deferrals to later phases[\s\S]*- X-1 -> P-002 \[met\] \(R-ID\): Id reuse across notes\. Until then: reject reuse/);
@@ -725,6 +742,66 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     assert.deepEqual(after(roleSeq(r), "implementer:repair").slice(0, 3), ["implementer:repair", "tester:testing", "reviewer:review"]);
     assert.ok(events(p).some((e) => e.type === "warning" && /reported not_fixed \(R-1\); they go to the review/.test(e.data.message)));
     assert.equal(state(p).phases["P-001"].status, "closed");
+    p.s.cleanup();
+  });
+
+  test("C-19 the Implementer executes the plan one work package per run, in dependency order, with a checkpoint each", () => {
+    const p = setupProject();
+    p.setScenario([{ role: "planner", phase: "P-001", task: "planning", two_packages: true }]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    assert.deepEqual(roleSeq(r).filter((x) => x.startsWith("implementer:")), ["implementer:implementation", "implementer:implementation", "implementer:handover"]);
+    const brief = (id: string) => readFileSync(join(p.root, `.looprch/runs/${id}/brief.md`), "utf8");
+    assert.match(brief("P-001-implementer-1"), /## Work package WP-1 \(1 of 2\): Package WP-1/);
+    assert.match(brief("P-001-implementer-1"), /Report "work_package": "WP-1"/);
+    assert.match(brief("P-001-implementer-1"), /- create `noteapp\.py`: validate_id\(s\) -> str/);
+    assert.match(brief("P-001-implementer-2"), /## Work package WP-2 \(2 of 2\).*\n\nImplement exactly this package and nothing else; the other packages run separately \(done: WP-1\)/);
+    const log = git(p.root, ["log", "--format=%s", "looprch/P-001"]);
+    assert.match(log, /looprch\(P-001\): implementation WP-1/);
+    assert.match(log, /looprch\(P-001\): implementation WP-2/);
+    assert.equal(events(p).filter((e) => e.type === "work.done").length, 2);
+    assert.ok(r.progress.some((l) => /\[PACKAGE DONE\] Work package WP-2 \(2 of 2\)/.test(l)));
+    p.s.cleanup();
+  });
+
+  test("C-20 a package run must report the package it implemented", () => {
+    const p = setupProject();
+    p.setScenario([{ role: "implementer", phase: "P-001", task: "implementation", nth: 1, omit_work_package: true }]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    assert.match(rejected(p, "implementer")[0]!, /report "work_package": "WP-1"/);
+    p.s.cleanup();
+  });
+
+  test("C-21 review findings are repaired as the Planner's repair packages, a few findings per Implementer run", () => {
+    const p = setupProject();
+    const f = (id: string) => ({ id, severity: "medium", summary: `defect ${id}`, files: ["noteapp.py"], fix: "fix it", owner: "implementer" });
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested", findings: [f("R-1"), f("R-2"), f("R-3")] },
+      { role: "planner", phase: "P-001", task: "context_answer", package_size: 2 },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    assert.deepEqual(after(roleSeq(r), "reviewer:review").slice(0, 5), ["reviewer:review", "planner:context_answer", "implementer:repair", "implementer:repair", "tester:testing"]);
+    const repairs = events(p).filter((e) => e.type === "result.accepted" && e.data.task === "repair");
+    assert.deepEqual(repairs.map((e) => e.data.resolutions.map((x: any) => x.id)), [["R-1", "R-2"], ["R-3"]], "each run resolves only its package's findings");
+    const brief = readFileSync(join(p.root, ".looprch/runs/P-001-implementer-3/brief.md"), "utf8");
+    assert.match(brief, /## Repair package RP-2 \(2 of 2\): Repair R-3/);
+    assert.match(brief, /Report `resolutions` for: R-3\./);
+    assert.doesNotMatch(brief, /- R-1 \[/, "only the package's findings are in its delta");
+    assert.match(git(p.root, ["log", "--format=%s", "looprch/P-001"]), /repair 1 RP-1[\s\S]*|repair 1 RP-2/);
+    p.s.cleanup();
+  });
+
+  test("C-22 a repair design without repair packages is re-asked", () => {
+    const p = setupProject();
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "planner", phase: "P-001", task: "context_answer", nth: 1, omit_repair_packages: true },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    assert.match(rejected(p, "planner")[0]!, /a repair design returns "repair_packages"/);
     p.s.cleanup();
   });
 

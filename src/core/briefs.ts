@@ -68,19 +68,19 @@ const TASK_DECISIONS: Record<Task, string[]> = {
 };
 
 const CONTRACT_FIELD =
-  '"contract": {"obligations": [{"id":"O-1","requirements":["R-001.01"],"kind":"behavior|invariant|boundary|interface|data|failure|production|procedure","statement":"the rule, decidable by a test","enforcement":"the single code path or structural constraint that enforces it","verify":"what the Tester must prove, with negative cases and variants","gates":["<gate id>"],"covers":["P-000/X-1 (incoming deferrals only)"]}], "deferrals": [{"id":"X-1","requirements":["…"],"what":"…","to_phase":"P-00N","interim":"fail-closed behavior in this phase"}]}';
+  '"contract": {"obligations": [{"id":"O-1","requirements":["R-001.01"],"kind":"behavior|invariant|boundary|interface|data|failure|production|procedure","statement":"the rule, decidable by a test","enforcement":"the single code path or structural constraint that enforces it","verify":"what the Tester must prove, with negative cases and variants","gates":["<gate id>"],"covers":["P-000/X-1 (incoming deferrals only)"]}], "deferrals": [{"id":"X-1","requirements":["…"],"what":"…","to_phase":"P-00N","interim":"fail-closed behavior in this phase"}], "work_packages": [{"id":"WP-1","title":"…","depends_on":[],"obligations":["O-1"],"files":[{"path":"app/…","action":"create|modify|delete","content":"what the file contains afterwards: classes, functions with signatures, keys, columns"}],"steps":["one concrete instruction per entry, in order"],"done_when":["a command or observation with its expected result"]}]}';
 const AMENDMENT_FIELD =
-  '"contract_amendment": {"obligations": [ {…same shape as a contract obligation, plus "resolves":["R-4"]} ], "deferrals": [ {… plus "resolves"} ], "retire": ["O-7"]}';
+  '"contract_amendment": {"obligations": [ {…same shape as a contract obligation, plus "resolves":["R-4"]} ], "deferrals": [ {… plus "resolves"} ], "work_packages": [ {…same shape as a work package; during implementation, every new obligation needs one} ], "retire": ["O-7"]}; for a repair design also "repair_packages": [{"id":"RP-1","title":"…","findings":["R-1"],"depends_on":[],"files":[{"path":"…","action":"create|modify|delete","content":"…"}],"steps":["…"],"done_when":["…"]}]';
 
 function fields(role: Role, task: Task): string {
   switch (role) {
     case "planner":
-      if (task === "context_answer") return `${AMENDMENT_FIELD} (required for a repair design; optional for a context answer)`;
+      if (task === "context_answer") return `${AMENDMENT_FIELD} (a repair design needs repair_packages, and an amendment for the findings the Delta names; both are optional for a context answer)`;
       return `${CONTRACT_FIELD}${task === "synthesis" ? '; "debate_dispositions": [{"id":"D-1","decision":"accept|reject","reason":"…","refs":["O-3"]}] (one per Plan Debate finding)' : ""}; with needs_expansion: "expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]`;
     case "plan_debater":
       return '"findings": [{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…","refs":["O-2"]}]';
     case "implementer":
-      return '"files_changed": ["…"]; after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed|needs_design","note":"what changed or why not","files":["paths your repair changed (required for fixed)"]}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]';
+      return '"files_changed": ["…"]; "work_package": "WP-1" (the package the Delta assigns, when it assigns one); after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed|needs_design","note":"what changed or why not","files":["paths your repair changed (required for fixed)"]}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]';
     case "tester":
       return '"tests_written": ["…"], "verifications": [{"id":"O-1 or R-1","status":"verified|failed|inspected","tests":["testcase name as in the JUnit report, or path::name"],"checks":[{"n":1,"tests":["…"]}] (review findings with Check lines: every check),"variants":["…"],"note":"…"}], "failures": [{"id":"T-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "reviewer":

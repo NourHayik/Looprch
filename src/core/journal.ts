@@ -54,6 +54,7 @@ export const EVENT_TYPES = [
   "design.escalated",
   "evidence.checked",
   "evidence.unbacked",
+  "work.done",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -369,6 +370,8 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
       );
     case "evidence.unbacked":
       return block("[EVIDENCE MISMATCH]", `Tester verifications not backed by passing testcases in the gate run: ${arr<string>(d.verifications).join(", ")}.`, "Action: The Tester fixes or withdraws them (test repair round).");
+    case "work.done":
+      return `[PACKAGE DONE] ${str(d.kind) === "repair" ? "Repair" : "Work"} package ${str(d.id)} (${str(d.done)} of ${str(d.total)}).`;
     case "evidence.checked":
     case "init.discovered":
     case "init.gates_acknowledged":

@@ -60,6 +60,17 @@ describe("gate runner", () => {
     assert.equal(runGate(d, cfg, gate({ kind: "static", command: [process.execPath, "-e", ""] }), "g1", d, "t", null).ok, true);
   });
 
+  test("every gate run records its provenance: runner, finish time, HEAD and output hashes", () => {
+    const d = tmp();
+    const r = runGate(d, cfg, gate({ kind: "static", command: [process.execPath, "-e", "console.log('hi')"] }), "g1", d, "t", null, "abc123");
+    assert.equal(r.runner?.name, "looprch");
+    assert.match(r.runner?.version ?? "", /^\d+\.\d+\.\d+/);
+    assert.equal(r.head_commit, "abc123");
+    assert.ok(Date.parse(r.finished_at!) >= Date.parse(r.started_at));
+    assert.match(r.stdout_sha256!, /^[0-9a-f]{64}$/);
+    assert.match(r.stderr_sha256!, /^[0-9a-f]{64}$/);
+  });
+
   test("timeout", () => {
     const d = tmp();
     const r = runGate(d, cfg, gate({ kind: "static", command: [process.execPath, "-e", "setTimeout(()=>{},5000)"], timeout_seconds: 1 }), "g1", d, "t", null);
@@ -152,7 +163,18 @@ describe("result blocks", () => {
     assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "partly" }] }).ok, false);
   });
   test("plan results need a contract; synthesis dispositions and amendments are shaped", () => {
-    const contract = { obligations: [{ id: "O-1", requirements: ["R-ID"], kind: "behavior", statement: "s", enforcement: "e", verify: "v", gates: [] }], deferrals: [] };
+    const wp = { id: "WP-1", title: "t", obligations: ["O-1"], files: [{ path: "a.py", action: "create", content: "f() -> int" }], steps: ["write f"], done_when: ["python3 -c 'import a'"] };
+    const contract = { obligations: [{ id: "O-1", requirements: ["R-ID"], kind: "behavior", statement: "s", enforcement: "e", verify: "v", gates: [] }], deferrals: [], work_packages: [wp] };
+    const noWp = validateResult("planner", { role: "planner", decision: "plan_ready", contract: { ...contract, work_packages: undefined } });
+    assert.match(!noWp.ok ? noWp.errors.join(";") : "", /contract\.work_packages must be a list/);
+    const bigWp = validateResult("planner", { role: "planner", decision: "plan_ready", contract: { ...contract, work_packages: [{ ...wp, steps: Array.from({ length: 26 }, () => "s") }] } });
+    assert.match(!bigWp.ok ? bigWp.errors.join(";") : "", /WP-1 has 26 steps \(max 25\): split it/);
+    assert.equal(validateResult("planner", { role: "planner", decision: "plan_ready", contract: { ...contract, work_packages: [{ ...wp, files: [{ path: "old.py", action: "delete" }] }] } }).ok, true, "a deleted file needs no content");
+    const vague = validateResult("planner", { role: "planner", decision: "plan_ready", contract: { ...contract, work_packages: [{ ...wp, files: [{ path: "a.py", action: "create", content: "" }] }] } });
+    assert.match(!vague.ok ? vague.errors.join(";") : "", /content must say what the file contains/);
+    const rp = { id: "RP-1", title: "t", findings: ["R-1", "R-2", "R-3", "R-4", "R-5", "R-6"], files: wp.files, steps: ["s"], done_when: ["d"] };
+    const bigRp = validateResult("planner", { role: "planner", decision: "context_answer", repair_packages: [rp] });
+    assert.match(!bigRp.ok ? bigRp.errors.join(";") : "", /RP-1 repairs 6 findings \(max 5\)/);
     assert.match((validateResult("planner", { role: "planner", decision: "plan_ready" }) as { errors: string[] }).errors.join(";"), /contract is required/);
     assert.equal(validateResult("planner", { role: "planner", decision: "plan_ready", contract }).ok, true);
     const badKind = validateResult("planner", { role: "planner", decision: "plan_final", contract: { ...contract, obligations: [{ ...contract.obligations[0], kind: "wish" }] } });

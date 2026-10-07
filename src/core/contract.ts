@@ -37,9 +37,40 @@ export interface Deferral {
   resolves?: string[];
 }
 
+export const WORK_FILE_ACTIONS = ["create", "modify", "delete"] as const;
+
+export interface WorkFile {
+  path: string;
+  action: (typeof WORK_FILE_ACTIONS)[number];
+  /** What the file contains after this package: classes, functions with signatures, keys, columns. */
+  content: string;
+}
+
+/**
+ * A unit of literal work for the Implementer: a work package of the plan (with the obligations it
+ * implements) or a repair package of a review round (with the findings it repairs).
+ */
+export interface WorkItem {
+  id: string;
+  title: string;
+  depends_on?: string[];
+  obligations?: string[];
+  findings?: string[];
+  files: WorkFile[];
+  /** Ordered, concrete instructions; each one leaves no design decision open. */
+  steps: string[];
+  /** Commands or observations the Implementer runs to check its own work, with the expected result. */
+  done_when: string[];
+}
+
+/** Bounds that keep one package small enough for one focused run of a cheaper model. */
+export const WORK_LIMITS = { steps: 25, files: 25, findings: 5 } as const;
+
 export interface ContractBody {
   obligations: Obligation[];
   deferrals: Deferral[];
+  /** Ordered work packages the Implementer executes one run at a time (protocol 3). */
+  work_packages?: WorkItem[];
 }
 
 export interface Contract extends ContractBody {
@@ -51,6 +82,7 @@ export interface Contract extends ContractBody {
 export interface Amendment {
   obligations?: Obligation[];
   deferrals?: Deferral[];
+  work_packages?: WorkItem[];
   retire?: string[];
 }
 
@@ -92,6 +124,38 @@ function deferralShape(x: unknown): string | null {
   return optionalIds(x, "covers") ?? optionalIds(x, "resolves");
 }
 
+function workFileShape(x: unknown): string | null {
+  if (!isObject(x) || !isNonEmptyString(x.path)) return "each file needs a path";
+  if (!oneOf(x.action, WORK_FILE_ACTIONS)) return `${x.path}: action must be one of ${WORK_FILE_ACTIONS.join(", ")}`;
+  if (x.action !== "delete" && !isNonEmptyString(x.content)) return `${x.path}: content must say what the file contains (classes, functions with signatures, keys, columns)`;
+  if (x.content !== undefined && typeof x.content !== "string") return `${x.path}: content must be a string`;
+  return null;
+}
+
+/** Shape of a work package (`kind` plan) or repair package (`kind` repair). */
+export function workItemShape(kind: "plan" | "repair") {
+  return (x: unknown): string | null => {
+    if (!isObject(x)) return "must be an object";
+    if (!isNonEmptyString(x.id)) return "id is required";
+    if (!isNonEmptyString(x.title)) return `${x.id}: title is required`;
+    if (!Array.isArray(x.files) || !x.files.length) return `${x.id}: files must list every file the package creates, modifies or deletes`;
+    for (const f of x.files) {
+      const e = workFileShape(f);
+      if (e) return `${x.id}: ${e}`;
+    }
+    if (!isStringArray(x.steps) || !x.steps.length) return `${x.id}: steps must be a non-empty list of concrete instructions`;
+    if (!isStringArray(x.done_when) || !x.done_when.length) return `${x.id}: done_when must list the commands or observations that show the package is done`;
+    if (x.steps.length > WORK_LIMITS.steps) return `${x.id} has ${x.steps.length} steps (max ${WORK_LIMITS.steps}): split it into smaller packages`;
+    if (x.files.length > WORK_LIMITS.files) return `${x.id} touches ${x.files.length} files (max ${WORK_LIMITS.files}): split it into smaller packages`;
+    if (kind === "plan" && !isStringArray(x.obligations)) return `${x.id}: obligations must list the contract obligations (or deferral interims) the package implements ([] for scaffolding)`;
+    if (kind === "repair") {
+      if (!isStringArray(x.findings) || !x.findings.length) return `${x.id}: findings must name the review findings the package repairs`;
+      if (x.findings.length > WORK_LIMITS.findings) return `${x.id} repairs ${x.findings.length} findings (max ${WORK_LIMITS.findings}): split it`;
+    }
+    return optionalIds(x, "depends_on") ?? optionalIds(x, "obligations") ?? optionalIds(x, "findings");
+  };
+}
+
 function listShape(errors: string[], obj: Record<string, unknown>, key: string, item: (v: unknown) => string | null, required: boolean): void {
   const v = obj[key];
   if (v === undefined && !required) return;
@@ -111,6 +175,7 @@ export function contractShapeErrors(raw: unknown): string[] {
   const errors: string[] = [];
   listShape(errors, raw, "obligations", obligationShape, true);
   listShape(errors, raw, "deferrals", deferralShape, true);
+  listShape(errors, raw, "work_packages", workItemShape("plan"), true);
   return errors.map((e) => `contract.${e}`);
 }
 
@@ -120,6 +185,7 @@ export function amendmentShapeErrors(raw: unknown): string[] {
   const errors: string[] = [];
   listShape(errors, raw, "obligations", obligationShape, false);
   listShape(errors, raw, "deferrals", deferralShape, false);
+  listShape(errors, raw, "work_packages", workItemShape("plan"), false);
   if (raw.retire !== undefined && !isStringArray(raw.retire)) errors.push("retire must be a list of ids");
   return errors.map((e) => `contract_amendment.${e}`);
 }
@@ -132,7 +198,7 @@ function knownRequirementIds(m: Manifest): Set<string> {
 }
 
 /** Deterministic checks of a contract against the phase: coverage, ids, gates, deferral targets, incoming deferrals. */
-export function contractProblems(body: ContractBody, ctx: ContractContext): string[] {
+export function contractProblems(body: ContractBody, ctx: ContractContext, opts: { amended?: boolean } = {}): string[] {
   const problems: string[] = [];
   const all = [...body.obligations, ...body.deferrals];
   const seen = new Set<string>();
@@ -157,7 +223,64 @@ export function contractProblems(body: ContractBody, ctx: ContractContext): stri
   const covers = new Set(all.flatMap((x) => x.covers ?? []));
   const open = ctx.incoming.filter((d) => !covers.has(d.ref)).map((d) => d.ref);
   if (open.length) problems.push(`deferrals from earlier phases to ${ctx.phase.id} must be covered (list the id in "covers" of an obligation, or defer it again): ${listed(open)}`);
+  if (body.work_packages) problems.push(...workPackageProblems(body.work_packages, body.obligations, !opts.amended, body.deferrals));
   return problems;
+}
+
+/**
+ * Work packages: unique ids, known obligations, an acyclic order and, for a plan (not an
+ * amendment, whose new obligations are built by repair packages), every obligation implemented.
+ */
+export function workPackageProblems(wps: WorkItem[], obligations: Obligation[], complete = true, deferrals: Deferral[] = []): string[] {
+  const problems: string[] = [];
+  const ids = new Set<string>();
+  const dup = wps.filter((w) => (ids.has(w.id) ? true : (ids.add(w.id), false))).map((w) => w.id);
+  if (dup.length) problems.push(`duplicate work package ids: ${listed(dup)}`);
+  if (complete && obligations.length && !wps.length) problems.push("the contract has no work_packages: break the implementation into ordered packages the Implementer executes one at a time");
+  const obIds = new Set([...obligations, ...deferrals].map((o) => o.id));
+  const unknown = [...new Set(wps.flatMap((w) => w.obligations ?? []).filter((o) => !obIds.has(o)))];
+  if (unknown.length) problems.push(`work packages name unknown obligations or deferrals: ${listed(unknown)}`);
+  const implemented = new Set(wps.flatMap((w) => w.obligations ?? []));
+  const orphan = obligations.filter((o) => !implemented.has(o.id)).map((o) => o.id);
+  if (complete && orphan.length && wps.length) problems.push(`every obligation needs a work package that implements it; none for: ${listed(orphan)}`);
+  const badDeps = wps.flatMap((w) => (w.depends_on ?? []).filter((d) => !ids.has(d)).map((d) => `${w.id} -> ${d}`));
+  if (badDeps.length) problems.push(`depends_on names unknown work packages: ${listed(badDeps)}`);
+  else if (orderWork(wps) === null) problems.push("work package depends_on has a cycle");
+  return problems;
+}
+
+/** Repair packages of a repair design: every design finding repaired, unique ids, bounded size. */
+export function repairPackageProblems(rps: WorkItem[] | undefined, findingIds: string[]): string[] {
+  if (!rps?.length) return ['a repair design returns "repair_packages": small, ordered packages with the exact files, steps and done_when checks the Implementer executes literally, each listing the findings it repairs'];
+  const problems: string[] = [];
+  const allowed = new Set(findingIds);
+  const foreign = [...new Set(rps.flatMap((w) => w.findings ?? []).filter((f) => !allowed.has(f)))];
+  if (foreign.length) problems.push(`repair packages may only repair this design's findings (${findingIds.join(", ")}); not: ${listed(foreign)}`);
+  const ids = new Set<string>();
+  const dup = rps.filter((w) => (ids.has(w.id) ? true : (ids.add(w.id), false))).map((w) => w.id);
+  if (dup.length) problems.push(`duplicate repair package ids: ${listed(dup)}`);
+  const covered = new Set(rps.flatMap((w) => w.findings ?? []));
+  const missing = findingIds.filter((f) => !covered.has(f));
+  if (missing.length) problems.push(`every finding of the repair design needs a repair package that lists it in "findings"; missing: ${listed(missing)}`);
+  const badDeps = rps.flatMap((w) => (w.depends_on ?? []).filter((d) => !ids.has(d)).map((d) => `${w.id} -> ${d}`));
+  if (badDeps.length) problems.push(`depends_on names unknown repair packages: ${listed(badDeps)}`);
+  else if (orderWork(rps) === null) problems.push("repair package depends_on has a cycle");
+  return problems;
+}
+
+/** The packages in an order that respects depends_on (stable for independent ones); null on a cycle. */
+export function orderWork(items: WorkItem[]): WorkItem[] | null {
+  const done = new Set<string>();
+  const out: WorkItem[] = [];
+  const rest = [...items];
+  while (rest.length) {
+    const i = rest.findIndex((w) => (w.depends_on ?? []).every((d) => done.has(d) || !items.some((x) => x.id === d)));
+    if (i < 0) return null;
+    const [w] = rest.splice(i, 1);
+    done.add(w!.id);
+    out.push(w!);
+  }
+  return out;
 }
 
 export interface Disposition {
@@ -204,7 +327,14 @@ export function amend(c: Contract, a: Amendment): Contract {
     }
     return out;
   };
-  return { ...c, revision: c.revision + 1, obligations: merge(c.obligations, a.obligations), deferrals: merge(c.deferrals, a.deferrals) };
+  const packages = c.work_packages || a.work_packages ? merge(c.work_packages ?? [], a.work_packages).map((w) => ({ ...w, obligations: (w.obligations ?? []).filter((o) => !retire.has(o)) })) : null;
+  return {
+    ...c,
+    revision: c.revision + 1,
+    obligations: merge(c.obligations, a.obligations),
+    deferrals: merge(c.deferrals, a.deferrals),
+    ...(packages ? { work_packages: packages } : {}),
+  };
 }
 
 /** Findings a repair design must answer that no amended obligation or deferral lists in `resolves`. */
@@ -238,7 +368,7 @@ export function saveContract(root: string, phase: string, c: Contract): string {
 }
 
 export function newContract(phase: string, body: ContractBody, revision = 1): Contract {
-  return { schema_version: 1, phase, revision, obligations: body.obligations, deferrals: body.deferrals };
+  return { schema_version: 1, phase, revision, obligations: body.obligations, deferrals: body.deferrals, ...(body.work_packages ? { work_packages: body.work_packages } : {}) };
 }
 
 /** Deferrals that closed phases made to `phaseId`. */

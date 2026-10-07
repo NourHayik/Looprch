@@ -18,6 +18,11 @@ Find the design defects that would otherwise reach the Implementer. Check every 
    phase unsafe.
 8. Invention: any place where the Implementer would have to decide a design question the plan
    leaves open.
+9. Executability: the Implementer is a cheaper model that follows the work packages literally.
+   For each package, would two such models write the same structure and behavior? Name every
+   step that leaves a class, signature, schema, algorithm, library or error behavior undecided,
+   every obligation whose package does not actually build it, and every package too large for
+   one focused run.
 
 - Be specific: each finding has an id, a severity (low, medium, high, critical), a summary, the
   plan section and the contract ids it concerns (`refs`).
@@ -29,6 +34,7 @@ findings list) or `no_findings`. Use `needs_expansion` only for a concrete sourc
 
 ### Task: design_review
 The Planner wrote a repair design for review findings that a code repair did not settle. Challenge
-the design and its contract amendment once with the checks above, especially enforceability,
-trust and invention: would this design end the findings for every input, or only for the examples
-seen so far? Decision: `findings` or `no_findings`.
+the design, its repair packages and its contract amendment once with the checks above,
+especially enforceability, trust, invention and executability: would this design end the
+findings for every input and every Check, or only for the examples seen so far? Decision:
+`findings` or `no_findings`.
