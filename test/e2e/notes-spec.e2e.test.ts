@@ -687,7 +687,7 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     p.s.cleanup();
   });
 
-  test("C-17 a verified high finding must prove every acceptance check", () => {
+  test("C-17 a verified high finding must prove every acceptance check; unproven checks go back to the Tester", () => {
     const p = setupProject();
     p.setScenario([
       { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
@@ -695,7 +695,11 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     ]);
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r.last.action, "phase_closed");
-    assert.match(rejected(p, "tester")[0]!, /R-1 has 2 acceptance check\(s\): "checks" must name the testcases that prove each one.*missing: check 1, check 2/);
+    assert.deepEqual(rejected(p, "tester"), [], "missing check proofs are an evidence gap, not an invalid result");
+    assert.deepEqual(after(roleSeq(r), "implementer:repair").slice(0, 4), ["implementer:repair", "tester:testing", "tester:testing", "reviewer:review"]);
+    const brief = readFileSync(join(p.root, ".looprch/runs/P-001-tester-3/brief.md"), "utf8");
+    assert.match(brief, /check 1 \("scripted check: the cited example"\) names no testcase in "checks"/);
+    assert.match(brief, /check 2 \("scripted check: a variant"\) names no testcase/);
     p.s.cleanup();
   });
 

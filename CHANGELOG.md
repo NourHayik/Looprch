@@ -2,6 +2,17 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.5.2 - 2026-10-07
+
+### Fixed
+
+- A Tester result that verified a review finding without naming a testcase for every acceptance
+  check was rejected as invalid; after the one re-ask it blocked the phase (`result_invalid`).
+  That is what happened in CoreBit P-001 after the round 1 repair. A missing check proof is a
+  gap in the evidence, not a malformed result. It now goes the same way as an unbacked
+  testcase: after the gates, a round goes to the Tester alone (counted as a test repair), and
+  its delta names each unproven check.
+
 ## 0.5.1 - 2026-10-07
 
 The first CoreBit P-001 validation on 0.5.0 was stopped after review round 2. The contract and

@@ -1014,11 +1014,6 @@ function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: 
         if (!v) continue;
         const serious = f.severity === "high" || f.severity === "critical";
         if (v.status === "verified" && serious && !v.variants.length) problems.push(`${f.id} is ${f.severity}: list the variants you tested beyond the Reviewer's example in "variants"`);
-        if (v.status === "verified" && f.checks?.length) {
-          const proven = new Set((v.checks ?? []).filter((x) => x.tests.length).map((x) => x.n));
-          const open = f.checks.map((_, i) => i + 1).filter((n) => !proven.has(n));
-          if (open.length) problems.push(`${f.id} has ${f.checks.length} acceptance check(s): "checks" must name the testcases that prove each one ({"n": 1, "tests": [...]}); missing: ${open.map((n) => `check ${n}`).join(", ")}`);
-        }
         if (v.status === "inspected" && serious) problems.push(`${f.id} is ${f.severity}: verify it with a test (status verified with tests), not by inspection`);
       }
       for (const v of verifs) {
@@ -1617,7 +1612,7 @@ export function applyGates(e: Engine, outcome: GatesOutcome): void {
     const current = (c.tester_verifications ?? []).filter((v) => !retired.has(v.id));
     const open = new Set((c.review_changes ?? 0) > 0 ? c.review_findings.map((f) => f.id) : []);
     const changed = new Set(c.reviewed_tree ? changedBetween(e.root, c.reviewed_tree, outcome.snapshot_tree) : []);
-    const stale = open.size && c.reviewed_cases ? staleClaims(current, open, c.reviewed_cases, changed, e.root) : [];
+    const stale = [...unprovenChecks(c, current, open), ...(open.size && c.reviewed_cases ? staleClaims(current, open, c.reviewed_cases, changed, e.root) : [])];
     const unbacked = [...unbackedTests(current, index, e.root), ...stale];
     ev(e, { type: "evidence.checked", data: { binding: index.available ? "testcases" : "files", cases: index.cases.length, verifications: (c.tester_verifications ?? []).length, unbacked: unbacked.length - stale.length, stale: stale.length } });
     if (unbacked.length) {
@@ -1640,6 +1635,20 @@ export function applyGates(e: Engine, outcome: GatesOutcome): void {
   findings.push(...c.tester_failures);
   const paths = outcome.runs.filter((r) => !r.ok).flatMap((r) => [r.stdout_path, r.stderr_path]);
   repairOrBlock(e, "test", findings, paths, findings.map((f) => f.gate_id ?? f.id).join(", ") || "tester verdict fail");
+}
+
+/** Acceptance checks of open review findings that a `verified` verification names no testcase for. */
+function unprovenChecks(c: NonNullable<State["current"]>, verifs: Verification[], open: Set<string>): { id: string; test: string; reason: string }[] {
+  const out: { id: string; test: string; reason: string }[] = [];
+  for (const v of verifs) {
+    if (v.status !== "verified" || !open.has(v.id)) continue;
+    const checks = c.review_findings.find((f) => f.id === v.id)?.checks ?? [];
+    const proven = new Set((v.checks ?? []).filter((x) => x.tests.length).map((x) => x.n));
+    checks.forEach((text, i) => {
+      if (!proven.has(i + 1)) out.push({ id: v.id, test: `check ${i + 1}`, reason: `check ${i + 1} ("${text.slice(0, 120)}") names no testcase in "checks"` });
+    });
+  }
+  return out;
 }
 
 export function doCheckpoint(e: Engine): { label: string | null; commit: string | null } {
