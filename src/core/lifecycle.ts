@@ -1433,6 +1433,14 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       }
       recordImplementer(e, run);
       if (run.task === "repair") c.repair_reports = [...(c.repair_reports ?? []), rel(e, join(projectPaths(e.root).run(run.run_id), "final.md"))];
+      if (r.resolutions?.length) {
+        const open = new Set(c.acknowledged_open ?? []);
+        for (const x of r.resolutions) {
+          if (x.status === "fixed") open.delete(x.id);
+          else open.add(x.id);
+        }
+        c.acknowledged_open = [...open];
+      }
       if (run.task === "repair" && c.repair_source === "review") {
         const done = new Set(c.designed_this_round ?? []);
         const ask = (r.resolutions ?? []).filter((x) => x.status === "needs_design" && !done.has(x.id)).map((x) => x.id);
@@ -1494,6 +1502,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       } else {
         c.review_findings = findings;
         c.review_changes = (c.review_changes ?? 0) + 1;
+        c.acknowledged_open = [];
         c.reviewed_tree = c.snapshots.gates;
         c.reviewed_cases = c.passing_cases ?? { available: false, cases: [] };
         if (reviewsExhausted(e)) c.final_review_pending = true;
@@ -1606,7 +1615,11 @@ export function applyGates(e: Engine, outcome: GatesOutcome): void {
   const c = cur(e);
   for (const r of outcome.runs) ev(e, { type: "gate.result", data: { gate_id: r.gate_id, gate_run_id: r.gate_run_id, ok: r.ok, reason: r.reason, tests: r.evidence.tests } });
   ev(e, { type: "gates.run", data: { all_passed: outcome.all_passed, snapshot: outcome.snapshot_tree } });
-  if (outcome.all_passed && c.tester_verdict === "pass") {
+  const acknowledged = new Set(c.acknowledged_open ?? []);
+  const carried = outcome.all_passed && c.tester_verdict === "fail" && c.tester_failures.length > 0 && (c.review_changes ?? 0) > 0 && c.tester_failures.every((f) => acknowledged.has(f.id));
+  if (carried)
+    ev(e, { type: "warning", data: { message: `The Tester's failures are findings the Implementer reported not_fixed (${c.tester_failures.map((f) => f.id).join(", ")}); they go to the review instead of another test repair` } });
+  if (outcome.all_passed && (c.tester_verdict === "pass" || carried)) {
     const index = testcaseIndex(e.root, outcome.runs);
     const retired = new Set(c.retired_obligations ?? []);
     const current = (c.tester_verifications ?? []).filter((v) => !retired.has(v.id));

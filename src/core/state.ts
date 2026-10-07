@@ -180,6 +180,8 @@ export interface Current {
   designed_this_round?: string[];
   /** The Tester's verifications of its last run (checked against the gate evidence). */
   tester_verifications?: Verification[];
+  /** Ids the Implementer's latest resolution reports as not_fixed since the last review (carried to the review, not into test repairs). */
+  acknowledged_open?: string[];
   /** Testcases that passed in the latest passing gate batch. */
   passing_cases?: CaseSet;
   /** Testcases that passed on the tree the last changes-requesting review looked at. */

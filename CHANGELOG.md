@@ -2,6 +2,20 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.5.3 - 2026-10-07
+
+### Fixed
+
+- CoreBit P-001 blocked at `repair_limit` with all gates green. The Implementer had honestly
+  reported a finding `not_fixed` after its repair design, because the design needs a CI trust
+  anchor outside the repository. The Tester failed that finding, and Looprch sent it back to the
+  Implementer as a test repair three times. Each time the Implementer answered `not_fixed`
+  without a change; the test-repair loop has no escalation. Now, when the gates pass and the
+  Tester's only failures are ids the Implementer's latest resolutions report as `not_fixed`, the
+  phase goes to the review instead (`[WARNING]` names them). The re-review then judges them and
+  the review ladder applies: a redesign with a Plan Debater challenge, and the user's
+  final-review decision.
+
 ## 0.5.2 - 2026-10-07
 
 ### Fixed

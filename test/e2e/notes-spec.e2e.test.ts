@@ -703,6 +703,31 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     p.s.cleanup();
   });
 
+  test("C-18 a finding the Implementer reports not_fixed goes back to the review, not into repeated test repairs", () => {
+    const p = setupProject({ config: { "limits.repair_rounds": "1" } });
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "implementer", phase: "P-001", task: "repair", nth: 1, resolution_status: "not_fixed" },
+      {
+        role: "tester",
+        phase: "P-001",
+        nth: 2,
+        decision: "fail",
+        failures: [{ id: "R-1", summary: "R-1 still holds" }],
+        verifications: [
+          { id: "O-1", status: "verified", tests: ["tests/test_ids.py"], variants: [] },
+          { id: "R-1", status: "failed", tests: [], variants: [] },
+        ],
+      },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    assert.deepEqual(after(roleSeq(r), "implementer:repair").slice(0, 3), ["implementer:repair", "tester:testing", "reviewer:review"]);
+    assert.ok(events(p).some((e) => e.type === "warning" && /reported not_fixed \(R-1\); they go to the review/.test(e.data.message)));
+    assert.equal(state(p).phases["P-001"].status, "closed");
+    p.s.cleanup();
+  });
+
   test("C-15 a phase started on protocol 1 without a contract pauses, then resumes and closes", () => {
     const p = setupProject();
     drive({ root: p.root, env: p.env, onAction: stopAt((a) => a.action === "run_role" && a.role === "implementer") });
