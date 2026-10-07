@@ -12,6 +12,7 @@ export type Task =
   | "revise"
   | "context_answer"
   | "debate"
+  | "design_review"
   | "implementation"
   | "repair"
   | "handover"
@@ -56,6 +57,7 @@ const TASK_DECISIONS: Record<Task, string[]> = {
   revise: ["plan_final"],
   context_answer: ["context_answer"],
   debate: ["findings", "no_findings", "needs_expansion"],
+  design_review: ["findings", "no_findings"],
   implementation: ["implemented", "needs_context"],
   repair: ["implemented", "needs_context"],
   handover: ["handover_ready"],
@@ -65,16 +67,32 @@ const TASK_DECISIONS: Record<Task, string[]> = {
   worker: ["answered"],
 };
 
-const FIELDS: Record<Role, string> = {
-  planner: '"expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]   (only with needs_expansion)',
-  plan_debater: '"findings": [{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…"}]',
-  implementer:
-    '"files_changed": ["…"]; after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed","note":"…"}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]',
-  tester: '"tests_written": ["…"], "failures": [{"id":"T-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]',
-  reviewer:
-    '"findings": [{"id":"R-1","severity":"high","summary":"…","files":["…"],"fix":"…","owner":"implementer|tester","origin":"unfixed|regression|missed (re-reviews only)"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]',
-  worker: '"evidence": [{"path":"…","lines":"10-20","note":"…"}]',
-};
+const CONTRACT_FIELD =
+  '"contract": {"obligations": [{"id":"O-1","requirements":["R-001.01"],"kind":"behavior|invariant|boundary|interface|data|failure|production|procedure","statement":"the rule, decidable by a test","enforcement":"the single code path or structural constraint that enforces it","verify":"what the Tester must prove, with negative cases and variants","gates":["<gate id>"],"covers":["P-000/X-1 (incoming deferrals only)"]}], "deferrals": [{"id":"X-1","requirements":["…"],"what":"…","to_phase":"P-00N","interim":"fail-closed behavior in this phase"}]}';
+const AMENDMENT_FIELD =
+  '"contract_amendment": {"obligations": [ {…same shape as a contract obligation, plus "resolves":["R-4"]} ], "deferrals": [ {… plus "resolves"} ], "retire": ["O-7"]}';
+
+function fields(role: Role, task: Task): string {
+  switch (role) {
+    case "planner":
+      if (task === "context_answer") return `${AMENDMENT_FIELD} (required for a repair design; optional for a context answer)`;
+      return `${CONTRACT_FIELD}${task === "synthesis" ? '; "debate_dispositions": [{"id":"D-1","decision":"accept|reject","reason":"…","refs":["O-3"]}] (one per Plan Debate finding)' : ""}; with needs_expansion: "expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]`;
+    case "plan_debater":
+      return '"findings": [{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…","refs":["O-2"]}]';
+    case "implementer":
+      return '"files_changed": ["…"]; after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed|needs_design","note":"what changed or why not","files":["paths your repair changed (required for fixed)"]}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]';
+    case "tester":
+      return '"tests_written": ["…"], "verifications": [{"id":"O-1 or R-1","status":"verified|failed|inspected","tests":["testcase name as in the JUnit report, or path::name"],"variants":["…"],"note":"…"}], "failures": [{"id":"T-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+    case "reviewer":
+      return '"findings": [{"id":"R-1","severity":"high","summary":"the broken rule","files":["…"],"fix":"the condition the repair must meet","owner":"implementer|tester","cause":"implementation|plan|requirement|cross_phase|test","obligations":["O-3"],"related":"R-2 (optional)","origin":"unfixed|regression|missed (re-reviews only)"}], "contract_review": [{"id":"O-1","status":"met|not_met"}] (first review: every obligation and deferral), "prior": [{"id":"R-1","status":"fixed|unfixed"}] (re-reviews: every earlier finding in the Delta), "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+    case "worker":
+      return '"evidence": [{"path":"…","lines":"10-20","note":"…"}]';
+    default: {
+      const never: never = role;
+      throw new Error(`unhandled role ${String(never)}`);
+    }
+  }
+}
 
 export function roleText(role: Role, task: Task): string {
   const text = readFileSync(join(packageRoot(), "assets", "roles", ROLE_FILE[role]), "utf8");
@@ -97,10 +115,13 @@ function taskText(input: BriefInput): string {
       lines.push("Revise the plan as the user asked (see Delta).");
       break;
     case "context_answer":
-      lines.push("Answer the Implementer's context request in the Delta from approved sources only.");
+      lines.push("Answer the context request or write the repair design in the Delta, from approved sources only.");
       break;
     case "debate":
-      lines.push("Critically review the plan once.");
+      lines.push("Critically review the plan and its contract once.");
+      break;
+    case "design_review":
+      lines.push("Challenge the Planner's repair design and its contract amendment once (see Delta). Do not re-review the code.");
       break;
     case "implementation":
       lines.push("Implement the approved plan.");
@@ -127,8 +148,8 @@ function taskText(input: BriefInput): string {
         );
         if (r.n > 1 && r.prevTree) lines.push(`- Repair since your last review: \`git diff --stat ${r.prevTree} ${tree}\`.`);
         lines.push("");
-        if (r.n === 1) lines.push("This is the first review: follow the first-review procedure and checklist and report every finding in this one pass.");
-        else lines.push("This is a re-review: follow the re-review rules. Verify every finding in the Delta against its fix, check the repair diff for regressions, and report anything the earlier review missed.");
+        if (r.n === 1) lines.push("This is the first review: follow the first-review procedure and checklist, give `contract_review` for every obligation and deferral in contract.json, and report every finding in this one pass.");
+        else lines.push("This is a re-review: follow the re-review rules. Give `prior` (fixed or unfixed) for every finding in the Delta against its unchanged Fix, check the repair diff for regressions, and report anything the earlier review missed.");
         if (r.n >= r.of)
           lines.push(
             "This is the final review. Still put every remaining issue in `findings`. Request changes only for high or critical defects; with only medium or low findings, approve: Looprch records them as open review notes in the handover. If you request changes, the user decides how to continue.",
@@ -156,8 +177,9 @@ function deltaText(d: Delta | null, note: string | null): string {
   if (d) {
     lines.push(d.text);
     for (const f of d.findings ?? []) {
-      const tags = [f.severity, f.owner ? `owner ${f.owner}` : null, f.origin].filter(Boolean).join(", ");
+      const tags = [f.severity, f.owner ? `owner ${f.owner}` : null, f.cause ? `cause ${f.cause}` : null, f.origin, f.related ? `related ${f.related}` : null].filter(Boolean).join(", ");
       lines.push(`- ${f.id}${tags ? ` [${tags}]` : ""}${f.gate_id ? ` (${f.gate_id})` : ""}: ${f.summary}${f.files?.length ? ` — ${f.files.join(", ")}` : ""}`);
+      if (f.obligations?.length) lines.push(`  Contract: ${f.obligations.join(", ")}`);
       if (f.fix) lines.push(`  Fix: ${f.fix}`);
     }
     for (const p of d.paths ?? []) lines.push(`- read: \`${p}\``);
@@ -177,7 +199,7 @@ function outputContract(role: Role, task: Task): string {
     "```",
     "",
     `- decision: one of ${decisions.map((d) => `\`${d}\``).join(", ")}`,
-    `- fields: ${FIELDS[role]}`,
+    `- fields: ${fields(role, task)}`,
     "- The block must be valid JSON. Nothing may follow it.",
   ].join("\n");
 }

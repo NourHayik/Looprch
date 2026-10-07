@@ -16,6 +16,7 @@ stateDiagram-v2
   testing --> gating
   gating --> reviewing
   gating --> repairing
+  gating --> testing
   gating --> handover
   repairing --> testing
   reviewing --> handover
@@ -25,6 +26,10 @@ stateDiagram-v2
   closing --> closed
   closed --> [*]
 ```
+
+`gating --> testing` is the Tester-only round after unbacked verifications. Inside `repairing`,
+a repair design runs Planner (`context_answer`), optionally Plan Debater (`design_review`) and
+Planner again before the Implementer; it is not a separate stage.
 
 ## Evaluation order in next
 
@@ -47,16 +52,16 @@ stateDiagram-v2
 | Stage | Action / transition |
 |---|---|
 | preflight | checks (config, fingerprint + verify, toolkit, gate ack → `ask_user ack_gates`, relays and CLIs); git init, identity, baseline (`ask_user commit_baseline`), clean tree, base branch; create phase branch → planning |
-| planning | Planner (`planning`). `plan_ready` → plan.md → debating. `needs_expansion` → expansion packets, same session (limit `expansion_rounds`) |
-| debating | Plan Debater once, read-only. `findings` → synthesizing; `no_findings` → plan_approval |
-| synthesizing | same Planner session (`synthesis`, or `revise` after a user revision) → plan_approval |
+| planning | Planner (`planning`). `plan_ready` → plan.md and contract.json (the phase contract must cover every mapped requirement; incoming deferrals from closed phases are an input and must be covered) → debating. `needs_expansion` → expansion packets, same session (limit `expansion_rounds`) |
+| debating | Plan Debater once, read-only, on plan.md and contract.json. `findings` (ids stored in `debate_findings`) → synthesizing; `no_findings` → plan_approval |
+| synthesizing | same Planner session (`synthesis`, or `revise` after a user revision): full plan and contract; a synthesis dispositions every debate finding → plan_approval |
 | plan_approval | if approvals apply: `ask_user approve_plan` (approve / revise). Then checkpoint "plan approved" → implementing |
-| implementing / repairing | if a context request is open: Planner `context_answer` → addendum → Implementer resumes (the repair delta is kept). Implementer `implemented` → checkpoint "implementation" / "repair N" → testing. A repair after a review must return `resolutions` for every finding in its delta (else the re-ask); its `final.md` is added to `repair_reports` |
-| testing | Tester; verdict and manual reports stored → gating. After a review repair the Tester gets every finding (it fixes `owner: tester` ones, verifies the rest) and the repair reports |
-| gating | `run_gates`; all gates pass and verdict pass → reviewing (post-run snapshot stored), or handover after a user-chosen unreviewed final repair (`review.skipped`, open findings go into handover.md); else repair (test, `test_repairs`+1) or `blocked repair_limit` when `test_repairs` reached `limits.repair_rounds` + extra rounds |
-| reviewing | `final_review_pending` → `ask_user final_review`. Snapshot must equal the gates snapshot (else gating). The brief carries "Review round n of N", the time budget and the diff commands (phase base → gates tree; re-reviews also `reviewed_tree` → gates tree); re-reviews get the open findings as a `rereview` delta and the repair reports. A run's timeout is the Reviewer timeout × (1 + 0.5 × (n − 1)). `approve` → handover (findings become `review_notes`, listed in handover.md). `changes_requested` → `review_changes`+1, `reviewed_tree` stored → repair (findings with `owner: tester` only: straight to testing; Implementer findings with `origin: unfixed` first open a `context_request`, so the Planner writes a repair design addendum before the Implementer runs). If that was the final allowed review (`limits.review_rounds` + `extra_reviews`), `final_review_pending` instead. The final review's `changes_requested` needs a high or critical finding (else the re-ask) |
-| final_review answer | `repair_and_review`: `extra_reviews`+1, repair, then one more review. `repair_and_handover`: final repair, tests and gates, then handover without a review. `pause`: paused; asked again after resume |
-| handover | snapshot changed → gating. File lists must equal `git diff --name-status` since the phase base (re-ask once, then `blocked handover_mismatch`) → closing |
+| implementing / repairing | a repair design in progress (`design`) runs first: Planner `context_answer` (step `design`, a `contract_amendment` that lists every design finding in `resolves`, merged into contract.json) → if the design covers a high or critical finding, or a lineage that already had a design, Plan Debater `design_review` (step `debate`) → on findings, Planner `context_answer` again (step `revise`) → Implementer. Else, if a context request is open: Planner `context_answer` → addendum (optionally an amendment) → Implementer resumes (the repair delta is kept). Implementer `implemented` → checkpoint "implementation" / "repair N" → testing. A repair after a review must return `resolutions` for every finding in its delta, and a `fixed` one must name files changed since `reviewed_tree` (else the re-ask); its `final.md` is added to `repair_reports`. `needs_design` resolutions (once per finding and round) open a repair design, then the same Implementer session repairs again |
+| testing | Tester; verdict, `verifications` (merged per id into `tester_verifications`) and manual reports stored → gating. The first run verifies every contract obligation and deferral. After a review repair the Tester gets every finding (it fixes `owner: tester` ones, tries to falsify the rest, returns a verification for each) and the repair reports. A `failed` verification is a tester failure |
+| gating | `run_gates`; all gates pass and verdict pass → evidence binding: every `verified` verification's `tests` must match a passing testcase of this gate batch (JUnit, verbose unittest), or without named testcases an existing test file and name (`evidence.checked`). Unbacked claims (`evidence.unbacked`) → a test repair for the Tester alone (`test_repairs`+1, the Implementer is skipped). Backed → reviewing (post-run snapshot stored), or handover after a user-chosen unreviewed final repair (`review.skipped`, open findings go into handover.md); else repair (test, `test_repairs`+1) or `blocked repair_limit` when `test_repairs` reached `limits.repair_rounds` + extra rounds |
+| reviewing | `final_review_pending` → `ask_user final_review`. Snapshot must equal the gates snapshot (else gating). The brief carries "Review round n of N", the time budget and the diff commands (phase base → gates tree; re-reviews also `reviewed_tree` → gates tree); re-reviews get the open findings as a `rereview` delta and the repair reports. A run's timeout is the Reviewer timeout × (1 + 0.5 × (n − 1)). Round 1 returns `contract_review` for every contract id; re-reviews return `prior` for every earlier finding (see the phase rules in [schemas.md](schemas.md)). Findings go into `finding_ledger` (an `unfixed` re-report keeps its first Fix; `related` joins a lineage). `approve` → handover (findings become `review_notes`, listed in handover.md). `changes_requested` → `review_changes`+1, `reviewed_tree` stored → repair: findings with `owner: tester` (or `cause: test`) only → straight to testing; Implementer findings with `cause` plan, requirement or cross_phase, `origin: unfixed`, or `related` to an earlier lineage first open a repair design (`design.escalated`). If that was the final allowed review (`limits.review_rounds` + `extra_reviews`), `final_review_pending` instead. The final review's `changes_requested` needs a high or critical finding (else the re-ask) |
+| final_review answer | `repair_and_review`: `extra_reviews`+1, repair, then one more review. `repair_and_handover`: final repair, tests and gates, then handover without a review. `pause`: paused; asked again after resume. The question names repeated lineages and their repair designs |
+| handover | snapshot changed → gating. File lists must equal `git diff --name-status` since the phase base (re-ask once, then `blocked handover_mismatch`) → closing. handover.md gets the contract status (from `contract_review`) and the deferrals to later phases |
 | closing | ticks todo.md and verifies; merge approval (`ask_user approve_merge`, hold → paused); final commit, `merge --no-ff`, tag, delete branch → `phase_closed` |
 
 ## Cross-cutting on every run
@@ -72,7 +77,9 @@ stateDiagram-v2
 
 ## Cross-cutting on every result
 
-- Invalid block → one re-ask in the same session, then `blocked result_invalid`.
+- Invalid block, or a phase rule violation (contract coverage, dispositions, resolutions,
+  verifications, review coverage and consistency) → one re-ask in the same session, then
+  `blocked result_invalid`.
 - Read-only role changed files (or the relay reports a violation) → `blocked readonly_violation`.
 - `failed` / `timeout` / `aborted` / interrupted → retry up to `run_attempts`, then fallback, then
   `blocked run_failed`. `*_unavailable` → fallback or `blocked cli_missing`. Exit 2 without a

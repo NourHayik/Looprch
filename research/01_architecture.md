@@ -59,6 +59,7 @@ flowchart LR
 | `state` + `journal` | Explicit, inspectable execution state and history |
 | `lifecycle` | The deterministic phase state machine (`next`, `record`) |
 | `briefs` | Assemble role inputs from core templates and SEV3 packets |
+| `contract` | The phase contract (`contract.json`): validate obligations and deferrals against the phase's requirements and gates, debate dispositions, amendments, deferrals between phases (D-23) |
 | `sev3` | Discovery, toolkit trust, validate, fingerprint, packets, todo updates |
 | `gates` | Run argv gates, parse unittest/JUnit evidence, bind to git tree |
 | `delegate` | Locate relays, build argv, parse `result.json`, sessions, read-only checks |
@@ -79,7 +80,7 @@ looprch/                      (this repo, Looprch-4)
   install.sh                  curl | sh entry; checks prerequisites, runs npx looprch@<v> install
   src/
     cli/                      one file per command (add.ts, update.ts, next.ts, ...)
-    core/                     fsx, config, migrations, state, journal, lock, lifecycle, briefs
+    core/                     fsx, config, migrations, state, journal, lock, lifecycle, briefs, contract
     sev3/                     discovery, trust, packets, todo, fingerprint
     gates/                    runner, unittest parser, junit parser
     delegate/                 relay locate, dispatch, result parsing, sessions

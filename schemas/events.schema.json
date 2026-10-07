@@ -18,7 +18,8 @@
         "quota.checked", "quota.wait", "quota.fallback", "assignment.changed", "ratelimit.detected",
         "question.asked", "question.answered", "paused", "resumed", "blocked",
         "todo.ticked", "review.skipped", "handover.accepted", "phase.merged", "phase.closed", "project.done",
-        "spec.changed", "protocol.mismatch", "lock.stale_recovered", "warning"
+        "spec.changed", "protocol.mismatch", "lock.stale_recovered", "warning",
+        "contract.accepted", "contract.amended", "design.escalated", "evidence.checked", "evidence.unbacked"
       ]
     },
     "phase": { "type": ["string", "null"] },

@@ -1,8 +1,10 @@
 import { isNonEmptyString, isObject, isStringArray, oneOf } from "./validate.js";
-import { FINDING_ORIGINS, FINDING_OWNERS, type FindingOrigin, type FindingOwner } from "./state.js";
+import { FINDING_CAUSES, FINDING_ORIGINS, FINDING_OWNERS, type FindingCause, type FindingOrigin, type FindingOwner, type Verification } from "./state.js";
+import { amendmentShapeErrors, contractShapeErrors, dispositionShape, type Amendment, type ContractBody, type Disposition } from "./contract.js";
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
-export const RESOLUTION_STATUSES = ["fixed", "not_fixed"] as const;
+export const RESOLUTION_STATUSES = ["fixed", "not_fixed", "needs_design"] as const;
+export const VERIFICATION_STATUSES = ["verified", "failed", "inspected"] as const;
 
 export const DECISIONS = {
   planner: ["plan_ready", "plan_final", "needs_expansion", "context_answer"],
@@ -22,12 +24,35 @@ export interface ExpansionRequest {
   reason: string;
 }
 
+export interface ResultFinding {
+  id: string;
+  severity?: string;
+  summary: string;
+  files?: string[];
+  section?: string;
+  requirement_ids?: string[];
+  fix?: string;
+  owner?: FindingOwner;
+  origin?: FindingOrigin;
+  cause?: FindingCause;
+  obligations?: string[];
+  related?: string;
+  refs?: string[];
+}
+
+export interface Resolution {
+  id: string;
+  status: (typeof RESOLUTION_STATUSES)[number];
+  note?: string;
+  files?: string[];
+}
+
 export interface RoleResult {
   role: ResultRole;
   decision: string;
   run_id?: string;
-  findings?: { id: string; severity?: string; summary: string; files?: string[]; section?: string; requirement_ids?: string[]; fix?: string; owner?: FindingOwner; origin?: FindingOrigin }[];
-  resolutions?: { id: string; status: (typeof RESOLUTION_STATUSES)[number]; note?: string }[];
+  findings?: ResultFinding[];
+  resolutions?: Resolution[];
   failures?: { id: string; gate_id?: string; summary: string; files?: string[] }[];
   expansion_requests?: ExpansionRequest[];
   files_changed?: string[];
@@ -44,6 +69,12 @@ export interface RoleResult {
   verification_ids?: string[];
   limitations?: string[];
   evidence?: { path: string; lines?: string; note: string }[];
+  contract?: ContractBody;
+  debate_dispositions?: Disposition[];
+  contract_amendment?: Amendment;
+  verifications?: Verification[];
+  contract_review?: { id: string; status: "met" | "not_met"; note?: string }[];
+  prior?: { id: string; status: "fixed" | "unfixed"; note?: string }[];
 }
 
 export interface Extracted {
@@ -81,15 +112,20 @@ function checkList(errors: string[], obj: Record<string, unknown>, key: string, 
   });
 }
 
-const finding = (requireFiles: boolean) => (x: unknown) => {
+const finding = (reviewer: boolean) => (x: unknown) => {
   if (!isObject(x)) return "must be an object";
   if (!isNonEmptyString(x.id)) return "id is required";
   if (!isNonEmptyString(x.summary)) return "summary is required";
   if (x.severity !== undefined && !oneOf(x.severity, SEVERITIES)) return `severity must be one of ${SEVERITIES.join(", ")}`;
-  if (requireFiles && !isStringArray(x.files)) return "files must be a list of paths";
+  if (reviewer && !isStringArray(x.files)) return "files must be a list of paths";
   if (x.fix !== undefined && typeof x.fix !== "string") return "fix must be a string";
   if (x.owner !== undefined && !oneOf(x.owner, FINDING_OWNERS)) return `owner must be one of ${FINDING_OWNERS.join(", ")}`;
   if (x.origin !== undefined && !oneOf(x.origin, FINDING_ORIGINS)) return `origin must be one of ${FINDING_ORIGINS.join(", ")}`;
+  if (reviewer && !oneOf(x.cause, FINDING_CAUSES)) return `${x.id}: cause must be one of ${FINDING_CAUSES.join(", ")}`;
+  if (x.cause === "test" && x.owner !== undefined && x.owner !== "tester") return `${x.id}: a finding with cause test has owner tester`;
+  if (x.obligations !== undefined && !isStringArray(x.obligations)) return "obligations must be a list of contract ids";
+  if (x.refs !== undefined && !isStringArray(x.refs)) return "refs must be a list of contract ids";
+  if (x.related !== undefined && !isNonEmptyString(x.related)) return "related must be a finding id";
   return null;
 };
 
@@ -97,6 +133,24 @@ const resolution = (x: unknown) => {
   if (!isObject(x) || !isNonEmptyString(x.id)) return "needs id";
   if (!oneOf(x.status, RESOLUTION_STATUSES)) return `status must be one of ${RESOLUTION_STATUSES.join(", ")}`;
   if (x.note !== undefined && typeof x.note !== "string") return "note must be a string";
+  if (x.files !== undefined && !isStringArray(x.files)) return "files must be a list of paths";
+  if (x.status === "fixed" && (!isStringArray(x.files) || x.files.length === 0)) return `${x.id}: a fixed resolution lists the files the repair changed in "files"`;
+  return null;
+};
+
+const verification = (x: unknown) => {
+  if (!isObject(x) || !isNonEmptyString(x.id)) return "needs id";
+  if (!oneOf(x.status, VERIFICATION_STATUSES)) return `${x.id}: status must be one of ${VERIFICATION_STATUSES.join(", ")}`;
+  if (!isStringArray(x.tests)) return `${x.id}: tests must be a list of testcase names (use [] when inspected)`;
+  if (!isStringArray(x.variants)) return `${x.id}: variants must be a list (use [] when none)`;
+  if (x.status === "verified" && x.tests.length === 0) return `${x.id}: verified needs the testcase(s) that prove it in "tests"`;
+  if (x.note !== undefined && typeof x.note !== "string") return "note must be a string";
+  return null;
+};
+
+const statusEntry = (statuses: readonly string[]) => (x: unknown) => {
+  if (!isObject(x) || !isNonEmptyString(x.id)) return "needs id";
+  if (!oneOf(x.status, statuses)) return `${x.id}: status must be one of ${statuses.join(", ")}`;
   return null;
 };
 
@@ -119,6 +173,9 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
   checkList(errors, raw, "expansion_requests", expansion);
   switch (expectedRole) {
     case "planner":
+      if (raw.decision === "plan_ready" || raw.decision === "plan_final") errors.push(...contractShapeErrors(raw.contract));
+      checkList(errors, raw, "debate_dispositions", dispositionShape);
+      if (raw.contract_amendment !== undefined) errors.push(...amendmentShapeErrors(raw.contract_amendment));
       break;
     case "plan_debater":
       checkList(errors, raw, "findings", finding(false));
@@ -142,10 +199,13 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       checkList(errors, raw, "tests_written", strings);
       checkList(errors, raw, "failures", (x) => (isObject(x) && isNonEmptyString(x.id) && isNonEmptyString(x.summary) ? null : "needs id and summary"));
       checkList(errors, raw, "manual_gate_reports", (x) => (isObject(x) && isNonEmptyString(x.gate_id) && isNonEmptyString(x.path) ? null : "needs gate_id and path"));
+      checkList(errors, raw, "verifications", verification);
       break;
     case "reviewer":
       checkList(errors, raw, "findings", finding(true));
       checkList(errors, raw, "manual_gate_reports", (x) => (isObject(x) && isNonEmptyString(x.gate_id) && isNonEmptyString(x.path) ? null : "needs gate_id and path"));
+      checkList(errors, raw, "contract_review", statusEntry(["met", "not_met"]));
+      checkList(errors, raw, "prior", statusEntry(["fixed", "unfixed"]));
       if (raw.decision === "changes_requested" && (!Array.isArray(raw.findings) || raw.findings.length === 0)) errors.push("changes_requested needs a non-empty findings list");
       else if (raw.decision === "changes_requested" && (raw.findings as unknown[]).every((f) => isObject(f) && f.severity === "low"))
         errors.push("every finding is low: use approve and list the low findings as notes");

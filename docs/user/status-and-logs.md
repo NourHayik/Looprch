@@ -14,6 +14,9 @@ Lead posts them unchanged.
 | `[PLANNING START]` / `[PLANNING COMPLETE]` | the Planner starts / delivers the first plan |
 | `[DEBATE START]` / `[DEBATE COMPLETE]` | the plan goes to the Plan Debater / its result: changes recommended (count, severities, summary) or no changes |
 | `[PLAN UPDATE START]` / `[PLAN UPDATED]` | the Planner updates the plan after the debate or your revision |
+| `[CONTRACT]`, `[CONTRACT AMENDED]` | the phase contract was accepted (obligations, deferrals, dispositioned debate findings) / amended by a repair design or context answer |
+| `[REPAIR DESIGN]`, `[DESIGN DEBATE COMPLETE]` | the Planner designs a repair before the Implementer runs (and why); the Plan Debater's challenge of that design |
+| `[EVIDENCE MISMATCH]` | Tester verifications that no passing testcase of the gate run backs; the Tester gets the round |
 | `[IMPLEMENTATION …]`, `[TESTING …]`, `[GATES …]`, `[REVIEW …]`, `[REPAIR …]`, `[HANDOVER …]`, `[CLOSING START]` | each stage starts and completes, with the verdict, findings or failed gates |
 | `[REVIEW COMPLETE]` | the review round (n of N), the decision, the findings by severity and, for re-reviews, how many are `unfixed`, `regression` or `missed`; an approval lists its notes |
 | `[REPAIR COMPLETE]` | after a review: how many findings the Implementer reports as fixed and which are not fixed |

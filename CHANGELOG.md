@@ -2,6 +2,98 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.5.0 - 2026-10-07
+
+The CoreBit P-001 runs on 0.4.x kept ending the same way. The Implementer reported a finding
+`fixed`, the Tester reported it `Verified`, and the next review found it `unfixed`. That
+happened in five review rounds (22, 15, 7, 7 and 5 findings). The causes were structural, not
+only model quality:
+
+- The plan never defined the trust source for authentication. It never decided how write
+  ownership is enforced, and never said what "every database target" means. The Implementer
+  invented these designs, and the Debater did not catch them.
+- Each round, the Reviewer kept the finding id but rewrote its Fix. The Implementer patched the
+  new example and the Tester confirmed that same example. Nothing tied a `fixed` or a `Verified`
+  to the diff or to a test that ran.
+- A design defect could only come back to the Implementer as another patch.
+
+The approved plan is now a machine-checked contract shared by every role, and completion claims
+are checked against evidence. Protocol 2: a phase in progress pauses until `looprch resume`.
+
+### Added
+
+- **Phase contract.** `plan_ready` and `plan_final` return a `contract` with obligations and
+  deferrals:
+  - An obligation states a rule or behavior, the single place that enforces it, what the Tester
+    must prove, and which gates prove it.
+  - A deferral states what a later phase delivers, which phase, and the fail-closed behavior until
+    then.
+
+  Looprch writes `.looprch/phases/P-NNN/contract.json` and checks that:
+  - every requirement id mapped to the phase is covered;
+  - requirement and gate ids exist;
+  - deferrals target a later phase;
+  - deferrals from closed phases (`incoming-deferrals.json`) are covered.
+
+  The Implementer, Tester, Reviewer and the handover all get the contract. `handover.md` lists
+  the contract status and the deferrals to later phases.
+- **Debate dispositions.** The Debater challenges the plan and the contract with a fixed list:
+  - requirements
+  - trust sources
+  - architecture
+  - enforcement that only recognizes known bad cases
+  - testability
+  - failure behavior
+  - cross-phase dependencies
+  - places where the Implementer would have to invent a design
+
+  The synthesis must accept or reject every debate finding. An accepted finding names the
+  obligations that carry it.
+- **Finding `cause`.** Each review finding names its cause (`implementation`, `plan`,
+  `requirement`, `cross_phase` or `test`) and the `obligations` it concerns. Round 1 reports
+  `contract_review` (met or not_met) for every obligation and deferral; every `not_met` needs a
+  finding. A report without `## Coverage` is re-asked.
+- **Finding lineages.** A finding's Fix does not change between rounds. A re-review says `fixed`
+  or `unfixed` for every earlier finding (`prior`). It may reuse an id only as `unfixed`. A new
+  way to break the same rule is a new finding with `related`. `status --json` shows the lineages
+  in `current.finding_ledger`.
+- **Repair designs as contract amendments.** These findings go to a Planner repair design before
+  the Implementer runs:
+  - findings with a plan, requirement or cross-phase cause (already in round 1);
+  - findings a re-review reports as `unfixed`;
+  - `related` findings;
+  - the Implementer's `needs_design` resolutions.
+
+  The design is a `contract_amendment` that lists the findings it answers in `resolves`. When the
+  design covers a high or critical finding, or replaces a design that did not hold, the Plan
+  Debater challenges it once (`design_review`) and the Planner revises it. New progress lines:
+  `[CONTRACT]`, `[CONTRACT AMENDED]`, `[REPAIR DESIGN]` and `[DESIGN DEBATE COMPLETE]`.
+- **Tester verifications backed by gate evidence.** The Tester returns `verifications`:
+  - on its first run, one per obligation and deferral;
+  - after a review repair, one per finding.
+
+  Each verification names the testcases that prove it and the variants tried. After the gates,
+  Looprch matches every claimed testcase against the passing testcases of its own gate run
+  (JUnit, or verbose unittest output). Without named testcases, the claim must name an existing
+  test file and a name in it. Unbacked claims send a round to the Tester alone
+  (`[EVIDENCE MISMATCH]`, counted as a test repair).
+- **Implementer `fixed` checked against the diff.** A `fixed` resolution lists its `files`, and
+  Looprch rejects it when none of them changed since the reviewed tree.
+
+### Changed
+
+- Role prompts:
+  - The Planner writes an implementation-ready plan with explicit trust boundaries, deferrals and
+    an enforceability rule: one point whose completeness can be checked, never a list of bad
+    forms.
+  - The Implementer asks for a design (`needs_context`, `needs_design`) instead of inventing one.
+  - The Tester derives its obligations from the contract and tries to falsify every repair.
+  - The Reviewer reviews against the contract and beyond it.
+- New journal events: `contract.accepted`, `contract.amended`, `design.escalated`,
+  `evidence.checked` and `evidence.unbacked`. `result.accepted` adds `cause`, `related`,
+  `obligations`, `verifications`, `prior`, `contract_unmet` and `dispositions`.
+- `PROTOCOL` is 2.
+
 ## 0.4.2 - 2026-10-06
 
 With 0.4.1 the CoreBit run went into a fourth review (allowed by the user). The same four

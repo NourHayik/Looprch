@@ -58,6 +58,9 @@ export const FINDING_OWNERS = ["implementer", "tester"] as const;
 export type FindingOwner = (typeof FINDING_OWNERS)[number];
 export const FINDING_ORIGINS = ["unfixed", "regression", "missed"] as const;
 export type FindingOrigin = (typeof FINDING_ORIGINS)[number];
+/** Where a review finding's defect comes from; decides who repairs it first. */
+export const FINDING_CAUSES = ["implementation", "plan", "requirement", "cross_phase", "test"] as const;
+export type FindingCause = (typeof FINDING_CAUSES)[number];
 
 export interface Finding {
   id: string;
@@ -65,16 +68,53 @@ export interface Finding {
   summary: string;
   files?: string[];
   gate_id?: string;
-  /** Review findings: the acceptance condition of the repair. */
+  /** Review findings: the acceptance condition of the repair (kept from the first report). */
   fix?: string;
   owner?: FindingOwner;
   /** Re-review findings only. */
   origin?: FindingOrigin;
+  cause?: FindingCause;
+  /** Contract obligation or deferral ids the finding concerns. */
+  obligations?: string[];
+  /** Id of an earlier finding about the same rule (a new way to break it). */
+  related?: string;
+}
+
+/** One review finding lineage (an id plus the findings `related` to it) across the review rounds of a phase. */
+export interface LedgerEntry {
+  lineage: string;
+  severity: string | null;
+  cause: FindingCause | null;
+  owner: FindingOwner | null;
+  /** The Fix of the first report; re-reports keep it. */
+  fix: string | null;
+  first_round: number;
+  last_round: number;
+  reports: number;
+  /** Planner repair designs (contract amendments) that covered this finding. */
+  designs: number;
+  status: "open" | "fixed";
+}
+
+/** A Planner repair design in progress: design, then (optionally) a Plan Debater challenge, then a revision. */
+export interface DesignState {
+  findings: string[];
+  step: "design" | "debate" | "revise";
+  debate: boolean;
+  reason: "plan_cause" | "unfixed" | "related" | "needs_design";
+}
+
+export interface Verification {
+  id: string;
+  status: "verified" | "failed" | "inspected";
+  tests: string[];
+  variants: string[];
+  note?: string;
 }
 
 /** Instructions carried into the next brief for a role (repair findings, re-ask, user note). */
 export interface Delta {
-  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "revise" | "retry" | "switch";
+  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "design_review" | "revise" | "retry" | "switch";
   text: string;
   findings?: Finding[];
   paths?: string[];
@@ -118,6 +158,20 @@ export interface Current {
   repair_reports?: string[];
   /** Findings of an approving review (notes), listed in the handover. */
   review_notes?: Finding[];
+  /** Ids of the Plan Debater's findings; the synthesis must disposition each one. */
+  debate_findings?: string[];
+  /** Review finding lineages of this phase, keyed by finding id. */
+  finding_ledger?: Record<string, LedgerEntry>;
+  /** Planner repair design in progress. */
+  design?: DesignState | null;
+  /** Finding ids that already got a repair design in the current repair round. */
+  designed_this_round?: string[];
+  /** The Tester's verifications of its last run (checked against the gate evidence). */
+  tester_verifications?: Verification[];
+  /** Contract ids a contract amendment retired (their old verifications are no longer checked). */
+  retired_obligations?: string[];
+  /** Obligation status from the latest review that reported it. */
+  contract_review?: { id: string; status: "met" | "not_met" }[];
   expansion_round: number;
   reask_count: number;
   extra_rounds: number;
@@ -240,6 +294,12 @@ export function newCurrent(phase: string, title: string, at: string): Current {
     reviewed_tree: null,
     repair_reports: [],
     review_notes: [],
+    debate_findings: [],
+    finding_ledger: {},
+    design: null,
+    designed_this_round: [],
+    tester_verifications: [],
+    contract_review: [],
     expansion_round: 0,
     reask_count: 0,
     extra_rounds: 0,

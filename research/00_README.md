@@ -54,6 +54,8 @@ taken after reviewing those requirements. Every such change is listed in the dec
 | D-20 | User and developer documentation in English only. | User |
 | D-21 | The Looprch source folder (`Looprch-4`) is a local git repository on `main`, no remote. | User |
 | D-22 | SEV3 observations are recorded separately in `../sev3_observations_for_review.md`; SEV3 is not changed. | User |
+| D-23 | The approved plan carries a machine-checked phase contract (`contract.json`: obligations and deferrals). Looprch checks that it covers every mapped requirement, that debate findings are dispositioned, and that the Tester's verifications and the Reviewer's `contract_review` cover it; the Tester's claimed testcases must pass in Looprch's own gate run. Plan, Implementer, Tester and Reviewer share one contract instead of four readings of the plan. | CoreBit P-001 evidence (0.5.0) |
+| D-24 | Review findings carry a `cause`; findings form lineages (`related`, a Fix that never changes). Design causes, repeated (`unfixed`, `related`) and `needs_design` findings go to a Planner repair design (a contract amendment) before the Implementer; serious or repeated designs get one Plan Debater challenge. No new stage, role or review round. | CoreBit P-001 evidence (0.5.0) |
 
 ## Lessons from earlier builds (evidence, not code to port)
 

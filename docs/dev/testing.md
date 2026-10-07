@@ -21,8 +21,15 @@ global git config, and clears host environment markers (so tests behave the same
   and plays every role from the brief's machine-readable header. Behavior is scripted per
   `(agent, role, phase, task, nth)` by the JSON file in `LOOPRCH_FAKE_SCENARIO`: status
   (completed, failed, timeout, unavailable), decisions, `sleep_ms`, `kill_self`, `usage_error`,
-  `no_session`, `read_only_violation`, `touch`, `omit_block`, `omit_new_file`, `variant`. Calls
-  are logged to `fake-calls.jsonl`.
+  `no_session`, `read_only_violation`, `touch`, `omit_block`, `omit_new_file`, `variant`. The
+  fake Planner returns a contract covering the phase's requirements (`drop_requirement`,
+  `deferrals`, `contract` override it), dispositions every debate finding (`omit_dispositions`)
+  and amends the contract for a repair design (`omit_amendment`, `contract_amendment`). The fake
+  Implementer edits `noteapp.py` on review repairs (`no_change`, `resolution_status`). The fake
+  Tester verifies every contract id and Delta finding (`verifications`, `omit_verifications`,
+  `bad_tests`). The fake Reviewer adds `cause`, `## Coverage`, `contract_review` and `prior`
+  (`raw_findings`, `omit_prior`, `prior`, `contract_review`, `omit_contract_review`). Calls are
+  logged to `fake-calls.jsonl`.
 - `test/fixtures/notes-impl/`: the application code and tests the fake Implementer and Tester
   write per phase (`buggy/` for a failing first attempt).
 - `test/helpers/fakes.ts`: installs fake relays in `~/.agents/skills`, fake agent binaries and a
@@ -36,7 +43,7 @@ global git config, and clears host environment markers (so tests behave the same
 |---|---|
 | unit | core (fsx, lock, journal, config, migrations, state), agents, sev3 helpers, gates and result parsers, briefs, quota policy, delegate argv/sessions/mode resolution, skills consistency, status rendering |
 | integration | install/update/rollback/uninstall, add/remove/list, SEV3 discovery and packets, git operations, doctor and config, lifecycle transition rows, delegate dispatch, status/log/review/worker |
-| e2e | E-1 to E-16 on notes-spec: happy path, repairs, cap, detached runs, interruption, spec change, quota wait and fallback, rate limits, read-only, re-asks, D-05, merge conflict, HEAD mismatch and pause |
+| e2e | E-1 to E-16 on notes-spec: happy path, repairs, cap, detached runs, interruption, spec change, quota wait and fallback, rate limits, read-only, re-asks, D-05, merge conflict, HEAD mismatch and pause. C-1 to C-15: the phase contract and convergence (uncovered requirements, debate dispositions, Plan-caused findings, violated obligations, contract_review coverage, false `fixed`, false `Verified`, missing verifications, `related` variants, re-review consistency, `needs_design`, redesign with a design debate, deferrals across phases, a protocol-1 phase without a contract) |
 
 No test makes paid model calls. The manual smoke checklist for real agents is in
 [debugging.md](debugging.md).

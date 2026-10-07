@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://looprch.dev/schemas/role-results.schema.json",
   "title": "The looprch-result block at the end of every role's final message",
-  "description": "Documentation schema. The CLI validates with src/core/results.ts (validateResult) and additionally checks that the decision fits the task.",
+  "description": "Documentation schema. The CLI validates with src/core/results.ts (validateResult) and additionally checks the phase rules in src/core/lifecycle.ts (phaseRuleViolation): contract coverage, debate dispositions, resolution files against the diff, verification coverage, contract_review coverage and re-review consistency.",
   "type": "object",
   "required": ["role", "decision"],
   "properties": {
@@ -12,7 +12,23 @@
     "expansion_requests": { "type": "array", "items": { "$ref": "#/$defs/expansion" } }
   },
   "oneOf": [
-    { "properties": { "role": { "const": "planner" }, "decision": { "enum": ["plan_ready", "plan_final", "needs_expansion", "context_answer"] } } },
+    {
+      "properties": {
+        "role": { "const": "planner" },
+        "decision": { "enum": ["plan_ready", "plan_final", "needs_expansion", "context_answer"] },
+        "contract": { "$ref": "#/$defs/contract", "description": "Required with plan_ready and plan_final" },
+        "debate_dispositions": {
+          "description": "Synthesis: one entry per Plan Debate finding",
+          "type": "array",
+          "items": { "type": "object", "required": ["id", "decision", "reason"], "properties": { "id": { "type": "string" }, "decision": { "enum": ["accept", "reject"] }, "reason": { "type": "string" }, "refs": { "$ref": "#/$defs/ids" } } }
+        },
+        "contract_amendment": {
+          "description": "context_answer: required for a repair design; each repair obligation lists the finding ids it answers in resolves",
+          "type": "object",
+          "properties": { "obligations": { "type": "array", "items": { "$ref": "#/$defs/obligation" } }, "deferrals": { "type": "array", "items": { "$ref": "#/$defs/deferral" } }, "retire": { "$ref": "#/$defs/ids" } }
+        }
+      }
+    },
     {
       "properties": {
         "role": { "const": "plan_debater" },
@@ -26,9 +42,13 @@
         "decision": { "enum": ["implemented", "needs_context", "handover_ready"] },
         "files_changed": { "$ref": "#/$defs/paths" },
         "resolutions": {
-          "description": "Repair after a review: one entry per finding the Delta assigns to the Implementer",
+          "description": "Repair after a review: one entry per finding the Delta assigns to the Implementer. fixed needs files that changed since the review.",
           "type": "array",
-          "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" } } }
+          "items": {
+            "type": "object",
+            "required": ["id", "status"],
+            "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed", "needs_design"] }, "note": { "type": "string" }, "files": { "$ref": "#/$defs/paths" } }
+          }
         },
         "context_request": {
           "type": "object",
@@ -51,6 +71,15 @@
         "role": { "const": "tester" },
         "decision": { "enum": ["pass", "fail"] },
         "tests_written": { "$ref": "#/$defs/paths" },
+        "verifications": {
+          "description": "One per contract obligation and deferral (first run) and per review finding in the Delta. verified tests must match passing testcases of Looprch's gate run.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "status", "tests", "variants"],
+            "properties": { "id": { "type": "string" }, "status": { "enum": ["verified", "failed", "inspected"] }, "tests": { "$ref": "#/$defs/paths" }, "variants": { "type": "array", "items": { "type": "string" } }, "note": { "type": "string" } }
+          }
+        },
         "failures": { "type": "array", "items": { "type": "object", "required": ["id", "summary"], "properties": { "id": { "type": "string" }, "gate_id": { "type": "string" }, "summary": { "type": "string" }, "files": { "$ref": "#/$defs/paths" } } } },
         "manual_gate_reports": { "$ref": "#/$defs/reports" }
       }
@@ -59,7 +88,9 @@
       "properties": {
         "role": { "const": "reviewer" },
         "decision": { "enum": ["approve", "changes_requested"] },
-        "findings": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/finding" }], "required": ["files"] } },
+        "findings": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/finding" }], "required": ["files", "cause"] } },
+        "contract_review": { "description": "First review: met or not_met for every obligation and deferral", "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["met", "not_met"] } } } },
+        "prior": { "description": "Re-reviews: fixed or unfixed for every earlier finding in the Delta", "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "unfixed"] } } } },
         "manual_gate_reports": { "$ref": "#/$defs/reports" }
       }
     },
@@ -73,6 +104,40 @@
   ],
   "$defs": {
     "paths": { "type": "array", "items": { "type": "string" } },
+    "ids": { "type": "array", "items": { "type": "string" } },
+    "obligation": {
+      "type": "object",
+      "required": ["id", "requirements", "kind", "statement", "enforcement", "verify", "gates"],
+      "properties": {
+        "id": { "type": "string" },
+        "requirements": { "$ref": "#/$defs/ids" },
+        "kind": { "enum": ["behavior", "invariant", "boundary", "interface", "data", "failure", "production", "procedure"] },
+        "statement": { "type": "string" },
+        "enforcement": { "type": "string" },
+        "verify": { "type": "string" },
+        "gates": { "$ref": "#/$defs/ids" },
+        "covers": { "$ref": "#/$defs/ids", "description": "Incoming deferrals (P-NNN/X-n) this obligation takes over" },
+        "resolves": { "$ref": "#/$defs/ids", "description": "Amendments: the review findings this obligation answers" }
+      }
+    },
+    "deferral": {
+      "type": "object",
+      "required": ["id", "requirements", "what", "to_phase", "interim"],
+      "properties": {
+        "id": { "type": "string" },
+        "requirements": { "$ref": "#/$defs/ids" },
+        "what": { "type": "string" },
+        "to_phase": { "type": "string" },
+        "interim": { "type": "string", "description": "Fail-closed behavior in this phase" },
+        "covers": { "$ref": "#/$defs/ids" },
+        "resolves": { "$ref": "#/$defs/ids" }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "required": ["obligations", "deferrals"],
+      "properties": { "obligations": { "type": "array", "items": { "$ref": "#/$defs/obligation" } }, "deferrals": { "type": "array", "items": { "$ref": "#/$defs/deferral" } } }
+    },
     "finding": {
       "type": "object",
       "required": ["id", "summary"],
@@ -83,8 +148,12 @@
         "files": { "type": "array", "items": { "type": "string" } },
         "section": { "type": "string" },
         "requirement_ids": { "type": "array", "items": { "type": "string" } },
-        "fix": { "type": "string", "description": "Reviewer: the acceptance condition of the repair" },
-        "owner": { "enum": ["implementer", "tester"], "description": "Reviewer: the role that fixes it (default implementer)" },
+        "refs": { "$ref": "#/$defs/ids", "description": "Plan Debater: contract ids the finding concerns" },
+        "fix": { "type": "string", "description": "Reviewer: the acceptance condition of the repair (kept unchanged across rounds)" },
+        "owner": { "enum": ["implementer", "tester"], "description": "Reviewer: the role that fixes it (default implementer; cause test means tester)" },
+        "cause": { "enum": ["implementation", "plan", "requirement", "cross_phase", "test"], "description": "Reviewer: where the defect comes from; plan, requirement and cross_phase go to a Planner repair design first" },
+        "obligations": { "$ref": "#/$defs/ids", "description": "Reviewer: contract ids the finding concerns" },
+        "related": { "type": "string", "description": "Reviewer: an earlier finding about the same rule" },
         "origin": { "enum": ["unfixed", "regression", "missed"], "description": "Reviewer, re-reviews only" }
       }
     },

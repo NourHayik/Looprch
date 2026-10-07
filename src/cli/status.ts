@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { VERSION } from "../core/constants.js";
 import { loadConfig, reviewRounds } from "../core/config.js";
+import { loadContract } from "../core/contract.js";
 import { now } from "../core/clock.js";
 import { readEvents, type LrEvent } from "../core/journal.js";
 import { nextDescription } from "../core/lifecycle.js";
@@ -37,6 +38,9 @@ export function buildStatus(root: string) {
           review_changes: c.review_changes ?? 0,
           review_cap: reviewRounds(cfg) + (c.extra_reviews ?? 0),
           final_review_pending: !!c.final_review_pending,
+          contract_revision: loadContract(root, c.phase)?.revision ?? null,
+          design: c.design ?? null,
+          finding_ledger: c.finding_ledger ?? {},
         }
       : null,
     active: run

@@ -96,7 +96,7 @@ describe("lifecycle transition rows", () => {
     assert.equal(a.action, "paused");
     assert.match(a.reason, /protocol_changed/);
     cli(p, ["resume"]);
-    assert.equal(state(p).protocol, 1);
+    assert.equal(state(p).protocol, 2);
     assert.notEqual(next(p).action, "paused");
     p.s.cleanup();
   });

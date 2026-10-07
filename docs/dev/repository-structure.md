@@ -10,7 +10,7 @@ scripts/build-manifest.mjs  writes VERSION and MANIFEST.sha256
 src/
   cli/        one file per command or command group; main.ts dispatches
   core/       constants, errors, paths, fsx, lock, journal, config, migrations, state, runs,
-              lifecycle, preflight, mode, actions, results, briefs, clock, validate
+              lifecycle, preflight, mode, actions, results, briefs, contract, clock, validate
   sev3/       discovery, trust, fingerprint, packets, todo, toolkit, manifest
   gates/      runner, unittest, junit
   delegate/   locate, discover, dispatch, result, sessions

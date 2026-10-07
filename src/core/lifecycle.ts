@@ -14,7 +14,8 @@ import { projectPaths } from "./paths.js";
 import { preflightChecks } from "./preflight.js";
 import { extractResultBlock, validateResult, type ExpansionRequest, type RoleResult } from "./results.js";
 import { loadRun, relayOutDir, saveRun, type RunRecord, type RunStatus } from "./runs.js";
-import { loadState, markPhaseStart, newCurrent, saveState, type AssignmentChange, type Delta, type Finding, type QuestionKind, type Scope, type Stage, type State } from "./state.js";
+import { loadState, markPhaseStart, newCurrent, saveState, type AssignmentChange, type Delta, type DesignState, type Finding, type LedgerEntry, type QuestionKind, type Scope, type Stage, type State, type Verification } from "./state.js";
+import { amend, contractIds, contractProblems, dispositionProblems, incomingDeferrals, loadContract, newContract, saveContract, unresolvedByAmendment, type Contract } from "./contract.js";
 import { adapterFor } from "../agents/index.js";
 import { readRelayResult } from "../delegate/result.js";
 import { forgetSession, recordSession, resumableSession, sessionKey } from "../delegate/sessions.js";
@@ -29,7 +30,7 @@ import { commitAll, currentBranch, dirtyFiles, gitOk, hasCommits, head } from ".
 import { commitBaseline, ensureRepo, requireIdentity } from "../git/baseline.js";
 import { closePhase, phaseBranch, startPhaseBranch } from "../git/phase.js";
 import { changedBetween, diffNameStatus, snapshotTree } from "../git/snapshot.js";
-import { loadGates, type GatesOutcome } from "../gates/runner.js";
+import { loadGates, testcaseIndex, unbackedTests, type GatesOutcome } from "../gates/runner.js";
 
 export interface Engine {
   root: string;
@@ -208,6 +209,7 @@ function step(e: Engine): Action | null {
     }
     case "implementing":
     case "repairing":
+      if (c.design) return issueRun(e, c.design.step === "debate" ? "plan_debater" : "planner", c.design.step === "debate" ? "design_review" : "context_answer");
       if (c.context_request) return issueRun(e, "planner", "context_answer");
       return issueRun(e, "implementer", c.stage === "implementing" ? "implementation" : "repair");
     case "testing":
@@ -409,36 +411,44 @@ function runInputs(e: Engine, role: Role, task: Task, phase: PhaseDef): { path: 
   const c = cur(e);
   const list: [string, string][] = [];
   const plan: [string, string] = ["plan.md", "approved implementation plan"];
+  const contract: [string, string] = ["contract.json", "the phase contract: binding obligations (rule, enforcement point, what proves it) and deferrals"];
   switch (task) {
     case "planning":
       break;
     case "debate":
-      list.push(["plan.md", "the plan to review"]);
+      list.push(["plan.md", "the plan to review"], ["contract.json", "the plan's contract (obligations and deferrals) to challenge"]);
       break;
     case "synthesis":
-      list.push(["plan.md", "your plan"], ["debate.md", "the single Plan Debate pass"]);
+      list.push(["plan.md", "your plan"], ["contract.json", "your contract"], ["debate.md", "the single Plan Debate pass"]);
       break;
     case "revise":
+      list.push(["plan.md", "the current plan"], ["contract.json", "the current contract"]);
+      break;
     case "context_answer":
-      list.push(["plan.md", "the current plan"]);
+      list.push(["plan.md", "the current plan"], ["contract.json", "the current contract"]);
+      if (c.design) list.push(["review.md", "the review whose findings need a repair design"]);
+      if (c.design?.step === "revise") list.push([`design-debate-${c.addenda.length}.md`, "the Plan Debater's challenge of your repair design"]);
+      break;
+    case "design_review":
+      list.push(["plan.md", "the approved plan"], ["contract.json", "the contract including the proposed amendment"], ["review.md", "the review findings the design answers"]);
       break;
     case "implementation":
-      list.push(plan);
+      list.push(plan, contract);
       break;
     case "repair":
-      list.push(plan, ["test-report.md", "latest test report"], ["gates.json", "machine evidence from Looprch's gate runs"]);
+      list.push(plan, contract, ["test-report.md", "latest test report"], ["gates.json", "machine evidence from Looprch's gate runs"]);
       if (c.repair_source === "review") list.push(["review.md", "review findings to address"]);
       break;
     case "testing":
-      list.push(plan);
+      list.push(plan, contract);
       if (c.round > 0) list.push(["gates.json", "earlier gate runs"]);
       if (c.repair_source === "review") list.push(["review.md", "review findings to verify"]);
       break;
     case "review":
-      list.push(plan, ["test-report.md", "Tester report"], ["gates.json", "machine evidence (bound to the reviewed snapshot)"]);
+      list.push(plan, contract, ["test-report.md", "Tester report"], ["gates.json", "machine evidence (bound to the reviewed snapshot)"]);
       break;
     case "handover":
-      list.push(plan, ["gates.json", "final gate runs"], ["test-report.md", "Tester report"], ["review.md", "Reviewer report"]);
+      list.push(plan, contract, ["gates.json", "final gate runs"], ["test-report.md", "Tester report"], ["review.md", "Reviewer report"]);
       break;
     case "adhoc_review":
     case "worker":
@@ -449,6 +459,14 @@ function runInputs(e: Engine, role: Role, task: Task, phase: PhaseDef): { path: 
     }
   }
   const out = existingInputs(e, list);
+  if (task === "planning" || task === "synthesis" || task === "revise") {
+    const incoming = incomingDeferrals(e.root, e.manifest, e.st, c.phase);
+    if (incoming.length) {
+      const path = phaseFile(e, "incoming-deferrals.json");
+      writeFileAtomic(path, `${JSON.stringify(incoming, null, 2)}\n`);
+      out.push({ path: rel(e, path), why: `deferrals that closed phases made to ${c.phase}; the contract must cover each one (list its ref in "covers") or defer it again` });
+    }
+  }
   if (task === "testing" || task === "review")
     for (const p of c.repair_reports ?? []) out.push({ path: p, why: "Implementer repair report: how each finding was fixed (resolutions, limitations)" });
   for (const a of c.addenda) out.push({ path: a, why: "Planner addendum (context answer or repair design); binding for this phase" });
@@ -800,6 +818,7 @@ const TASK_DECISIONS: Record<Task, string[]> = {
   revise: ["plan_final", "plan_ready"],
   context_answer: ["context_answer"],
   debate: ["findings", "no_findings", "needs_expansion"],
+  design_review: ["findings", "no_findings"],
   implementation: ["implemented", "needs_context"],
   repair: ["implemented", "needs_context"],
   handover: ["handover_ready"],
@@ -847,7 +866,7 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessage: string, se
     else result = v.result;
   }
   if (result && !run.side) {
-    const why = phaseRuleViolation(e, run, result);
+    const why = phaseRuleViolation(e, run, result, ex.artifact);
     if (why) {
       errors = [why];
       result = null;
@@ -881,9 +900,22 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessage: string, se
       task: run.task,
       findings_total: reported.length,
       severities: severityCounts(reported),
-      findings: reported.map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), ...(f.owner ? { owner: f.owner } : {}), ...(f.origin ? { origin: f.origin } : {}), summary: f.summary.slice(0, 300) })),
+      findings: reported.map((f) => ({
+        id: f.id,
+        ...(f.severity ? { severity: f.severity } : {}),
+        ...(f.owner ? { owner: f.owner } : {}),
+        ...(f.origin ? { origin: f.origin } : {}),
+        ...("cause" in f && f.cause ? { cause: f.cause } : {}),
+        ...("related" in f && f.related ? { related: f.related } : {}),
+        ...("obligations" in f && f.obligations?.length ? { obligations: f.obligations } : {}),
+        summary: f.summary.slice(0, 300),
+      })),
       ...(run.task === "review" && !run.side ? { review_round: (st.current?.review_changes ?? 0) + 1, review_cap: reviewCap(e) } : {}),
-      ...(result.resolutions ? { resolutions: result.resolutions.map((r) => ({ id: r.id, status: r.status })) } : {}),
+      ...(result.resolutions ? { resolutions: result.resolutions.map((r) => ({ id: r.id, status: r.status, ...(r.files ? { files: r.files.length } : {}) })) } : {}),
+      ...(result.verifications ? { verifications: result.verifications.map((v) => ({ id: v.id, status: v.status, tests: v.tests.length, variants: v.variants.length })) } : {}),
+      ...(result.prior ? { prior: result.prior.map((p) => ({ id: p.id, status: p.status })) } : {}),
+      ...(result.contract_review ? { contract_unmet: result.contract_review.filter((x) => x.status === "not_met").map((x) => x.id) } : {}),
+      ...(result.debate_dispositions ? { dispositions: result.debate_dispositions.map((d) => ({ id: d.id, decision: d.decision })) } : {}),
     },
   });
   if (run.side) return { status: "accepted", decision: result.decision, artifact: writeSideOutput(e, run, ex.artifact, result), errors: [] };
@@ -896,20 +928,154 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessage: string, se
   return { status: "accepted", decision: result.decision, artifact, errors: [] };
 }
 
-/** Checks that need the phase state: resolutions cover the assigned findings; the final review blocks only on high/critical. */
-function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult): string | null {
+function contractContext(e: Engine) {
+  const c = cur(e);
+  return { phase: phaseDef(e, c.phase), manifest: e.manifest, incoming: incomingDeferrals(e.root, e.manifest, e.st, c.phase) };
+}
+
+function obligationOf(contract: Contract | null, id: string) {
+  return contract?.obligations.find((o) => o.id === id) ?? null;
+}
+
+const TEST_GATE_KINDS = new Set(["test", "integration"]);
+/** gate_id of the problems Looprch raises when a Tester claim is not backed by the gate evidence. */
+const EVIDENCE_GATE = "evidence-binding";
+
+/** An obligation the Tester may mark `inspected`: procedural, or proven only by non-test gates. */
+function inspectable(e: Engine, contract: Contract | null, id: string): boolean {
+  if (contract?.deferrals.some((d) => d.id === id)) return true;
+  const o = obligationOf(contract, id);
+  if (!o) return false;
+  if (o.kind === "procedure") return true;
+  const gates = phaseDef(e, cur(e).phase).gates;
+  return o.gates.every((g) => !TEST_GATE_KINDS.has(gates.find((x) => x.id === g)?.kind ?? "test"));
+}
+
+function joinProblems(list: string[]): string | null {
+  return list.length ? list.join("; ") : null;
+}
+
+/**
+ * Checks that need the phase state: the contract covers the phase, debate findings are
+ * dispositioned, resolutions and verifications cover their findings and match the diff and the
+ * contract, reviews cover the contract and stay consistent with earlier findings.
+ */
+function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: string): string | null {
   const c = e.st.current;
   if (!c) return null;
-  if (run.task === "repair" && r.decision === "implemented" && c.repair_source === "review") {
-    const got = new Set((r.resolutions ?? []).map((x) => x.id));
-    const missing = (c.deltas.implementer?.findings ?? []).map((f) => f.id).filter((id) => !got.has(id));
-    if (missing.length) return `resolutions must list every finding assigned to you ({"id","status":"fixed|not_fixed","note"}); missing: ${missing.join(", ")}`;
+  const contract = loadContract(e.root, c.phase);
+  const problems: string[] = [];
+  switch (run.task) {
+    case "planning":
+    case "synthesis":
+    case "revise": {
+      if (!r.contract) break;
+      problems.push(...contractProblems(r.contract, contractContext(e)));
+      if (run.task === "synthesis") problems.push(...dispositionProblems(r.debate_dispositions, c.debate_findings ?? [], r.contract));
+      break;
+    }
+    case "context_answer": {
+      if (contract && r.contract_amendment) problems.push(...contractProblems(amend(contract, r.contract_amendment), contractContext(e)).map((p) => `after the amendment: ${p}`));
+      if (c.design) {
+        if (!r.contract_amendment) problems.push('a repair design must amend the contract: return "contract_amendment" with the obligations (or deferrals) that define each repair, each listing the finding ids it answers in "resolves"');
+        const open = unresolvedByAmendment(r.contract_amendment, c.design.findings);
+        if (r.contract_amendment && open.length) problems.push(`every finding of the repair design needs an amended obligation or deferral that lists it in "resolves"; missing: ${open.join(", ")}`);
+      }
+      break;
+    }
+    case "repair": {
+      if (r.decision !== "implemented" || c.repair_source !== "review") break;
+      const got = new Map((r.resolutions ?? []).map((x) => [x.id, x]));
+      const missing = (c.deltas.implementer?.findings ?? []).map((f) => f.id).filter((id) => !got.has(id));
+      if (missing.length) problems.push(`resolutions must list every finding assigned to you ({"id","status":"fixed|not_fixed|needs_design","note","files"}); missing: ${missing.join(", ")}`);
+      if (c.reviewed_tree) {
+        const changed = new Set(changedBetween(e.root, c.reviewed_tree, snapshotTree(e.root)));
+        const norm = (p: string) => (p.startsWith(`${e.root}/`) ? p.slice(e.root.length + 1) : p).replace(/^\.\//, "");
+        const unchanged = (r.resolutions ?? []).filter((x) => x.status === "fixed" && !(x.files ?? []).some((f) => changed.has(norm(f)))).map((x) => x.id);
+        if (unchanged.length) problems.push(`these resolutions say fixed, but none of their files changed since the review: ${unchanged.join(", ")}. List the files your repair changed, or report not_fixed`);
+      }
+      break;
+    }
+    case "testing": {
+      const verifs = r.verifications ?? [];
+      const byId = new Map(verifs.map((v) => [v.id, v]));
+      const failed = verifs.filter((v) => v.status === "failed").map((v) => v.id);
+      if (r.decision === "pass" && failed.length) problems.push(`decision pass with failed verifications (${failed.join(", ")}): return fail and list them in failures`);
+      if (contract) {
+        const known = new Set((c.tester_verifications ?? []).map((v) => v.id));
+        const uncovered = contractIds(contract).filter((id) => !byId.has(id) && !known.has(id));
+        if (uncovered.length) problems.push(`verifications must cover every contract obligation and deferral ({"id","status":"verified|failed|inspected","tests":[testcase names],"variants":[]}); missing: ${uncovered.slice(0, 30).join(", ")}${uncovered.length > 30 ? ` and ${uncovered.length - 30} more` : ""}`);
+      }
+      const assigned = (c.deltas.tester?.findings ?? []).filter((f) => c.repair_source === "review" || f.gate_id === EVIDENCE_GATE);
+      const unverified = assigned.map((f) => f.id).filter((id) => !byId.has(id));
+      if (unverified.length) problems.push(`verifications must list every review finding in the Delta; missing: ${unverified.join(", ")}`);
+      for (const f of assigned) {
+        const v = byId.get(f.id);
+        if (!v) continue;
+        const serious = f.severity === "high" || f.severity === "critical";
+        if (v.status === "verified" && serious && !v.variants.length) problems.push(`${f.id} is ${f.severity}: list the variants you tested beyond the Reviewer's example in "variants"`);
+        if (v.status === "inspected" && serious) problems.push(`${f.id} is ${f.severity}: verify it with a test (status verified with tests), not by inspection`);
+      }
+      for (const v of verifs) {
+        if (v.status !== "inspected" || assigned.some((f) => f.id === v.id)) continue;
+        if (contract && contractIds(contract).includes(v.id) && !inspectable(e, contract, v.id)) problems.push(`${v.id} is checked by a test gate: verify it with a test, not by inspection`);
+      }
+      break;
+    }
+    case "review": {
+      const n = (c.review_changes ?? 0) + 1;
+      if (!/^#{1,3}\s*Coverage\b/m.test(artifact)) problems.push("the review report must start with a ## Coverage section");
+      const findings = r.findings ?? [];
+      const ids = new Set(contractIds(contract));
+      for (const f of findings) {
+        const bad = (f.obligations ?? []).filter((o) => !ids.has(o));
+        if (contract && bad.length) problems.push(`${f.id}: obligations ${bad.join(", ")} are not in contract.json`);
+      }
+      if (contract && n === 1) {
+        const reviewed = new Map((r.contract_review ?? []).map((x) => [x.id, x.status]));
+        const missing = [...ids].filter((id) => !reviewed.has(id));
+        if (missing.length) problems.push(`contract_review must give met or not_met for every obligation and deferral in contract.json; missing: ${missing.slice(0, 30).join(", ")}${missing.length > 30 ? ` and ${missing.length - 30} more` : ""}`);
+        const cited = new Set(findings.flatMap((f) => f.obligations ?? []));
+        const orphan = [...reviewed].filter(([id, s]) => s === "not_met" && !cited.has(id)).map(([id]) => id);
+        if (orphan.length) problems.push(`every not_met obligation needs a finding that lists it in "obligations": ${orphan.join(", ")}`);
+      }
+      problems.push(...rereviewProblems(c, r));
+      if (r.decision === "changes_requested" && n >= reviewCap(e) && !findings.some((f) => f.severity === "high" || f.severity === "critical"))
+        problems.push("this is the final review: changes_requested needs a high or critical finding; approve and keep the medium and low findings in findings");
+      break;
+    }
+    default:
+      break;
   }
-  if (run.task === "review" && r.decision === "changes_requested" && (c.review_changes ?? 0) + 1 >= reviewCap(e)) {
-    if (!(r.findings ?? []).some((f) => f.severity === "high" || f.severity === "critical"))
-      return "this is the final review: changes_requested needs a high or critical finding; approve and keep the medium and low findings in findings";
+  return joinProblems(problems);
+}
+
+/** A re-review states fixed/unfixed for every earlier finding; ids and origins must agree with that. */
+function rereviewProblems(c: NonNullable<State["current"]>, r: RoleResult): string[] {
+  const ledger = c.finding_ledger ?? {};
+  const findings = r.findings ?? [];
+  const problems: string[] = [];
+  for (const f of findings) if (f.related && !ledger[f.related]) problems.push(`${f.id}: related ${f.related} is not an earlier finding of this phase`);
+  const delta = (c.review_changes ?? 0) > 0 ? c.review_findings : [];
+  if (!delta.length) {
+    const reused = findings.filter((f) => ledger[f.id]).map((f) => f.id);
+    if (reused.length) problems.push(`ids ${reused.join(", ")} were used by an earlier review; give new findings new ids (with "related" when they concern the same rule)`);
+    return problems;
   }
-  return null;
+  const prior = new Map((r.prior ?? []).map((p) => [p.id, p.status]));
+  const missing = delta.map((f) => f.id).filter((id) => !prior.has(id));
+  if (missing.length) problems.push(`a re-review lists every earlier finding in "prior" ({"id","status":"fixed|unfixed"}); missing: ${missing.join(", ")}`);
+  const open = new Set(delta.map((f) => f.id));
+  for (const f of findings) {
+    if (open.has(f.id)) {
+      if (f.origin !== "unfixed") problems.push(`${f.id} is an earlier finding: report it only as origin unfixed (a new way to break the rule gets a new id with "related": "${f.id}")`);
+      else if (prior.get(f.id) !== "unfixed") problems.push(`${f.id} has origin unfixed, so prior must say unfixed for it`);
+    } else if (ledger[f.id]) problems.push(`${f.id} was used by an earlier review; use a new id with "related": "${f.id}" and origin regression or missed`);
+    else if (f.origin === "unfixed") problems.push(`${f.id} has origin unfixed but is not an earlier finding; use regression or missed`);
+    else if (!f.origin) problems.push(`${f.id}: a re-review sets origin regression or missed on new findings`);
+  }
+  for (const [id, s] of prior) if (s === "unfixed" && !findings.some((f) => f.id === id)) problems.push(`prior says ${id} is unfixed: report it in findings with origin unfixed`);
+  return problems;
 }
 
 function writeSideOutput(e: Engine, run: RunRecord, artifact: string, result: RoleResult): string {
@@ -947,21 +1113,112 @@ function findingSummary(list: Finding[]): string {
   return list.map((f) => f.summary).join("; ");
 }
 
+const DESIGN_CAUSES = new Set(["plan", "requirement", "cross_phase"]);
+
+function lineageOf(c: NonNullable<State["current"]>, id: string): string {
+  return c.finding_ledger?.[id]?.lineage ?? id;
+}
+
+function lineageEntries(c: NonNullable<State["current"]>, lineage: string): LedgerEntry[] {
+  return Object.values(c.finding_ledger ?? {}).filter((l) => l.lineage === lineage);
+}
+
+/** Record review findings in the phase ledger: lineages, rounds, reports; an unfixed finding keeps its first Fix. */
+function updateLedger(e: Engine, findings: Finding[], prior: { id: string; status: string }[]): void {
+  const c = cur(e);
+  const ledger = (c.finding_ledger ??= {});
+  const round = (c.review_changes ?? 0) + 1;
+  for (const p of prior) if (ledger[p.id]) ledger[p.id]!.status = p.status === "fixed" ? "fixed" : "open";
+  for (const f of findings) {
+    const prev = ledger[f.id];
+    if (prev) {
+      prev.reports++;
+      prev.last_round = round;
+      prev.status = "open";
+      prev.severity = f.severity ?? prev.severity;
+      if (prev.fix && f.origin === "unfixed") f.fix = prev.fix;
+      continue;
+    }
+    const lineage = f.related && ledger[f.related] ? ledger[f.related]!.lineage : f.id;
+    ledger[f.id] = { lineage, severity: f.severity ?? null, cause: f.cause ?? null, owner: f.owner ?? null, fix: f.fix ?? null, first_round: round, last_round: round, reports: 1, designs: 0, status: "open" };
+  }
+}
+
+/** Why an Implementer finding needs a Planner repair design before the Implementer runs, or null. */
+function designReason(c: NonNullable<State["current"]>, f: Finding): DesignState["reason"] | null {
+  if (f.cause && DESIGN_CAUSES.has(f.cause)) return "plan_cause";
+  if (f.origin === "unfixed") return "unfixed";
+  if (f.related && lineageEntries(c, lineageOf(c, f.id)).length > 1) return "related";
+  return null;
+}
+
+/**
+ * Open a Planner repair design (a contract amendment). The Plan Debater challenges it once when
+ * a finding is high or critical, or when its lineage already had a design that did not hold.
+ */
+function startDesign(e: Engine, ids: string[], reason: DesignState["reason"]): void {
+  const c = cur(e);
+  const list = ids.map((id) => c.review_findings.find((f) => f.id === id) ?? { id, summary: id }).filter(Boolean) as Finding[];
+  const redesign = list.filter((f) => lineageEntries(c, lineageOf(c, f.id)).some((l) => l.designs > 0)).map((f) => f.id);
+  const debate = redesign.length > 0 || list.some((f) => f.severity === "high" || f.severity === "critical");
+  c.design = { findings: ids, step: "design", debate, reason };
+  const why: Record<DesignState["reason"], string> = {
+    plan_cause: "the Reviewer traced them to the plan or contract (a missing or wrong design decision, a missed requirement, or a cross-phase dependency)",
+    unfixed: "an earlier repair reported them fixed and the re-review found the Fix condition still unmet",
+    related: "they are new ways to break a rule an earlier finding already reported, so the rule's enforcement is not complete",
+    needs_design: "the Implementer reported that the contract does not define how to repair them",
+  };
+  c.deltas.planner = {
+    kind: "context_answer",
+    text: [
+      `Repair design for ${ids.join(", ")}: ${why[reason]}. Do not write code.`,
+      `For each finding, amend the contract (contract_amendment): add or replace the obligation that defines the correct behavior, with the rule, the requirement behind it, the single enforcement point whose completeness can be checked (an allowlist, one validated path, a structural constraint or a type, never a list of known bad cases), what the Tester must prove (negative cases and variants), and the gates. Where the full rule needs something a later phase delivers, add a deferral with to_phase and the fail-closed interim behavior. Each amended obligation or deferral lists the finding ids it answers in "resolves".`,
+      ...(redesign.length ? [`${redesign.join(", ")} already had a repair design that did not hold: do not repeat it; change the enforcement design or narrow the rule.`] : []),
+    ].join("\n"),
+    findings: list,
+  };
+  ev(e, { type: "design.escalated", data: { findings: ids, reason, debate, redesign } });
+}
+
+function finishDesign(e: Engine): void {
+  const c = cur(e);
+  const d = c.design;
+  if (!d) return;
+  c.designed_this_round = [...new Set([...(c.designed_this_round ?? []), ...d.findings])];
+  for (const id of d.findings) {
+    const l = c.finding_ledger?.[id];
+    if (l) l.designs++;
+  }
+  c.design = null;
+}
+
 /**
  * Enter the repair stage with the findings. Review repairs are bounded by the review limit;
  * test/gate repairs by limits.repair_rounds. At that limit it blocks in the repair stage, so
  * `looprch resume` (one extra round) continues with the repair, never with another review.
+ * `testerOnly` (claims not backed by gate evidence) sends the round to the Tester alone.
  */
-function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[], paths: string[], summary: string): void {
+function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[], paths: string[], summary: string, testerOnly = false): void {
   const c = cur(e);
   c.round++;
   c.repair_source = source;
+  c.designed_this_round = [];
   if (source === "test") {
     const used = c.test_repairs ?? 0;
     c.test_repairs = used + 1;
-    c.deltas.implementer = { kind: "repair", text: `Repair round ${c.round} (tests/gates failed). Fix every problem below completely, including the same defect anywhere else in the phase diff:`, findings, paths };
-    c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer repaired the problems below. Re-verify, keep the tests honest and update them only where they were wrong.`, findings };
-    transition(e, "repairing");
+    if (testerOnly) {
+      delete c.deltas.implementer;
+      c.deltas.tester = {
+        kind: "repair",
+        text: `Round ${c.round}: Looprch checked your verifications against the testcases in its own gate run and could not back the claims below. A verified claim names testcases (as they appear in the JUnit report, or path::name) that exist and pass. Add or fix those tests, or report the verification as failed. Return verifications for: ${findings.map((f) => f.id).join(", ")}.`,
+        findings,
+      };
+      transition(e, "testing");
+    } else {
+      c.deltas.implementer = { kind: "repair", text: `Repair round ${c.round} (tests/gates failed). Fix every problem below completely, including the same defect anywhere else in the phase diff:`, findings, paths };
+      c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer repaired the problems below. Re-verify, keep the tests honest and update them only where they were wrong.`, findings };
+      transition(e, "repairing");
+    }
     if (used >= e.cfg.limits.repair_rounds + c.extra_rounds)
       block(e, "repair_limit", `Repair limit reached (${used} test/gate repair round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
     return;
@@ -975,37 +1232,41 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   const reopened = findings.filter((f) => f.origin === "unfixed").map((f) => f.id);
   const reopenedMine = mine.filter((f) => f.origin === "unfixed").map((f) => f.id);
   const reopenedText = reopenedMine.length
-    ? [`Still open after an earlier repair reported them fixed: ${reopenedMine.join(", ")}. That repair covered the cited example only. Fix the rule in each Fix line for every variant (prefer one fail-closed path over patching cases), and try variants of the Reviewer's probe before you report fixed.`]
+    ? [`Still open after an earlier repair reported them fixed: ${reopenedMine.join(", ")}. The Fix condition is unchanged; the Planner's repair design (contract amendment) says how the rule is enforced. Fix the rule at that enforcement point for every input, not the cited example.`]
     : [];
   const text = [
-    `${head}: meet its Fix condition, fix the root cause and the same defect anywhere else in the phase diff, and check that the fix works with the evidence the declared gates produce. Report \`resolutions\` for: ${mine.map((f) => f.id).join(", ")}.`,
+    `${head}: meet its Fix condition and the contract obligations it names, fix the root cause and the same defect anywhere else in the phase diff, and check that the fix works with the evidence the declared gates produce. Report \`resolutions\` for: ${mine.map((f) => f.id).join(", ")}.`,
     ...reopenedText,
+    "When the contract does not define how a finding must be repaired (you would have to invent a design decision), report it as needs_design instead of guessing.",
     ...(theirs.length ? [`The Tester fixes these test-owned findings after you; do not change tests for them: ${theirs.map((f) => `${f.id} (${f.summary})`).join("; ")}`] : []),
   ].join("\n");
   if (mine.length) c.deltas.implementer = { kind: "repair", text, findings: mine, paths };
   else delete c.deltas.implementer;
-  if (reopenedMine.length) {
-    c.context_request = {
-      question: `Repair design for review findings that came back unfixed: ${reopenedMine.join(", ")}`,
-      reason: "An earlier repair reported them fixed; the re-review found the rule still broken.",
-      documents: [],
-      phases: [],
-    };
-    c.deltas.planner = {
-      kind: "context_answer",
-      text: `Repair design: the review findings below came back unfixed after a repair that patched the cited examples. For each one, decide the approach the Implementer must take within this phase: the rule to enforce and the packet requirement behind it, the single code path that enforces it, and what must fail closed (for example \`dependency_unavailable\`) where the full rule needs something a later phase delivers. Do not write code.`,
-      findings: mine.filter((f) => f.origin === "unfixed"),
-      paths,
-    };
+  const byReason = new Map<DesignState["reason"], string[]>();
+  for (const f of mine) {
+    const why = designReason(c, f);
+    if (why) byReason.set(why, [...(byReason.get(why) ?? []), f.id]);
   }
+  const designIds = [...byReason.values()].flat();
+  if (designIds.length) startDesign(e, designIds, byReason.has("plan_cause") ? "plan_cause" : byReason.has("unfixed") ? "unfixed" : "related");
   c.deltas.tester = {
     kind: "repair",
-    text: `Round ${c.round}: review findings. Fix the findings owned by the Tester (you own the test code). For every other finding, the Implementer's repair report in your inputs says how it was fixed: verify each one with a test that fails without the fix, or with a read-only command, against the evidence the declared gates actually produce. Check the rule in the Fix line with at least one variant the Reviewer's example did not cover.${reopened.length ? ` ${reopened.join(", ")} came back after an earlier repair and verification: check them hardest.` : ""} If a finding is not fixed, return \`fail\` with a failure whose id is the finding id. In your report, list every finding id with how you verified it and which variants you tried.`,
+    text: [
+      `Round ${c.round}: review findings. Fix the findings owned by the Tester (you own the test code). For every other finding, try to falsify the repair: derive the rule from its Fix line and the contract obligations it names, and test that rule, not the Implementer's claim. Test the cited example, at least one input class that neither the Reviewer nor the Implementer named (another entry point, configuration, boundary, trust case or dependency path), and the enforcement point itself (that no second path bypasses it). Tests must fail without the fix and run in the declared gates.`,
+      reopened.length ? `${reopened.join(", ")} came back after an earlier repair and verification: check them hardest.` : "",
+      `Return \`verifications\` for every finding id below (status verified with the testcase names, variants you tried; failed when it is not fixed, and list it in failures).`,
+    ].filter(Boolean).join(" "),
     findings,
     paths,
   };
   if (finalRepair) delete c.deltas.reviewer;
-  else c.deltas.reviewer = { kind: "rereview", text: "Your previous review requested the changes below. Follow the re-review rules: verify each one against its fix, check the repair diff for regressions and report what the earlier review missed.", findings, paths };
+  else
+    c.deltas.reviewer = {
+      kind: "rereview",
+      text: 'Your previous review requested the changes below. Follow the re-review rules: give "prior" fixed or unfixed for each one against its unchanged Fix condition, check the repair diff for regressions, and report what the earlier review missed. A new way to break the same rule is a new finding with "related".',
+      findings,
+      paths,
+    };
   transition(e, mine.length ? "repairing" : "testing");
 }
 
@@ -1015,11 +1276,16 @@ function finalReviewQuestion(e: Engine): Action {
   const serious = c.review_findings.filter((f) => f.severity === "high" || f.severity === "critical").length;
   const origins = (["unfixed", "regression", "missed"] as const).map((o) => [o, c.review_findings.filter((f) => f.origin === o).length] as const).filter(([, n]) => n > 0);
   const originText = origins.length ? ` (${origins.map(([o, n]) => `${n} ${o}`).join(", ")})` : "";
+  const lineages = [...new Set(c.review_findings.map((f) => lineageOf(c, f.id)))].map((l) => {
+    const entries = lineageEntries(c, l);
+    return { l, reports: entries.reduce((s, x) => s + x.reports, 0), designs: entries.reduce((s, x) => s + x.designs, 0) };
+  });
+  const repeated = lineages.filter((x) => x.reports > 1).map((x) => `${x.l} reported ${x.reports}x, ${x.designs} repair design(s)`);
   return ask(
     e,
     "final_review",
     qid,
-    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s)${originText}, ${serious} high or critical (see .looprch/phases/${c.phase}/review.md). Normally the first review finds everything, so this needs your decision. How should Looprch continue?`,
+    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s)${originText}, ${serious} high or critical (see .looprch/phases/${c.phase}/review.md).${repeated.length ? ` Repeated: ${repeated.join("; ")}.` : ""} Normally the first review finds everything, so this needs your decision. How should Looprch continue?`,
     [
       { id: "repair_and_review", label: "Repair, then run one more review" },
       { id: "repair_and_handover", label: "Repair, then hand over without another review (findings listed in handover.md)" },
@@ -1091,23 +1357,66 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
     case "revise": {
       if (expansion("planner")) return null;
       const path = writeArtifact(e, "plan.md", artifact);
+      if (r.contract) {
+        const prev = loadContract(e.root, c.phase);
+        saveContract(e.root, c.phase, newContract(c.phase, r.contract, (prev?.revision ?? 0) + 1));
+        ev(e, { type: "contract.accepted", role: "planner", run_id: run.run_id, data: { task: run.task, obligations: r.contract.obligations.length, deferrals: r.contract.deferrals.length, dispositions: r.debate_dispositions?.length ?? 0 } });
+      }
       transition(e, run.task === "planning" ? "debating" : "plan_approval");
       return path;
     }
     case "debate": {
       if (expansion("plan_debater")) return null;
       const path = writeArtifact(e, "debate.md", artifact || "No findings.");
+      c.debate_findings = r.decision === "findings" ? (r.findings ?? []).map((f) => f.id) : [];
       transition(e, r.decision === "findings" ? "synthesizing" : "plan_approval");
+      return path;
+    }
+    case "design_review": {
+      const path = writeArtifact(e, `design-debate-${c.addenda.length}.md`, artifact || "No findings.");
+      const d = c.design;
+      if (!d) return path;
+      if (r.decision === "findings") {
+        d.step = "revise";
+        c.deltas.planner = {
+          kind: "context_answer",
+          text: `The Plan Debater challenged your repair design (read it in your inputs). Revise the design: answer each challenge, and return the complete contract_amendment again (each repair obligation lists the finding ids it answers in "resolves"). Do not write code.`,
+          findings: (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary })),
+          paths: [path],
+        };
+      } else finishDesign(e);
       return path;
     }
     case "context_answer": {
       const n = c.addenda.length + 1;
       const path = writeArtifact(e, `plan-addendum-${n}.md`, artifact);
       c.addenda.push(path);
+      if (r.contract_amendment) {
+        const base = loadContract(e.root, c.phase) ?? newContract(c.phase, { obligations: [], deferrals: [] }, 0);
+        const next = amend(base, r.contract_amendment);
+        saveContract(e.root, c.phase, next);
+        const kept = new Set(contractIds(next));
+        c.retired_obligations = [...new Set([...(c.retired_obligations ?? []), ...(r.contract_amendment.retire ?? [])])].filter((id) => !kept.has(id));
+        ev(e, { type: "contract.amended", role: "planner", run_id: run.run_id, data: { revision: next.revision, obligations: (r.contract_amendment.obligations ?? []).map((o) => o.id), deferrals: (r.contract_amendment.deferrals ?? []).map((x) => x.id), retired: r.contract_amendment.retire ?? [], design: c.design?.findings ?? null } });
+      }
       const prior = c.deltas.implementer;
-      const answered = `The Planner answered your context request (${c.context_request?.question ?? ""}). Continue.`;
-      c.deltas.implementer = { ...prior, kind: "context_answer", text: prior?.text ? `${answered}\n\n${prior.text}` : answered, paths: [...(prior?.paths ?? []), path] };
-      c.context_request = null;
+      const design = c.design;
+      const answered = design
+        ? `The Planner wrote a repair design (${path.split("/").pop()}) and amended contract.json for: ${design.findings.join(", ")}. The amended obligations are binding: implement each one at its enforcement point exactly as defined; do not patch around it.`
+        : `The Planner answered your context request (${c.context_request?.question ?? ""}). Continue.`;
+      const rest = prior?.text?.startsWith("The Planner wrote a repair design") ? prior.text.split("\n\n").slice(1).join("\n\n") : prior?.text;
+      c.deltas.implementer = { ...prior, kind: "context_answer", text: rest ? `${answered}\n\n${rest}` : answered, paths: [...(prior?.paths ?? []), path] };
+      if (design) {
+        if (design.step === "design" && design.debate) {
+          design.step = "debate";
+          c.deltas.plan_debater = {
+            kind: "design_review",
+            text: `Challenge the Planner's repair design (${path.split("/").pop()}) and its contract amendment once, for: ${design.findings.join(", ")}. For each: is the rule decidable and complete at its single enforcement point (no list of known bad cases), testable, feasible in this phase (or deferred with a fail-closed interim), and consistent with the contract and the packet? Would the Implementer still have to invent a decision?`,
+            findings: design.findings.map((id) => c.review_findings.find((f) => f.id === id)).filter((f): f is Finding => !!f),
+            paths: [path],
+          };
+        } else finishDesign(e);
+      } else c.context_request = null;
       return path;
     }
     case "implementation":
@@ -1120,6 +1429,15 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       }
       recordImplementer(e, run);
       if (run.task === "repair") c.repair_reports = [...(c.repair_reports ?? []), rel(e, join(projectPaths(e.root).run(run.run_id), "final.md"))];
+      if (run.task === "repair" && c.repair_source === "review") {
+        const done = new Set(c.designed_this_round ?? []);
+        const ask = (r.resolutions ?? []).filter((x) => x.status === "needs_design" && !done.has(x.id)).map((x) => x.id);
+        if (ask.length) {
+          startDesign(e, ask, "needs_design");
+          if (priorDelta) c.deltas.implementer = priorDelta;
+          return null;
+        }
+      }
       e.st.pending_checkpoint = { label: run.task === "implementation" ? "implementation" : `repair ${c.round}` };
       transition(e, "testing");
       return null;
@@ -1128,6 +1446,12 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       const path = writeArtifact(e, "test-report.md", artifact);
       c.tester_verdict = r.decision === "pass" ? "pass" : "fail";
       c.tester_failures = (r.failures ?? []).map((f) => ({ id: f.id, summary: f.summary, gate_id: f.gate_id, files: f.files }));
+      const verifs: Verification[] = (r.verifications ?? []).map((v) => ({ id: v.id, status: v.status, tests: v.tests, variants: v.variants, ...(v.note ? { note: v.note } : {}) }));
+      for (const v of verifs)
+        if (v.status === "failed" && !c.tester_failures.some((f) => f.id === v.id)) c.tester_failures.push({ id: v.id, summary: `verification failed${v.note ? `: ${v.note}` : ""}` });
+      const merged = new Map((c.tester_verifications ?? []).map((v) => [v.id, v]));
+      for (const v of verifs) merged.set(v.id, v);
+      c.tester_verifications = [...merged.values()];
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
       transition(e, "gating");
       return path;
@@ -1135,7 +1459,26 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
     case "review": {
       const path = writeArtifact(e, "review.md", artifact);
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
-      const findings: Finding[] = (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary, files: f.files, ...(f.fix ? { fix: f.fix } : {}), ...(f.owner ? { owner: f.owner } : {}), ...(f.origin ? { origin: f.origin } : {}) }));
+      const findings: Finding[] = (r.findings ?? []).map((f) => ({
+        id: f.id,
+        severity: f.severity,
+        summary: f.summary,
+        files: f.files,
+        ...(f.fix ? { fix: f.fix } : {}),
+        ...(f.cause === "test" ? { owner: "tester" as const } : f.owner ? { owner: f.owner } : {}),
+        ...(f.origin ? { origin: f.origin } : {}),
+        ...(f.cause ? { cause: f.cause } : {}),
+        ...(f.obligations?.length ? { obligations: f.obligations } : {}),
+        ...(f.related ? { related: f.related } : {}),
+      }));
+      updateLedger(e, findings, r.prior ?? []);
+      const merged = new Map((c.contract_review ?? []).map((x) => [x.id, x.status]));
+      const stillOpen = new Set(findings.flatMap((f) => f.obligations ?? []));
+      const fixed = new Set((r.prior ?? []).filter((p) => p.status === "fixed").map((p) => p.id));
+      for (const f of c.review_findings) if (fixed.has(f.id)) for (const o of f.obligations ?? []) if (!stillOpen.has(o) && merged.get(o) === "not_met") merged.set(o, "met");
+      for (const o of stillOpen) if (merged.has(o)) merged.set(o, "not_met");
+      for (const x of r.contract_review ?? []) merged.set(x.id, x.status);
+      c.contract_review = [...merged].map(([id, status]) => ({ id, status }));
       c.repair_reports = [];
       if (r.decision === "approve") {
         c.snapshots.review = c.snapshots.gates;
@@ -1179,6 +1522,17 @@ function unreviewedSection(e: Engine, findings: Finding[]): string {
 
 function findingLines(findings: Finding[]): string[] {
   return findings.map((f) => `- ${f.id}${f.severity ? ` [${f.severity}]` : ""}: ${f.summary}${f.files?.length ? ` (${f.files.join(", ")})` : ""}`);
+}
+
+function contractSection(contract: Contract | null, review: { id: string; status: string }[]): string {
+  if (!contract) return "- (this phase has no contract.json)";
+  const status = new Map(review.map((x) => [x.id, x.status]));
+  const lines = [`Contract revision ${contract.revision}: ${contract.obligations.length} obligation(s), ${contract.deferrals.length} deferral(s). Status from the latest review that reported it.`, ""];
+  for (const o of contract.obligations) lines.push(`- ${o.id} [${status.get(o.id) ?? "not reviewed"}] (${o.requirements.join(", ") || "no requirement id"}): ${o.statement}`);
+  lines.push("", "### Deferrals to later phases", "");
+  if (!contract.deferrals.length) lines.push("- none");
+  for (const d of contract.deferrals) lines.push(`- ${d.id} -> ${d.to_phase} [${status.get(d.id) ?? "not reviewed"}] (${d.requirements.join(", ")}): ${d.what}. Until then: ${d.interim}`);
+  return lines.join("\n");
 }
 
 function notesSection(findings: Finding[]): string {
@@ -1229,7 +1583,8 @@ function acceptHandover(e: Engine, run: RunRecord, r: RoleResult, artifact: stri
       const g = gates.runs.find((x) => x.gate_run_id === id)!;
       return `- ${g.gate_id}: ${g.gate_run_id}, ${g.ok ? "passed" : "failed"}, tests ${g.evidence.tests}, evidence sha256 ${g.evidence.sha256 ?? "-"}, tree ${g.snapshot_tree}`;
     }).join("\n"))
-    .replace("{{unreviewed}}", `${c.snapshots.review ? "" : unreviewedSection(e, c.review_findings)}${notesSection(c.review_notes ?? [])}`);
+    .replace("{{unreviewed}}", `${c.snapshots.review ? "" : unreviewedSection(e, c.review_findings)}${notesSection(c.review_notes ?? [])}`)
+    .replace("{{contract}}", contractSection(loadContract(e.root, c.phase), c.contract_review ?? []));
   const path = writeArtifact(e, "handover.md", `${artifact.trim()}\n${extra}`);
   c.snapshots.handover = snap;
   ev(e, { type: "handover.accepted", run_id: run.run_id, data: { files: actual } });
@@ -1246,6 +1601,19 @@ export function applyGates(e: Engine, outcome: GatesOutcome): void {
   for (const r of outcome.runs) ev(e, { type: "gate.result", data: { gate_id: r.gate_id, gate_run_id: r.gate_run_id, ok: r.ok, reason: r.reason, tests: r.evidence.tests } });
   ev(e, { type: "gates.run", data: { all_passed: outcome.all_passed, snapshot: outcome.snapshot_tree } });
   if (outcome.all_passed && c.tester_verdict === "pass") {
+    const index = testcaseIndex(e.root, outcome.runs);
+    const retired = new Set(c.retired_obligations ?? []);
+    const current = (c.tester_verifications ?? []).filter((v) => !retired.has(v.id));
+    const unbacked = unbackedTests(current, index, e.root);
+    ev(e, { type: "evidence.checked", data: { binding: index.available ? "testcases" : "files", cases: index.cases.length, verifications: (c.tester_verifications ?? []).length, unbacked: unbacked.length } });
+    if (unbacked.length) {
+      const byId = new Map<string, string[]>();
+      for (const u of unbacked) byId.set(u.id, [...(byId.get(u.id) ?? []), `${u.test} (${u.reason})`]);
+      const findings: Finding[] = [...byId].map(([id, why]) => ({ id, gate_id: EVIDENCE_GATE, summary: `claimed tests not backed by the gate evidence: ${why.join("; ")}` }));
+      ev(e, { type: "evidence.unbacked", role: "tester", data: { verifications: [...byId.keys()], tests: unbacked.map((u) => u.test).slice(0, 50) } });
+      repairOrBlock(e, "test", findings, [], `unbacked verifications ${[...byId.keys()].join(", ")}`, true);
+      return;
+    }
     c.snapshots.gates = outcome.snapshot_tree;
     afterGatesPassed(e);
     return;

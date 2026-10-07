@@ -49,6 +49,11 @@ export const EVENT_TYPES = [
   "protocol.mismatch",
   "lock.stale_recovered",
   "warning",
+  "contract.accepted",
+  "contract.amended",
+  "design.escalated",
+  "evidence.checked",
+  "evidence.unbacked",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -352,6 +357,19 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
       return "[WARNING] Recovered a stale project lock left by a stopped Looprch process.";
     case "warning":
       return `[WARNING] ${str(d.message)}`;
+    case "contract.accepted":
+      return `[CONTRACT] ${phase} contract: ${plural(num(d.obligations) ?? 0, "obligation")}, ${plural(num(d.deferrals) ?? 0, "deferral")}${num(d.dispositions) ? `, ${plural(num(d.dispositions)!, "debate finding")} dispositioned` : ""}: .looprch/phases/${phase}/contract.json`;
+    case "contract.amended":
+      return `[CONTRACT AMENDED] Revision ${str(d.revision)}: ${[...arr<string>(d.obligations), ...arr<string>(d.deferrals)].join(", ") || "no additions"}${arr<string>(d.retired).length ? `; retired ${arr<string>(d.retired).join(", ")}` : ""}${arr<string>(d.design).length ? ` (repair design for ${arr<string>(d.design).join(", ")})` : ""}.`;
+    case "design.escalated":
+      return block(
+        "[REPAIR DESIGN]",
+        `The Planner designs the repair of ${arr<string>(d.findings).join(", ")} before the Implementer runs (${str(d.reason).replace(/_/g, " ")}).`,
+        ...(d.debate ? [`The Plan Debater challenges the design once${arr<string>(d.redesign).length ? `; earlier designs did not hold for ${arr<string>(d.redesign).join(", ")}` : ""}.`] : []),
+      );
+    case "evidence.unbacked":
+      return block("[EVIDENCE MISMATCH]", `Tester verifications not backed by passing testcases in the gate run: ${arr<string>(d.verifications).join(", ")}.`, "Action: The Tester fixes or withdraws them (test repair round).");
+    case "evidence.checked":
     case "init.discovered":
     case "init.gates_acknowledged":
     case "config.changed":
@@ -448,6 +466,10 @@ function acceptedLine(e: LrEvent): string | null {
       return `[PLAN UPDATED] The Planner revised the plan as you asked: .looprch/phases/${phase}/plan.md`;
     case "context_answer":
       return "[CONTEXT ANSWERED] The Planner wrote an addendum for the Implementer (context answer or repair design).";
+    case "design_review":
+      return decision === "findings"
+        ? block("[DESIGN DEBATE COMPLETE]", `Result: the repair design needs changes (${plural(total, "finding")}${severities(d.severities)}).`, `Summary: ${findingsText(d)}`)
+        : "[DESIGN DEBATE COMPLETE] Result: the repair design holds.";
     case "implementation":
     case "repair":
       if (decision === "needs_context") return "[CONTEXT NEEDED] The Implementer asked the Planner for missing context.";

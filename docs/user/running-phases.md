@@ -88,6 +88,37 @@ looprch resume --note "Use the existing parser instead of a new one"
 or raise the limit: `looprch config set limits.repair_rounds 5`. Resuming always continues with
 the repair, never with another review.
 
+## The phase contract
+
+The Planner delivers the plan together with a contract, `.looprch/phases/P-NNN/contract.json`.
+It lists **obligations** (a rule or behavior, the single place that enforces it, what the Tester
+must prove, and the gates that prove it) and **deferrals** (what a later phase delivers, which
+phase, and how this phase fails closed until then). Looprch checks it before the debate:
+
+- every requirement id the SEV3 manifest maps to the phase is covered by an obligation or a
+  deferral, and the ids and gate ids exist;
+- every deferral targets a later phase;
+- deferrals that closed phases made to this phase (`incoming-deferrals.json`) are covered.
+
+The Plan Debater challenges the plan and the contract (missing requirements, trust sources,
+dependency direction, enforcement that only recognizes known bad cases, untestable rules,
+missing failure behavior and deferrals, places where the Implementer would have to invent a
+design). The synthesis must accept or reject every debate finding; an accepted one names the
+obligations that carry it.
+
+The same contract is the input of every later role:
+
+- the **Implementer** implements each obligation at its enforcement point and asks the Planner
+  (`needs_context`) instead of inventing a design the contract leaves open;
+- the **Tester** returns a verification for every obligation and deferral, naming the testcases
+  that prove it. After the gates, Looprch matches those names against the passing testcases of
+  its own gate run; a claim it cannot match goes back to the Tester alone (`[EVIDENCE MISMATCH]`);
+- the **Reviewer** reports `met` or `not_met` for every obligation in round 1, classifies every
+  finding by `cause` (`implementation`, `plan`, `requirement`, `cross_phase` or `test`) and names
+  the obligations it concerns.
+
+`handover.md` ends with the contract status and the deferrals to later phases.
+
 ## Review rounds
 
 The Reviewer may request changes at most `limits.review_rounds` times per phase (default 3).
@@ -105,27 +136,29 @@ second is a safety net, and a third is for exceptional cases.
   `changes_requested` needs at least one `medium`, `high` or `critical` finding; low findings
   are notes on an approval. Every issue goes into the findings list, not only into the prose.
 - **Repairs are accounted for and verified.** The Implementer fixes the findings it owns and
-  reports a `resolutions` entry (`fixed` or `not_fixed`) for each one; a repair without them is
-  re-asked. The Tester then fixes the test-owned findings and verifies every other finding with
-  a test or a command, against the evidence the gates produce. A finding that is not fixed is a
-  Tester failure, so it goes back to the Implementer before the next review. Both get the
-  Implementer's repair report.
+  reports a `resolutions` entry for each one: `fixed` (with the files the repair changed;
+  Looprch rejects a `fixed` whose files did not change since the review), `not_fixed`, or
+  `needs_design` when the contract does not say how to repair it. The Tester then fixes the
+  test-owned findings and tries to falsify every other repair: it tests the rule in the `fix`
+  and the obligations, with an input class neither the Reviewer nor the Implementer named, and
+  returns a verification naming the testcases. A finding that is not fixed is a Tester failure,
+  so it goes back to the Implementer before the next review.
 - **Repairs fix the rule, not the example.** A finding names the broken rule, and its `fix`
-  states the rule for all inputs and the known variants. The Implementer fixes the rule
-  (preferring one fail-closed path), tries variants of the Reviewer's probe and reports `fixed`
-  only when the whole rule holds. The Tester checks at least one variant the Reviewer's example
-  did not cover. A finding that a re-review reports as `unfixed` is named in the next repair and
-  Tester briefs as having come back after an earlier repair.
-- **Findings that come back get a repair design.** Before the Implementer repairs a finding that
-  a re-review reports as `unfixed`, the Planner (same session) writes a repair design addendum.
-  For each such finding it gives the rule, the requirement behind it, the single code path that
-  enforces it, and what fails closed in this phase when the full rule needs a later phase. The
-  Implementer, Tester and Reviewer all get the addendum (`[CONTEXT ANSWERED]`).
+  states the rule for all inputs and the known variants. The `fix` does not change between
+  rounds: a re-review judges the same condition, and a new way to break the rule is a new
+  finding marked `related` to the earlier one.
+- **Design defects go to the Planner, not to another patch.** Before the Implementer repairs, the
+  Planner writes a repair design (an amendment of the contract that defines the enforcement) for
+  findings the Reviewer traced to the plan, a missed requirement or a later phase, for findings a
+  re-review reports as `unfixed`, for `related` findings, and for `needs_design` resolutions
+  (`[REPAIR DESIGN]`). When the design covers a high or critical finding, or replaces a design
+  that did not hold, the Plan Debater challenges it once (`[DESIGN DEBATE COMPLETE]`) and the
+  Planner revises it if needed. The Implementer, Tester and Reviewer get the amended contract.
 - **Round 2 is the safety net.** The re-review gets the open findings, the repair reports and the
-  repair diff (from the tree it last reviewed to the current one). It checks each finding against
-  its fix, looks for regressions and over-fixes, and reports anything round 1 missed. Every
-  re-review finding says whether it is `unfixed`, a `regression` or `missed`; the progress line
-  `[REVIEW COMPLETE]` shows these counts.
+  repair diff (from the tree it last reviewed to the current one). It says `fixed` or `unfixed`
+  for every earlier finding, looks for regressions and over-fixes, and reports anything round 1
+  missed. Every re-review finding says whether it is `unfixed`, a `regression` or `missed`; the
+  progress line `[REVIEW COMPLETE]` shows these counts.
 - **Each round gets more time.** Review round n runs with the Reviewer timeout × (1 + 0.5 ×
   (n − 1)): with the default 60m that is 60m, 90m and 2h. The brief states the time budget.
 - **The final review** (round `limits.review_rounds`) still lists every remaining issue but

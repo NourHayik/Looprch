@@ -6,7 +6,10 @@
 // Behaviour keys: status ("completed"|"failed"|"timeout"|"aborted"|"unavailable"), decision,
 // variant (fixture subfolder to copy, default "app"/"tests"), sleep_ms, stderr, no_session,
 // read_only_violation, touch (path to create), usage_error, omit_block, omit_new_file,
-// findings, failures, final (literal final message), kill_self, omit_resolutions.
+// findings, failures, final (literal final message), kill_self, omit_resolutions; contract keys:
+// drop_requirement, deferrals, contract, omit_dispositions, omit_amendment, contract_amendment,
+// no_change, resolution_status, verifications, omit_verifications, bad_tests, raw_findings,
+// omit_prior, prior, contract_review, omit_contract_review.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -95,13 +98,72 @@ function changedSinceBase() {
   return out;
 }
 
+function readJson(path, fallback = null) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+const phaseDir = join(cwd, ".looprch", "phases", phase);
+const manifestPhase = (readJson(join(cwd, "phases", "manifest.json"), { phases: [] }).phases || []).find((p) => p.id === phase) || { requirements: [], gates: [] };
+const contractIds = () => {
+  const c = readJson(join(phaseDir, "contract.json"));
+  return c ? [...c.obligations, ...c.deferrals].map((x) => x.id) : [];
+};
+/** Finding ids listed as Delta bullets in the brief ("- R-1 [high, …]: …"). */
+const deltaIds = () => {
+  const delta = brief.split("\n## Delta\n")[1]?.split("\n## Output contract")[0] ?? "";
+  return [...delta.matchAll(/^- ([A-Za-z][\w.]*-[\w.-]+?)(?: \[| \(|:)/gm)].map((m) => m[1]).filter((id) => id !== "read");
+};
+function defaultContract() {
+  const incoming = readJson(join(phaseDir, "incoming-deferrals.json"), []);
+  const contract = {
+    obligations: [
+      {
+        id: "O-1",
+        requirements: manifestPhase.requirements,
+        kind: "behavior",
+        statement: `The ${phase} change meets its mapped requirements.`,
+        enforcement: "noteapp.py",
+        verify: "Unit tests cover valid and invalid inputs.",
+        gates: manifestPhase.gates.map((g) => g.id),
+        ...(incoming.length ? { covers: incoming.map((d) => d.ref) } : {}),
+      },
+    ],
+    deferrals: [],
+  };
+  if (rule.drop_requirement) contract.obligations[0].requirements = contract.obligations[0].requirements.filter((r) => r !== rule.drop_requirement);
+  if (rule.deferrals) contract.deferrals = rule.deferrals;
+  return rule.contract ?? contract;
+}
+function testRef() {
+  const dir = join(cwd, "tests");
+  if (!existsSync(dir)) return "tests";
+  const files = execFileSync("ls", [dir], { encoding: "utf8" }).split("\n").filter((f) => /^test_.*\.py$/.test(f));
+  return files.length ? `tests/${files[0]}` : "tests";
+}
+
 let decision = rule.decision;
 let body = `Fake ${agent} ${role} for ${phase} (${task}, call ${nth}).`;
 const extra = {};
 switch (role) {
   case "planner":
-    decision ||= task === "synthesis" ? "plan_final" : task === "context_answer" ? "context_answer" : "plan_ready";
+    decision ||= task === "synthesis" || task === "revise" ? "plan_final" : task === "context_answer" ? "context_answer" : "plan_ready";
     body = `## Plan for ${phase}\n\n1. Implement the scoped change.\n2. Tester covers the declared gates.\n\n${body}`;
+    if (decision === "plan_ready" || decision === "plan_final") extra.contract = defaultContract();
+    if (task === "synthesis" && !rule.omit_dispositions) {
+      const ids = readJson(join(cwd, ".looprch", "state.json"), {}).current?.debate_findings ?? [];
+      extra.debate_dispositions = ids.map((id) => ({ id, decision: "accept", reason: "scripted", refs: ["O-1"] }));
+    }
+    if (task === "context_answer") {
+      const design = /Repair design for ([^:]+):/.exec(brief);
+      if (rule.contract_amendment) extra.contract_amendment = rule.contract_amendment;
+      else if (design && !rule.omit_amendment) {
+        const ids = design[1].split(",").map((s) => s.trim()).filter(Boolean);
+        extra.contract_amendment = { obligations: [{ id: `O-D${nth}`, requirements: manifestPhase.requirements.slice(0, 1), kind: "invariant", statement: `Repair rule for ${ids.join(", ")}`, enforcement: "noteapp.py validate_id", verify: "negative and variant cases", gates: manifestPhase.gates.map((g) => g.id).slice(0, 1), resolves: ids }] };
+      }
+    }
     break;
   case "plan_debater":
     decision ||= "no_findings";
@@ -120,20 +182,46 @@ switch (role) {
       if (decision === "needs_context") extra.context_request = { question: "Which error type?", reason: "Contract unclear" };
       extra.files_changed = [];
       const owed = /Report `resolutions` for: ([^\n]*?)\.?\n/.exec(brief);
-      if (owed && !rule.omit_resolutions) extra.resolutions = owed[1].split(",").map((id) => id.trim()).filter(Boolean).map((id) => ({ id, status: "fixed", note: "scripted" }));
+      if (owed && !rule.omit_resolutions) {
+        const app = join(cwd, "noteapp.py");
+        if (!rule.no_change && existsSync(app)) appendFileSync(app, `# repaired (${task} ${nth})\n`);
+        extra.resolutions = owed[1].split(",").map((id) => id.trim()).filter(Boolean).map((id) => ({ id, status: rule.resolution_status || "fixed", note: "scripted", files: ["noteapp.py"] }));
+      }
     }
     break;
-  case "tester":
+  case "tester": {
     copyFixture(rule.variant || "tests");
     decision ||= "pass";
     extra.tests_written = [];
     if (decision === "fail") extra.failures = rule.failures || [{ id: "T-1", summary: "scripted failure" }];
+    const ids = [...new Set([...contractIds(), ...deltaIds()])];
+    const tests = rule.bad_tests ? ["tests/test_missing.py::test_nope"] : [testRef()];
+    if (!rule.omit_verifications) extra.verifications = rule.verifications ?? ids.map((id) => ({ id, status: "verified", tests, variants: ["scripted variant"] }));
     break;
-  case "reviewer":
+  }
+  case "reviewer": {
     decision ||= "approve";
-    if (decision === "changes_requested") extra.findings = rule.findings || [{ id: "R-1", severity: "high", summary: "Scripted finding", files: ["noteapp.py"], fix: "Scripted fix condition", owner: "implementer" }];
-    else if (rule.findings) extra.findings = rule.findings;
+    const withCause = (list) => list.map((f) => ({ cause: f.owner === "tester" ? "test" : "implementation", ...f }));
+    if (decision === "changes_requested") extra.findings = rule.raw_findings ?? withCause(rule.findings || [{ id: "R-1", severity: "high", summary: "Scripted finding", files: ["noteapp.py"], fix: "Scripted fix condition", owner: "implementer" }]);
+    else if (rule.findings || rule.raw_findings) extra.findings = rule.raw_findings ?? withCause(rule.findings);
+    body = `## Coverage\n\n- Scripted coverage.\n\n${body}`;
+    if (task === "review") {
+      const rereview = /Review round [2-9]\d* of/.test(brief);
+      if (rereview && !rule.raw_findings) {
+        const earlier = new Set(deltaIds());
+        for (const f of extra.findings ?? []) f.origin ??= earlier.has(f.id) ? "unfixed" : "missed";
+      }
+      if (rereview && !rule.omit_prior) {
+        const unfixed = new Set((extra.findings ?? []).filter((f) => f.origin === "unfixed").map((f) => f.id));
+        extra.prior = rule.prior ?? deltaIds().map((id) => ({ id, status: unfixed.has(id) ? "unfixed" : "fixed" }));
+      }
+      if (!rereview && !rule.omit_contract_review) {
+        const notMet = new Set((extra.findings ?? []).flatMap((f) => f.obligations ?? []));
+        extra.contract_review = rule.contract_review ?? contractIds().map((id) => ({ id, status: notMet.has(id) ? "not_met" : "met" }));
+      }
+    }
     break;
+  }
   default:
     decision ||= "answered";
     extra.evidence = [{ path: "noteapp.py", note: "scripted" }];

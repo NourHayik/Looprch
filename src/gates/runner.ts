@@ -7,8 +7,8 @@ import { nowIso } from "../core/clock.js";
 import { projectPaths } from "../core/paths.js";
 import { sha256 } from "../install/manifest.js";
 import type { Gate, PhaseDef } from "../sev3/manifest.js";
-import { parseJunit } from "./junit.js";
-import { parseUnittest, type Counts } from "./unittest.js";
+import { junitCases, parseJunit } from "./junit.js";
+import { parseUnittest, unittestCases, type Counts, type TestCase } from "./unittest.js";
 
 export interface GateRun {
   gate_run_id: string;
@@ -151,6 +151,74 @@ export function runGate(root: string, cfg: Config, gate: Gate, gateRunId: string
     run.reason = `inspection report ${manualReport} does not exist`;
   }
   return run;
+}
+
+export interface CaseIndex {
+  /** True when at least one gate of the batch produced named testcases. */
+  available: boolean;
+  cases: TestCase[];
+}
+
+/** Named testcases from this gate batch: JUnit evidence files and verbose unittest output. */
+export function testcaseIndex(root: string, runs: GateRun[]): CaseIndex {
+  const cases: TestCase[] = [];
+  for (const r of runs) {
+    if (r.evidence.format === "junit" && r.evidence.path) {
+      const abs = join(root, r.evidence.path);
+      if (existsSync(abs)) cases.push(...junitCases(readFileSync(abs, "utf8")));
+    } else if (r.evidence.format === "unittest") {
+      const out = [r.stdout_path, r.stderr_path].map((p) => join(root, p)).filter((p) => existsSync(p)).map((p) => readFileSync(p, "utf8")).join("\n");
+      cases.push(...unittestCases(out));
+    }
+  }
+  return { available: cases.length > 0, cases };
+}
+
+const norm = (s: string): string => s.replace(/\\/g, "/").replace(/\s+/g, " ").trim();
+
+function refMatches(ref: string, c: TestCase, root: string): boolean {
+  const r = norm(ref);
+  const name = norm(c.name);
+  if (!r || !name) return false;
+  if (r === name) return true;
+  const file = norm(c.file).replace(`${norm(root)}/`, "");
+  const cls = norm(c.classname);
+  const candidates = [file, cls && `${cls}::${name}`, cls && `${cls}.${name}`, cls && `${cls} > ${name}`].filter(Boolean);
+  if (candidates.some((x) => x === r || x.endsWith(`/${r}`) || x.endsWith(`::${r}`) || x.endsWith(`.${r}`))) return true;
+  const sep = r.lastIndexOf("::");
+  if (sep < 0) return false;
+  const rFile = r.slice(0, sep);
+  const rName = r.slice(sep + 2);
+  if (rName !== name && !name.endsWith(` > ${rName}`)) return false;
+  const stem = rFile.replace(/\.[A-Za-z]+$/, "");
+  return !file && !cls ? true : file.includes(rFile) || cls.includes(rFile) || cls.replace(/\./g, "/").includes(stem) || cls.includes(stem.split("/").pop() ?? stem);
+}
+
+/**
+ * Tester claims that the gate evidence does not back: a `verified` test reference must match a
+ * passing testcase of this batch. Without named testcases, the reference must at least name an
+ * existing test file (and a name that occurs in it).
+ */
+export function unbackedTests(verifs: { id: string; status: string; tests: string[] }[], index: CaseIndex, root: string): { id: string; test: string; reason: string }[] {
+  const out: { id: string; test: string; reason: string }[] = [];
+  for (const v of verifs) {
+    if (v.status !== "verified") continue;
+    for (const t of v.tests) {
+      if (index.available) {
+        const hits = index.cases.filter((c) => refMatches(t, c, root));
+        if (!hits.length) out.push({ id: v.id, test: t, reason: "no such testcase in the gate evidence" });
+        else if (!hits.some((c) => c.status === "passed")) out.push({ id: v.id, test: t, reason: `the testcase ${hits[0]!.status} in the gate evidence` });
+        continue;
+      }
+      const sep = t.lastIndexOf("::");
+      const file = (sep >= 0 ? t.slice(0, sep) : t).trim();
+      const name = sep >= 0 ? t.slice(sep + 2).trim() : "";
+      const abs = join(root, file);
+      if (!file || !existsSync(abs) || !statSync(abs).isFile()) out.push({ id: v.id, test: t, reason: "no named testcases in the gate evidence, and no such test file" });
+      else if (name && !readFileSync(abs, "utf8").includes(name)) out.push({ id: v.id, test: t, reason: `${file} does not contain ${name}` });
+    }
+  }
+  return out;
 }
 
 export interface GatesOutcome {

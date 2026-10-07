@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 declare const __LOOPRCH_VERSION__: string | undefined;
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 export const TOOLKIT_VERSION = "1.2.0";
 export const CONFIG_SCHEMA = 1;
 export const STATE_SCHEMA = 1;

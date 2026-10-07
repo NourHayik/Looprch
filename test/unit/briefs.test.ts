@@ -71,7 +71,7 @@ describe("briefs", () => {
     const first = review(1);
     assert.match(first, /Review round 1 of 3\. Time budget: up to 60m\./);
     assert.match(first, /`git diff --stat abc123 tree3`/);
-    assert.match(first, /follow the first-review procedure and checklist and report every finding in this one pass/);
+    assert.match(first, /follow the first-review procedure and checklist, give `contract_review` for every obligation and deferral in contract\.json, and report every finding in this one pass/);
     assert.doesNotMatch(first, /Repair since your last review/);
     assert.doesNotMatch(first, /This is the final review/);
     const second = review(2, 3, true);
@@ -86,21 +86,33 @@ describe("briefs", () => {
     assert.match(last, /This is the final review\. Still put every remaining issue in `findings`/);
     assert.match(review(1, 1), /This is the final review/);
     const role = roleText("reviewer", "review");
-    for (const s of [/## Coverage/, /Walk every plan step and every requirement id/, /Security: trust boundaries/, /"origin": "missed"/, /`owner`/]) assert.match(role, s);
+    for (const s of [/## Coverage/, /Walk every obligation and deferral in `contract\.json`/, /Security: trust boundaries/, /"origin": "missed"/, /`owner`/, /`cause` says where the defect comes from/, /`"related": "<earlier id>"`/, /report it in `prior`/]) assert.match(role, s);
     assert.match(roleText("reviewer", "adhoc_review"), /Checklist:/);
     assert.match(roleText("implementer", "repair"), /same defect wherever else it occurs/);
     assert.match(roleText("implementer", "repair"), /report `resolutions`/);
-    assert.match(roleText("implementer", "repair"), /Fix the rule it\s+states, not only the example/);
-    assert.match(roleText("implementer", "repair"), /Report `fixed` only\s+when the whole rule holds/);
+    assert.match(roleText("implementer", "repair"), /Fix the rule at its enforcement point for all inputs/);
+    assert.match(roleText("implementer", "repair"), /`fixed` only when the whole rule holds, with the files your repair changed/);
+    assert.match(roleText("implementer", "repair"), /`needs_design` when the contract does not define/);
     assert.match(role, /Describe the broken rule, not only the example/);
-    assert.match(roleText("tester", "testing"), /try at least one variant the example did not cover/);
+    assert.match(roleText("tester", "testing"), /cover at least one input class the Implementer did not mention/);
+    assert.match(roleText("tester", "testing"), /Derive the test obligations from `contract\.json`/);
+    assert.match(roleText("planner", "planning"), /Enforceability/);
+    assert.match(roleText("planner", "context_answer"), /return `contract_amendment`/);
+    assert.match(roleText("plan_debater", "design_review"), /### Task: design_review/);
   });
 
   test("output contract shows the object shapes reviewers and implementers must return", () => {
     const r = assembleBrief(input({ role: "reviewer", task: "review" }));
     assert.match(r, /"manual_gate_reports": \[\{"gate_id":"…","path":"\.looprch\/reports\/…"\}\]/);
     assert.match(r, /"owner":"implementer\|tester"/);
-    assert.match(assembleBrief(input({ role: "implementer", task: "repair" })), /"resolutions": \[\{"id":"R-1","status":"fixed\|not_fixed"/);
+    assert.match(r, /"cause":"implementation\|plan\|requirement\|cross_phase\|test"/);
+    assert.match(r, /"contract_review": \[\{"id":"O-1","status":"met\|not_met"\}\]/);
+    assert.match(r, /"prior": \[\{"id":"R-1","status":"fixed\|unfixed"\}\]/);
+    assert.match(assembleBrief(input({ role: "implementer", task: "repair" })), /"resolutions": \[\{"id":"R-1","status":"fixed\|not_fixed\|needs_design"/);
+    assert.match(assembleBrief(input({ role: "tester", task: "testing" })), /"verifications": \[\{"id":"O-1 or R-1","status":"verified\|failed\|inspected"/);
+    assert.match(assembleBrief(input({ role: "planner", task: "planning" })), /"contract": \{"obligations": \[/);
+    assert.match(assembleBrief(input({ role: "planner", task: "synthesis" })), /"debate_dispositions"/);
+    assert.match(assembleBrief(input({ role: "planner", task: "context_answer" })), /"contract_amendment"/);
   });
 
   test("delta findings show owner, origin and the fix condition", () => {

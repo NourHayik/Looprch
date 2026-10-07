@@ -26,7 +26,7 @@ JSON Schemas in `schemas/` document the files; the CLI validates with hand-writt
 manifest hash, phases_total), `git` (`base_branch`, `baseline_commit`), `current` (phase, stage,
 round, close_step, phase_base, branch, last_commit, active_run, tester verdict and failures,
 review findings, `review_changes` (reviews that requested changes; absent in older files), `test_repairs`,
-`extra_reviews`, `final_review_pending`, `reviewed_tree`, `repair_reports`, `review_notes` (all optional), deltas per role, assignment index per role, sessions-related counters,
+`extra_reviews`, `final_review_pending`, `reviewed_tree`, `repair_reports`, `review_notes`, `debate_findings`, `finding_ledger` (per finding id: lineage, severity, cause, owner, first Fix, rounds, reports, repair designs, open or fixed), `design` (a Planner repair design in progress: findings, step `design`/`debate`/`revise`, whether the Debater challenges it, reason), `designed_this_round`, `tester_verifications`, `contract_review` (all optional), deltas per role, assignment index per role, sessions-related counters,
 snapshots), `flags` (`pause_requested`, `paused`, `waiting`, `blocked`), `pending_question`,
 `answers`, `pending_checkpoint`, `runs_index`, `sessions` (key `P-NNN/<role>/<agent>`),
 `assignments_history`, `quota.exhausted` (rate-limit marks), `phases.<id>` (status, tag,
@@ -39,11 +39,32 @@ fields: `role`, `decision`, optional `run_id`. Decisions per role:
 
 | Role | Decisions | Extra fields |
 |---|---|---|
-| planner | `plan_ready`, `plan_final`, `needs_expansion`, `context_answer` | `expansion_requests[]` |
-| plan_debater | `findings`, `no_findings`, `needs_expansion` | `findings[{id, severity, summary, section}]` |
-| implementer | `implemented`, `needs_context`, `handover_ready` | `files_changed[]`; after a review: `resolutions[{id, status: fixed or not_fixed, note}]`, one per finding in the delta; `context_request{question, reason}`; handover: `modified_files`, `new_files`, `deleted_files`, `renamed[{from,to}]`, `verification_ids`, `limitations` |
-| tester | `pass`, `fail` | `tests_written[]`, `failures[{id, gate_id, summary}]`, `manual_gate_reports[{gate_id, path}]` |
-| reviewer | `approve`, `changes_requested` | `findings[{id, severity, summary, files[], fix, owner: implementer or tester, origin: unfixed, regression or missed (re-reviews)}]`, `manual_gate_reports[{gate_id, path}]` |
+| planner | `plan_ready`, `plan_final`, `needs_expansion`, `context_answer` | `contract{obligations[], deferrals[]}` (required with `plan_ready`/`plan_final`); synthesis: `debate_dispositions[{id, decision: accept or reject, reason, refs[]}]`; context answer: `contract_amendment{obligations[], deferrals[], retire[]}` (required for a repair design); `expansion_requests[]` |
+| plan_debater | `findings`, `no_findings`, `needs_expansion` | `findings[{id, severity, summary, section, refs[]}]` (also for the `design_review` task) |
+| implementer | `implemented`, `needs_context`, `handover_ready` | `files_changed[]`; after a review: `resolutions[{id, status: fixed, not_fixed or needs_design, note, files[]}]`, one per finding in the delta; `context_request{question, reason}`; handover: `modified_files`, `new_files`, `deleted_files`, `renamed[{from,to}]`, `verification_ids`, `limitations` |
+| tester | `pass`, `fail` | `tests_written[]`, `verifications[{id, status: verified, failed or inspected, tests[], variants[], note}]`, `failures[{id, gate_id, summary}]`, `manual_gate_reports[{gate_id, path}]` |
+| reviewer | `approve`, `changes_requested` | `findings[{id, severity, summary, files[], fix, owner: implementer or tester, cause: implementation, plan, requirement, cross_phase or test, obligations[], related, origin: unfixed, regression or missed (re-reviews)}]`, `contract_review[{id, status: met or not_met}]` (first review), `prior[{id, status: fixed or unfixed}]` (re-reviews), `manual_gate_reports[{gate_id, path}]` |
 | worker | `answered` | `evidence[{path, lines, note}]` |
 
 Expansion request: `{kind: "document"|"phase", id, question, reason}`.
+
+Phase rules checked against the state (`phaseRuleViolation`; one re-ask, then `result_invalid`):
+
+| Result | Rule |
+|---|---|
+| plan (planning, synthesis, revise) | every `requirements` id of the phase is covered by an obligation or deferral; requirement ids exist in the manifest; gate ids are the phase's; `to_phase` is a later phase; ids are unique; every incoming deferral is listed in `covers` |
+| synthesis | every Plan Debater finding has a disposition; an accepted one names contract ids in `refs` |
+| repair design (context answer) | `contract_amendment` is present and lists every design finding in `resolves`; the amended contract still passes the plan rules |
+| repair after a review | a resolution for every assigned finding; a `fixed` resolution names files that changed since the reviewed tree |
+| testing | the first run verifies every obligation and deferral; after a review repair, every finding in the delta; `pass` has no `failed` verification; high and critical findings are `verified` with `variants`; `inspected` only for procedural obligations or obligations without a test gate |
+| review | the report has a `## Coverage` section; round 1 covers every contract id in `contract_review`, and each `not_met` is cited by a finding; finding `obligations` exist; a re-review gives `prior` for every earlier finding, reuses an earlier id only as `origin: unfixed`, gives new findings new ids with `regression` or `missed`, and `related` names an earlier finding; the final review blocks only on high or critical |
+
+## contract.json (schema_version 1)
+
+`.looprch/phases/P-NNN/contract.json`, written by Looprch from the Planner's result (earlier
+versions kept as `contract.rN.json`): `phase`, `revision`, `obligations[{id, requirements[],
+kind: behavior, invariant, boundary, interface, data, failure, production or procedure,
+statement, enforcement, verify, gates[], covers[], resolves[]}]`, `deferrals[{id,
+requirements[], what, to_phase, interim, covers[], resolves[]}]`. `incoming-deferrals.json` in a
+later phase lists the deferrals closed phases made to it, each with `from_phase` and `ref`
+(`P-NNN/X-n`).
