@@ -9,7 +9,7 @@
 // findings, failures, final (literal final message), kill_self, omit_resolutions; contract keys:
 // drop_requirement, deferrals, contract, omit_dispositions, omit_amendment, contract_amendment,
 // no_change, resolution_status, verifications, omit_verifications, bad_tests, raw_findings,
-// omit_prior, prior, contract_review, omit_contract_review.
+// omit_prior, prior, contract_review, omit_contract_review, no_test_change, omit_checks.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -196,12 +196,23 @@ switch (role) {
     if (decision === "fail") extra.failures = rule.failures || [{ id: "T-1", summary: "scripted failure" }];
     const ids = [...new Set([...contractIds(), ...deltaIds()])];
     const tests = rule.bad_tests ? ["tests/test_missing.py::test_nope"] : [testRef()];
-    if (!rule.omit_verifications) extra.verifications = rule.verifications ?? ids.map((id) => ({ id, status: "verified", tests, variants: ["scripted variant"] }));
+    const reviewRepair = /Round \d+: review findings|could not back the claims below/.test(brief);
+    if (reviewRepair && !rule.no_test_change && existsSync(join(cwd, tests[0]))) appendFileSync(join(cwd, tests[0]), `# verified (${nth})\n`);
+    const checkCount = {};
+    let currentId = null;
+    for (const line of (brief.split("\n## Delta\n")[1] ?? "").split("\n")) {
+      const head = /^- ([A-Za-z][\w.]*-[\w.-]+?)(?: \[| \(|:)/.exec(line);
+      if (head) currentId = head[1];
+      else if (currentId && /^  Check \d+:/.test(line)) checkCount[currentId] = (checkCount[currentId] ?? 0) + 1;
+    }
+    const checks = (id) => (checkCount[id] && !rule.omit_checks ? { checks: Array.from({ length: checkCount[id] }, (_, i) => ({ n: i + 1, tests })) } : {});
+    if (!rule.omit_verifications) extra.verifications = rule.verifications ?? ids.map((id) => ({ id, status: "verified", tests, variants: ["scripted variant"], ...checks(id) }));
     break;
   }
   case "reviewer": {
     decision ||= "approve";
-    const withCause = (list) => list.map((f) => ({ cause: f.owner === "tester" ? "test" : "implementation", ...f }));
+    const withCause = (list) =>
+      list.map((f) => ({ cause: f.owner === "tester" ? "test" : "implementation", ...(f.severity === "high" || f.severity === "critical" ? { checks: ["scripted check: the cited example", "scripted check: a variant"] } : {}), ...f }));
     if (decision === "changes_requested") extra.findings = rule.raw_findings ?? withCause(rule.findings || [{ id: "R-1", severity: "high", summary: "Scripted finding", files: ["noteapp.py"], fix: "Scripted fix condition", owner: "implementer" }]);
     else if (rule.findings || rule.raw_findings) extra.findings = rule.raw_findings ?? withCause(rule.findings);
     body = `## Coverage\n\n- Scripted coverage.\n\n${body}`;

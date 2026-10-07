@@ -120,7 +120,7 @@ describe("result blocks", () => {
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [] }).ok, false);
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x" }] }).ok, false);
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"] }] }).ok, false, "cause is required");
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"], cause: "implementation" }] }).ok, true);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"], cause: "implementation", checks: ["rejects x"] }] }).ok, true);
   });
   test("changes_requested with only low findings must approve instead", () => {
     const low = { id: "R-1", severity: "low", summary: "nit", files: ["a.py"], cause: "implementation" };
@@ -131,8 +131,11 @@ describe("result blocks", () => {
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "approve", findings: [low] }).ok, true);
   });
   test("review finding fields and implementer resolutions are validated", () => {
-    const f = { id: "R-1", severity: "high", summary: "x", files: ["a.py"], fix: "y", owner: "tester", origin: "missed", cause: "test", obligations: ["O-1"], related: "R-0" };
+    const f = { id: "R-1", severity: "high", summary: "x", files: ["a.py"], fix: "y", owner: "tester", origin: "missed", cause: "test", obligations: ["O-1"], related: "R-0", checks: ["rejects x", "rejects y"] };
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [f] }).ok, true);
+    const noChecks = validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, checks: [] }] });
+    assert.match(!noChecks.ok ? noChecks.errors.join(";") : "", /R-1 is high: list the acceptance checks/);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, severity: "medium", checks: undefined }] }).ok, true, "checks are optional below high");
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, owner: "planner" }] }).ok, false);
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, origin: "new" }] }).ok, false);
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, cause: "luck" }] }).ok, false);
@@ -168,6 +171,8 @@ describe("result blocks", () => {
     assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "O-1", status: "verified", tests: [], variants: [] }] }).ok, false);
     assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "O-1", status: "inspected", tests: [], variants: [] }] }).ok, true);
     assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "O-1", status: "ok", tests: [], variants: [] }] }).ok, false);
+    assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "R-1", status: "verified", tests: ["t"], variants: [], checks: [{ n: 1, tests: ["t"] }] }] }).ok, true);
+    assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "R-1", status: "verified", tests: ["t"], variants: [], checks: [{ tests: ["t"] }] }] }).ok, false);
   });
   test("handover needs file lists", () => {
     assert.equal(validateResult("implementer", { role: "implementer", decision: "handover_ready" }).ok, false);

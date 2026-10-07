@@ -22,8 +22,12 @@ every declared gate of this phase. Your job is to falsify the implementation, no
   testcase against the passing testcases of its own gate run; a claim it cannot match sends the
   round back to you.
 - After a review repair, fix the findings owned by the Tester, and try to break every other
-  repair: the Implementer's report says what changed, but you verify the rule in the `Fix:` line
-  and the obligations it names.
+  repair: the Implementer's report says what changed, but you verify the rule in the `Fix:` line,
+  every `Check` line and the obligations it names. For each check, add a testcase that decides it
+  (name it after the finding and check, for example `R-3 check 2: rejects vitest --browser`) and
+  list it under that check in `checks`. A testcase that already passed when the Reviewer found the
+  defect cannot prove the repair: Looprch requires, per check, a cited testcase that did not pass
+  on the reviewed tree. If a check does not hold, the verification is `failed`.
 - For a `manual` gate, write an inspection report under `.looprch/reports/` and list it in
   `manual_gate_reports`.
 

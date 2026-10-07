@@ -23,9 +23,11 @@ Fix the problems in the Delta (failing gates, tester failures or review findings
 cause, and fix the same defect wherever else it occurs in the phase diff, not only at the cited
 line. Leave no finding partly fixed. Change nothing unrelated.
 
-- A review finding's `Fix:` line is the condition your repair must meet, and the obligations it
-  names define the correct behavior. Fix the rule at its enforcement point for all inputs, not the
-  Reviewer's example; then try to break your fix with variants of the Reviewer's probe.
+- A review finding's `Fix:` line is the condition your repair must meet, its `Check` lines are
+  the acceptance checks the Tester will prove with new tests and the Reviewer will judge, and the
+  obligations it names define the correct behavior. Fix the rule at its enforcement point for all
+  inputs, not the Reviewer's example; walk every check against your code before you report
+  `fixed`, then try to break your fix with variants of the Reviewer's probe.
 - A Planner repair design (contract amendment) in the Delta is binding: implement it as defined.
 - Do not over-correct: check that the fixed code still works with the real inputs and with the
   evidence the declared gates produce (run the affected command on that evidence).

@@ -159,6 +159,12 @@ export interface CaseIndex {
   cases: TestCase[];
 }
 
+/** Named testcases without their outcome (the passing cases of an earlier batch). */
+export interface CaseNames {
+  available: boolean;
+  cases: Pick<TestCase, "name" | "classname" | "file">[];
+}
+
 /** Named testcases from this gate batch: JUnit evidence files and verbose unittest output. */
 export function testcaseIndex(root: string, runs: GateRun[]): CaseIndex {
   const cases: TestCase[] = [];
@@ -176,7 +182,7 @@ export function testcaseIndex(root: string, runs: GateRun[]): CaseIndex {
 
 const norm = (s: string): string => s.replace(/\\/g, "/").replace(/\s+/g, " ").trim();
 
-function refMatches(ref: string, c: TestCase, root: string): boolean {
+export function refMatches(ref: string, c: Pick<TestCase, "name" | "classname" | "file">, root: string): boolean {
   const r = norm(ref);
   const name = norm(c.name);
   if (!r || !name) return false;
@@ -199,11 +205,45 @@ function refMatches(ref: string, c: TestCase, root: string): boolean {
  * passing testcase of this batch. Without named testcases, the reference must at least name an
  * existing test file (and a name that occurs in it).
  */
-export function unbackedTests(verifs: { id: string; status: string; tests: string[] }[], index: CaseIndex, root: string): { id: string; test: string; reason: string }[] {
+type Claim = { id: string; status: string; tests: string[]; checks?: { n: number; tests: string[] }[] };
+
+const claimedTests = (v: Claim): string[] => [...new Set([...v.tests, ...(v.checks ?? []).flatMap((c) => c.tests)])];
+
+/** `path::name` or `path` of a test reference; null when it does not name a file. */
+function refFile(ref: string): string | null {
+  const sep = ref.lastIndexOf("::");
+  const file = (sep >= 0 ? ref.slice(0, sep) : ref).trim();
+  return /[/.]/.test(file) ? file.replace(/^\.\//, "") : null;
+}
+
+/**
+ * Verifications of review findings whose proof is stale: for each check (or the finding as a
+ * whole), at least one cited testcase must be new since the reviewed tree. A testcase that already
+ * passed on the tree where the Reviewer found the defect cannot prove the repair. Without named
+ * testcases, the cited test file must have changed since that tree.
+ */
+export function staleClaims(verifs: Claim[], findingIds: Set<string>, reviewed: CaseNames, changedFiles: Set<string>, root: string): { id: string; test: string; reason: string }[] {
+  const out: { id: string; test: string; reason: string }[] = [];
+  const fresh = (t: string): boolean => {
+    if (reviewed.available) return !reviewed.cases.some((c) => refMatches(t, c, root));
+    const f = refFile(t);
+    return !!f && changedFiles.has(f);
+  };
+  for (const v of verifs) {
+    if (v.status !== "verified" || !findingIds.has(v.id)) continue;
+    const groups = v.checks?.length ? v.checks.map((c) => ({ label: `check ${c.n}`, tests: c.tests })) : [{ label: "the finding", tests: v.tests }];
+    for (const g of groups)
+      if (!g.tests.some(fresh))
+        out.push({ id: v.id, test: g.tests.join(", ") || "(none)", reason: `${g.label}: every cited testcase already passed on the reviewed tree, where the Reviewer found the defect; add a testcase that fails there` });
+  }
+  return out;
+}
+
+export function unbackedTests(verifs: Claim[], index: CaseIndex, root: string): { id: string; test: string; reason: string }[] {
   const out: { id: string; test: string; reason: string }[] = [];
   for (const v of verifs) {
     if (v.status !== "verified") continue;
-    for (const t of v.tests) {
+    for (const t of claimedTests(v)) {
       if (index.available) {
         const hits = index.cases.filter((c) => refMatches(t, c, root));
         if (!hits.length) out.push({ id: v.id, test: t, reason: "no such testcase in the gate evidence" });

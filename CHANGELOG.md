@@ -2,6 +2,32 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.5.1 - 2026-10-07
+
+The first CoreBit P-001 validation on 0.5.0 was stopped after review round 2. The contract and
+debate worked: the plan deferred authentication and tenant routing with fail-closed interims, and
+round 1 found 28 findings tied to contract obligations. But the old symptom came back. The
+Implementer reported all 25 of its findings `fixed`, the Tester verified all 28, and round 2
+found 23 of them `unfixed`. The Reviewer judged the frozen Fix conditions, so the rules did not
+move; the repairs were incomplete. Two holes let the Tester's claims through:
+
+- Several verifications cited testcases that had already passed on the tree where the Reviewer
+  found the defect. Such a test cannot prove a repair.
+- New tests covered only the Reviewer's example. The Fix for R-24 named invalid dates and
+  oversized fractions; the tests rejected those, while 15 integer digits were still accepted.
+
+### Changed
+
+- High and critical review findings list `checks`: the acceptance checks of the repair, one
+  testable condition each, covering the example and the rule's variants. The checks are frozen
+  with the Fix, shown to the Implementer, Tester and Reviewer as `Check n` lines, and judged per
+  check in re-reviews (`prior[].failed_checks`).
+- A verified finding with checks names the testcases for every check (`verifications[].checks`).
+- Gate evidence: for each open review finding and each check, at least one cited testcase must
+  not have passed on the reviewed tree (Looprch keeps the passing testcases of each gate batch).
+  Without named testcases, a cited test file must have changed since that tree. A stale proof
+  sends the round to the Tester alone; that round's delta keeps the Fix and the checks.
+
 ## 0.5.0 - 2026-10-07
 
 The CoreBit P-001 runs on 0.4.x kept ending the same way. The Implementer reported a finding

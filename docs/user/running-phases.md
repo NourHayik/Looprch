@@ -144,9 +144,14 @@ second is a safety net, and a third is for exceptional cases.
   returns a verification naming the testcases. A finding that is not fixed is a Tester failure,
   so it goes back to the Implementer before the next review.
 - **Repairs fix the rule, not the example.** A finding names the broken rule, and its `fix`
-  states the rule for all inputs and the known variants. The `fix` does not change between
-  rounds: a re-review judges the same condition, and a new way to break the rule is a new
-  finding marked `related` to the earlier one.
+  states the rule for all inputs and the known variants. High and critical findings list
+  `checks`: the acceptance checks of the repair, one testable condition each. The `fix` and the
+  checks do not change between rounds: a re-review judges the same conditions, and a new way to
+  break the rule is a new finding marked `related` to the earlier one.
+- **A repair is proven by a new test.** The Tester names, per check, the testcases that prove it.
+  A testcase that already passed on the tree where the Reviewer found the defect cannot prove the
+  repair, so Looprch requires at least one cited testcase per check that did not pass there; a
+  claim without one goes back to the Tester (`[EVIDENCE MISMATCH]`).
 - **Design defects go to the Planner, not to another patch.** Before the Implementer repairs, the
   Planner writes a repair design (an amendment of the contract that defines the enforcement) for
   findings the Reviewer traced to the plan, a missed requirement or a later phase, for findings a

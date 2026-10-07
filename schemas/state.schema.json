@@ -53,6 +53,7 @@
               "cause": { "enum": [null, "implementation", "plan", "requirement", "cross_phase", "test"] },
               "owner": { "enum": [null, "implementer", "tester"] },
               "fix": { "type": ["string", "null"], "description": "Fix of the first report; unfixed re-reports keep it" },
+              "checks": { "type": "array", "items": { "type": "string" }, "description": "Acceptance checks of the first report" },
               "first_round": { "type": "integer" },
               "last_round": { "type": "integer" },
               "reports": { "type": "integer" },
@@ -67,6 +68,8 @@
           "properties": { "findings": { "type": "array", "items": { "type": "string" } }, "step": { "enum": ["design", "debate", "revise"] }, "debate": { "type": "boolean" }, "reason": { "enum": ["plan_cause", "unfixed", "related", "needs_design"] } }
         },
         "designed_this_round": { "type": "array", "items": { "type": "string" } },
+        "passing_cases": { "type": "object", "description": "Testcases that passed in the latest passing gate batch {available, cases[{name, classname, file}]}" },
+        "reviewed_cases": { "type": "object", "description": "passing_cases at the last changes-requesting review; a proof of a repair needs a testcase outside it" },
         "retired_obligations": { "type": "array", "items": { "type": "string" }, "description": "Contract ids retired by an amendment" },
         "tester_verifications": { "type": "array", "description": "Latest Tester verification per id; checked against the gate evidence" },
         "contract_review": { "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["met", "not_met"] } } } },

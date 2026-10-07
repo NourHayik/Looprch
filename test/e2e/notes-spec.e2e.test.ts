@@ -600,7 +600,7 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     const p = setupProject();
     p.setScenario([
       { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
-      { role: "reviewer", phase: "P-001", nth: 2, decision: "changes_requested", raw_findings: [{ id: "R-1", severity: "high", summary: "different defect", files: ["noteapp.py"], cause: "implementation", origin: "missed" }], prior: [{ id: "R-1", status: "fixed" }] },
+      { role: "reviewer", phase: "P-001", nth: 2, decision: "changes_requested", raw_findings: [{ id: "R-1", severity: "high", summary: "different defect", files: ["noteapp.py"], cause: "implementation", origin: "missed", checks: ["c"] }], prior: [{ id: "R-1", status: "fixed" }] },
     ]);
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r.last.action, "phase_closed");
@@ -665,6 +665,37 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     assert.deepEqual(readJson(join(p.root, ".looprch/phases/P-002/contract.json")).obligations[0].covers, ["P-001/X-1"]);
     const brief = readFileSync(join(p.root, ".looprch/runs/P-002-planner-1/brief.md"), "utf8");
     assert.match(brief, /incoming-deferrals\.json` — deferrals that closed phases made to P-002/);
+    p.s.cleanup();
+  });
+
+  test("C-16 false Verified with an old test: a proof that already passed on the reviewed tree goes back to the Tester", () => {
+    const p = setupProject();
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "tester", phase: "P-001", nth: 2, no_test_change: true },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    assert.deepEqual(after(roleSeq(r), "implementer:repair").slice(0, 4), ["implementer:repair", "tester:testing", "tester:testing", "reviewer:review"]);
+    const checked = events(p).filter((e) => e.type === "evidence.checked");
+    assert.ok(checked.some((e) => e.data.stale === 2), "both checks of the high finding cited only an unchanged test");
+    const brief = readFileSync(join(p.root, ".looprch/runs/P-001-tester-3/brief.md"), "utf8");
+    assert.match(brief, /R-1 \[high\] \(evidence-binding\): claimed tests not backed by the gate evidence: .*check 1: every cited testcase already passed on the reviewed tree/);
+    assert.match(brief, /  Check 2: scripted check: a variant/, "the evidence round keeps the finding's checks");
+    const repair = readFileSync(join(p.root, ".looprch/runs/P-001-implementer-2/brief.md"), "utf8");
+    assert.match(repair, /  Check 1: scripted check: the cited example\n  Check 2: scripted check: a variant/);
+    p.s.cleanup();
+  });
+
+  test("C-17 a verified high finding must prove every acceptance check", () => {
+    const p = setupProject();
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "tester", phase: "P-001", nth: 2, omit_checks: true },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    assert.match(rejected(p, "tester")[0]!, /R-1 has 2 acceptance check\(s\): "checks" must name the testcases that prove each one.*missing: check 1, check 2/);
     p.s.cleanup();
   });
 

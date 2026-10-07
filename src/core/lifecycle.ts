@@ -30,7 +30,7 @@ import { commitAll, currentBranch, dirtyFiles, gitOk, hasCommits, head } from ".
 import { commitBaseline, ensureRepo, requireIdentity } from "../git/baseline.js";
 import { closePhase, phaseBranch, startPhaseBranch } from "../git/phase.js";
 import { changedBetween, diffNameStatus, snapshotTree } from "../git/snapshot.js";
-import { loadGates, testcaseIndex, unbackedTests, type GatesOutcome } from "../gates/runner.js";
+import { loadGates, staleClaims, testcaseIndex, unbackedTests, type GatesOutcome } from "../gates/runner.js";
 
 export interface Engine {
   root: string;
@@ -1014,6 +1014,11 @@ function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: 
         if (!v) continue;
         const serious = f.severity === "high" || f.severity === "critical";
         if (v.status === "verified" && serious && !v.variants.length) problems.push(`${f.id} is ${f.severity}: list the variants you tested beyond the Reviewer's example in "variants"`);
+        if (v.status === "verified" && f.checks?.length) {
+          const proven = new Set((v.checks ?? []).filter((x) => x.tests.length).map((x) => x.n));
+          const open = f.checks.map((_, i) => i + 1).filter((n) => !proven.has(n));
+          if (open.length) problems.push(`${f.id} has ${f.checks.length} acceptance check(s): "checks" must name the testcases that prove each one ({"n": 1, "tests": [...]}); missing: ${open.map((n) => `check ${n}`).join(", ")}`);
+        }
         if (v.status === "inspected" && serious) problems.push(`${f.id} is ${f.severity}: verify it with a test (status verified with tests), not by inspection`);
       }
       for (const v of verifs) {
@@ -1136,11 +1141,15 @@ function updateLedger(e: Engine, findings: Finding[], prior: { id: string; statu
       prev.last_round = round;
       prev.status = "open";
       prev.severity = f.severity ?? prev.severity;
-      if (prev.fix && f.origin === "unfixed") f.fix = prev.fix;
+      if (f.origin === "unfixed") {
+        if (prev.fix) f.fix = prev.fix;
+        if (prev.checks?.length) f.checks = prev.checks;
+        else if (f.checks?.length) prev.checks = f.checks;
+      }
       continue;
     }
     const lineage = f.related && ledger[f.related] ? ledger[f.related]!.lineage : f.id;
-    ledger[f.id] = { lineage, severity: f.severity ?? null, cause: f.cause ?? null, owner: f.owner ?? null, fix: f.fix ?? null, first_round: round, last_round: round, reports: 1, designs: 0, status: "open" };
+    ledger[f.id] = { lineage, severity: f.severity ?? null, cause: f.cause ?? null, owner: f.owner ?? null, fix: f.fix ?? null, ...(f.checks?.length ? { checks: f.checks } : {}), first_round: round, last_round: round, reports: 1, designs: 0, status: "open" };
   }
 }
 
@@ -1254,7 +1263,7 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
     text: [
       `Round ${c.round}: review findings. Fix the findings owned by the Tester (you own the test code). For every other finding, try to falsify the repair: derive the rule from its Fix line and the contract obligations it names, and test that rule, not the Implementer's claim. Test the cited example, at least one input class that neither the Reviewer nor the Implementer named (another entry point, configuration, boundary, trust case or dependency path), and the enforcement point itself (that no second path bypasses it). Tests must fail without the fix and run in the declared gates.`,
       reopened.length ? `${reopened.join(", ")} came back after an earlier repair and verification: check them hardest.` : "",
-      `Return \`verifications\` for every finding id below (status verified with the testcase names, variants you tried; failed when it is not fixed, and list it in failures).`,
+      `Prove every Check line with a new testcase of its own; a testcase that already passed when the Reviewer found the defect does not count. Return \`verifications\` for every finding id below (status verified with the testcase names and, per check, \`checks\` [{"n", "tests"}], and the variants you tried; failed when it is not fixed, and list it in failures).`,
     ].filter(Boolean).join(" "),
     findings,
     paths,
@@ -1446,7 +1455,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       const path = writeArtifact(e, "test-report.md", artifact);
       c.tester_verdict = r.decision === "pass" ? "pass" : "fail";
       c.tester_failures = (r.failures ?? []).map((f) => ({ id: f.id, summary: f.summary, gate_id: f.gate_id, files: f.files }));
-      const verifs: Verification[] = (r.verifications ?? []).map((v) => ({ id: v.id, status: v.status, tests: v.tests, variants: v.variants, ...(v.note ? { note: v.note } : {}) }));
+      const verifs: Verification[] = (r.verifications ?? []).map((v) => ({ id: v.id, status: v.status, tests: v.tests, variants: v.variants, ...(v.checks?.length ? { checks: v.checks } : {}), ...(v.note ? { note: v.note } : {}) }));
       for (const v of verifs)
         if (v.status === "failed" && !c.tester_failures.some((f) => f.id === v.id)) c.tester_failures.push({ id: v.id, summary: `verification failed${v.note ? `: ${v.note}` : ""}` });
       const merged = new Map((c.tester_verifications ?? []).map((v) => [v.id, v]));
@@ -1470,6 +1479,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         ...(f.cause ? { cause: f.cause } : {}),
         ...(f.obligations?.length ? { obligations: f.obligations } : {}),
         ...(f.related ? { related: f.related } : {}),
+        ...(f.checks?.length ? { checks: f.checks } : {}),
       }));
       updateLedger(e, findings, r.prior ?? []);
       const merged = new Map((c.contract_review ?? []).map((x) => [x.id, x.status]));
@@ -1490,6 +1500,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         c.review_findings = findings;
         c.review_changes = (c.review_changes ?? 0) + 1;
         c.reviewed_tree = c.snapshots.gates;
+        c.reviewed_cases = c.passing_cases ?? { available: false, cases: [] };
         if (reviewsExhausted(e)) c.final_review_pending = true;
         else repairOrBlock(e, "review", findings, [path], findingSummary(findings));
       }
@@ -1604,16 +1615,23 @@ export function applyGates(e: Engine, outcome: GatesOutcome): void {
     const index = testcaseIndex(e.root, outcome.runs);
     const retired = new Set(c.retired_obligations ?? []);
     const current = (c.tester_verifications ?? []).filter((v) => !retired.has(v.id));
-    const unbacked = unbackedTests(current, index, e.root);
-    ev(e, { type: "evidence.checked", data: { binding: index.available ? "testcases" : "files", cases: index.cases.length, verifications: (c.tester_verifications ?? []).length, unbacked: unbacked.length } });
+    const open = new Set((c.review_changes ?? 0) > 0 ? c.review_findings.map((f) => f.id) : []);
+    const changed = new Set(c.reviewed_tree ? changedBetween(e.root, c.reviewed_tree, outcome.snapshot_tree) : []);
+    const stale = open.size && c.reviewed_cases ? staleClaims(current, open, c.reviewed_cases, changed, e.root) : [];
+    const unbacked = [...unbackedTests(current, index, e.root), ...stale];
+    ev(e, { type: "evidence.checked", data: { binding: index.available ? "testcases" : "files", cases: index.cases.length, verifications: (c.tester_verifications ?? []).length, unbacked: unbacked.length - stale.length, stale: stale.length } });
     if (unbacked.length) {
       const byId = new Map<string, string[]>();
       for (const u of unbacked) byId.set(u.id, [...(byId.get(u.id) ?? []), `${u.test} (${u.reason})`]);
-      const findings: Finding[] = [...byId].map(([id, why]) => ({ id, gate_id: EVIDENCE_GATE, summary: `claimed tests not backed by the gate evidence: ${why.join("; ")}` }));
+      const findings: Finding[] = [...byId].map(([id, why]) => {
+        const rf = open.has(id) ? c.review_findings.find((f) => f.id === id) : undefined;
+        return { id, gate_id: EVIDENCE_GATE, summary: `claimed tests not backed by the gate evidence: ${why.join("; ")}`, ...(rf?.severity ? { severity: rf.severity } : {}), ...(rf?.fix ? { fix: rf.fix } : {}), ...(rf?.checks?.length ? { checks: rf.checks } : {}) };
+      });
       ev(e, { type: "evidence.unbacked", role: "tester", data: { verifications: [...byId.keys()], tests: unbacked.map((u) => u.test).slice(0, 50) } });
       repairOrBlock(e, "test", findings, [], `unbacked verifications ${[...byId.keys()].join(", ")}`, true);
       return;
     }
+    c.passing_cases = { available: index.available, cases: index.cases.filter((x) => x.status === "passed").map((x) => ({ name: x.name, classname: x.classname, file: x.file })) };
     c.snapshots.gates = outcome.snapshot_tree;
     afterGatesPassed(e);
     return;

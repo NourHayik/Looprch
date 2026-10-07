@@ -82,9 +82,9 @@ function fields(role: Role, task: Task): string {
     case "implementer":
       return '"files_changed": ["…"]; after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed|needs_design","note":"what changed or why not","files":["paths your repair changed (required for fixed)"]}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]';
     case "tester":
-      return '"tests_written": ["…"], "verifications": [{"id":"O-1 or R-1","status":"verified|failed|inspected","tests":["testcase name as in the JUnit report, or path::name"],"variants":["…"],"note":"…"}], "failures": [{"id":"T-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"tests_written": ["…"], "verifications": [{"id":"O-1 or R-1","status":"verified|failed|inspected","tests":["testcase name as in the JUnit report, or path::name"],"checks":[{"n":1,"tests":["…"]}] (review findings with Check lines: every check),"variants":["…"],"note":"…"}], "failures": [{"id":"T-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "reviewer":
-      return '"findings": [{"id":"R-1","severity":"high","summary":"the broken rule","files":["…"],"fix":"the condition the repair must meet","owner":"implementer|tester","cause":"implementation|plan|requirement|cross_phase|test","obligations":["O-3"],"related":"R-2 (optional)","origin":"unfixed|regression|missed (re-reviews only)"}], "contract_review": [{"id":"O-1","status":"met|not_met"}] (first review: every obligation and deferral), "prior": [{"id":"R-1","status":"fixed|unfixed"}] (re-reviews: every earlier finding in the Delta), "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"findings": [{"id":"R-1","severity":"high","summary":"the broken rule","files":["…"],"fix":"the condition the repair must meet","checks":["one concrete, testable acceptance check per line (required for high and critical)"],"owner":"implementer|tester","cause":"implementation|plan|requirement|cross_phase|test","obligations":["O-3"],"related":"R-2 (optional)","origin":"unfixed|regression|missed (re-reviews only)"}], "contract_review": [{"id":"O-1","status":"met|not_met"}] (first review: every obligation and deferral), "prior": [{"id":"R-1","status":"fixed|unfixed","failed_checks":[2]}] (re-reviews: every earlier finding in the Delta), "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "worker":
       return '"evidence": [{"path":"…","lines":"10-20","note":"…"}]';
     default: {
@@ -181,6 +181,7 @@ function deltaText(d: Delta | null, note: string | null): string {
       lines.push(`- ${f.id}${tags ? ` [${tags}]` : ""}${f.gate_id ? ` (${f.gate_id})` : ""}: ${f.summary}${f.files?.length ? ` — ${f.files.join(", ")}` : ""}`);
       if (f.obligations?.length) lines.push(`  Contract: ${f.obligations.join(", ")}`);
       if (f.fix) lines.push(`  Fix: ${f.fix}`);
+      (f.checks ?? []).forEach((c, i) => lines.push(`  Check ${i + 1}: ${c}`));
     }
     for (const p of d.paths ?? []) lines.push(`- read: \`${p}\``);
   }

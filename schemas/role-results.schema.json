@@ -77,7 +77,14 @@
           "items": {
             "type": "object",
             "required": ["id", "status", "tests", "variants"],
-            "properties": { "id": { "type": "string" }, "status": { "enum": ["verified", "failed", "inspected"] }, "tests": { "$ref": "#/$defs/paths" }, "variants": { "type": "array", "items": { "type": "string" } }, "note": { "type": "string" } }
+            "properties": {
+              "id": { "type": "string" },
+              "status": { "enum": ["verified", "failed", "inspected"] },
+              "tests": { "$ref": "#/$defs/paths" },
+              "checks": { "description": "Review findings with checks: testcases per check; per check one must not have passed on the reviewed tree", "type": "array", "items": { "type": "object", "required": ["n", "tests"], "properties": { "n": { "type": "integer" }, "tests": { "$ref": "#/$defs/paths" } } } },
+              "variants": { "type": "array", "items": { "type": "string" } },
+              "note": { "type": "string" }
+            }
           }
         },
         "failures": { "type": "array", "items": { "type": "object", "required": ["id", "summary"], "properties": { "id": { "type": "string" }, "gate_id": { "type": "string" }, "summary": { "type": "string" }, "files": { "$ref": "#/$defs/paths" } } } },
@@ -90,7 +97,7 @@
         "decision": { "enum": ["approve", "changes_requested"] },
         "findings": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/finding" }], "required": ["files", "cause"] } },
         "contract_review": { "description": "First review: met or not_met for every obligation and deferral", "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["met", "not_met"] } } } },
-        "prior": { "description": "Re-reviews: fixed or unfixed for every earlier finding in the Delta", "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "unfixed"] } } } },
+        "prior": { "description": "Re-reviews: fixed or unfixed for every earlier finding in the Delta", "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "unfixed"] }, "failed_checks": { "type": "array", "items": { "type": "integer" } } } } },
         "manual_gate_reports": { "$ref": "#/$defs/reports" }
       }
     },
@@ -150,6 +157,7 @@
         "requirement_ids": { "type": "array", "items": { "type": "string" } },
         "refs": { "$ref": "#/$defs/ids", "description": "Plan Debater: contract ids the finding concerns" },
         "fix": { "type": "string", "description": "Reviewer: the acceptance condition of the repair (kept unchanged across rounds)" },
+        "checks": { "type": "array", "items": { "type": "string" }, "description": "Reviewer: acceptance checks the repair must pass, one testable condition each (required for high and critical; kept unchanged across rounds)" },
         "owner": { "enum": ["implementer", "tester"], "description": "Reviewer: the role that fixes it (default implementer; cause test means tester)" },
         "cause": { "enum": ["implementation", "plan", "requirement", "cross_phase", "test"], "description": "Reviewer: where the defect comes from; plan, requirement and cross_phase go to a Planner repair design first" },
         "obligations": { "$ref": "#/$defs/ids", "description": "Reviewer: contract ids the finding concerns" },

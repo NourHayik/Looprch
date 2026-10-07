@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { amend, contractProblems, dispositionProblems, newContract, unresolvedByAmendment, type ContractBody } from "../../src/core/contract.js";
 import { junitCases } from "../../src/gates/junit.js";
 import { unittestCases } from "../../src/gates/unittest.js";
-import { unbackedTests, type CaseIndex } from "../../src/gates/runner.js";
+import { staleClaims, unbackedTests, type CaseIndex } from "../../src/gates/runner.js";
 import type { Manifest, PhaseDef } from "../../src/sev3/manifest.js";
 
 const gate = (id: string, kind: "test" | "static" = "test") => ({ id, kind, command: ["true"], negative: false, requirements: [], evidence: { format: "junit" as const, path: "x.xml" } });
@@ -93,6 +93,21 @@ describe("tester evidence binding", () => {
     assert.match(unbackedTests(v(["skipped one"]), index, "/repo")[0]!.reason, /skipped/);
     assert.match(unbackedTests(v(["it rejects"]), index, "/repo")[0]!.reason, /no such testcase/);
     assert.deepEqual(unbackedTests(v(["anything"], "inspected"), index, "/repo"), []);
+  });
+
+  test("a review finding's proof needs, per check, a testcase that did not pass on the reviewed tree", () => {
+    const reviewed = { available: true, cases: [{ name: "it rejects a production url", classname: "Tests.Feature.SafetyTest", file: "" }] };
+    const open = new Set(["R-1"]);
+    const v = (checks: { n: number; tests: string[] }[]) => [{ id: "R-1", status: "verified", tests: checks.flatMap((c) => c.tests), checks }];
+    const stale = staleClaims(v([{ n: 1, tests: ["it rejects a production url"] }, { n: 2, tests: ["R-1 check 2: rejects a nested write host"] }]), open, reviewed, new Set(), "/repo");
+    assert.equal(stale.length, 1);
+    assert.match(stale[0]!.reason, /check 1: every cited testcase already passed on the reviewed tree/);
+    assert.deepEqual(staleClaims(v([{ n: 1, tests: ["it rejects a production url", "R-1 check 1: rejects URL-free targets"] }]), open, reviewed, new Set(), "/repo"), []);
+    assert.deepEqual(staleClaims([{ id: "R-1", status: "verified", tests: ["it rejects a production url"] }], new Set(["R-9"]), reviewed, new Set(), "/repo"), [], "only open review findings");
+    assert.equal(staleClaims([{ id: "R-1", status: "verified", tests: ["it rejects a production url"] }], open, reviewed, new Set(), "/repo").length, 1, "without checks the finding as a whole");
+    const files = { available: false, cases: [] };
+    assert.deepEqual(staleClaims([{ id: "R-1", status: "verified", tests: ["tests/test_ids.py::test_valid"] }], open, files, new Set(["tests/test_ids.py"]), "/repo"), []);
+    assert.equal(staleClaims([{ id: "R-1", status: "verified", tests: ["tests/test_ids.py::test_valid"] }], open, files, new Set(["noteapp.py"]), "/repo").length, 1);
   });
 
   test("without named testcases a claim must name an existing test file and a name in it", () => {

@@ -90,7 +90,9 @@ describe("briefs", () => {
     assert.match(roleText("reviewer", "adhoc_review"), /Checklist:/);
     assert.match(roleText("implementer", "repair"), /same defect wherever else it occurs/);
     assert.match(roleText("implementer", "repair"), /report `resolutions`/);
-    assert.match(roleText("implementer", "repair"), /Fix the rule at its enforcement point for all inputs/);
+    assert.match(roleText("implementer", "repair"), /Fix the rule at its enforcement point for all\s+inputs/);
+    assert.match(roleText("implementer", "repair"), /walk every check against your code/);
+    assert.match(roleText("tester", "testing"), /A testcase that already passed when the Reviewer found the\s+defect cannot prove the repair/);
     assert.match(roleText("implementer", "repair"), /`fixed` only when the whole rule holds, with the files your repair changed/);
     assert.match(roleText("implementer", "repair"), /`needs_design` when the contract does not define/);
     assert.match(role, /Describe the broken rule, not only the example/);
@@ -107,7 +109,8 @@ describe("briefs", () => {
     assert.match(r, /"owner":"implementer\|tester"/);
     assert.match(r, /"cause":"implementation\|plan\|requirement\|cross_phase\|test"/);
     assert.match(r, /"contract_review": \[\{"id":"O-1","status":"met\|not_met"\}\]/);
-    assert.match(r, /"prior": \[\{"id":"R-1","status":"fixed\|unfixed"\}\]/);
+    assert.match(r, /"prior": \[\{"id":"R-1","status":"fixed\|unfixed","failed_checks":\[2\]\}\]/);
+    assert.match(r, /"checks":\["one concrete, testable acceptance check per line/);
     assert.match(assembleBrief(input({ role: "implementer", task: "repair" })), /"resolutions": \[\{"id":"R-1","status":"fixed\|not_fixed\|needs_design"/);
     assert.match(assembleBrief(input({ role: "tester", task: "testing" })), /"verifications": \[\{"id":"O-1 or R-1","status":"verified\|failed\|inspected"/);
     assert.match(assembleBrief(input({ role: "planner", task: "planning" })), /"contract": \{"obligations": \[/);
@@ -117,10 +120,10 @@ describe("briefs", () => {
 
   test("delta findings show owner, origin and the fix condition", () => {
     const b = assembleBrief(
-      input({ role: "tester", task: "testing", delta: { kind: "repair", text: "Verify:", findings: [{ id: "R-7", severity: "medium", owner: "tester", origin: "unfixed", summary: "missing tests", fix: "two-connection test" }] } }),
+      input({ role: "tester", task: "testing", delta: { kind: "repair", text: "Verify:", findings: [{ id: "R-7", severity: "medium", owner: "tester", origin: "unfixed", summary: "missing tests", fix: "two-connection test", checks: ["two connections contend", "the loser gets a conflict"] }] } }),
     );
     assert.match(b, /- R-7 \[medium, owner tester, unfixed\]: missing tests/);
-    assert.match(b, /  Fix: two-connection test/);
+    assert.match(b, /  Fix: two-connection test\n  Check 1: two connections contend\n  Check 2: the loser gets a conflict/);
   });
 
   test("role text picks the task section", () => {

@@ -38,6 +38,7 @@ export interface ResultFinding {
   obligations?: string[];
   related?: string;
   refs?: string[];
+  checks?: string[];
 }
 
 export interface Resolution {
@@ -74,7 +75,7 @@ export interface RoleResult {
   contract_amendment?: Amendment;
   verifications?: Verification[];
   contract_review?: { id: string; status: "met" | "not_met"; note?: string }[];
-  prior?: { id: string; status: "fixed" | "unfixed"; note?: string }[];
+  prior?: { id: string; status: "fixed" | "unfixed"; note?: string; failed_checks?: number[] }[];
 }
 
 export interface Extracted {
@@ -126,6 +127,9 @@ const finding = (reviewer: boolean) => (x: unknown) => {
   if (x.obligations !== undefined && !isStringArray(x.obligations)) return "obligations must be a list of contract ids";
   if (x.refs !== undefined && !isStringArray(x.refs)) return "refs must be a list of contract ids";
   if (x.related !== undefined && !isNonEmptyString(x.related)) return "related must be a finding id";
+  if (x.checks !== undefined && !isStringArray(x.checks)) return `${x.id}: checks must be a list of acceptance checks`;
+  if (reviewer && (x.severity === "high" || x.severity === "critical") && (!isStringArray(x.checks) || x.checks.length === 0))
+    return `${x.id} is ${x.severity}: list the acceptance checks a repair must pass in "checks" (one concrete, testable condition each: the cited example and the variants of the rule)`;
   return null;
 };
 
@@ -145,6 +149,10 @@ const verification = (x: unknown) => {
   if (!isStringArray(x.variants)) return `${x.id}: variants must be a list (use [] when none)`;
   if (x.status === "verified" && x.tests.length === 0) return `${x.id}: verified needs the testcase(s) that prove it in "tests"`;
   if (x.note !== undefined && typeof x.note !== "string") return "note must be a string";
+  if (x.checks !== undefined) {
+    if (!Array.isArray(x.checks)) return `${x.id}: checks must be a list of {"n", "tests"}`;
+    for (const c of x.checks) if (!isObject(c) || typeof c.n !== "number" || !isStringArray(c.tests)) return `${x.id}: each checks entry is {"n": <check number>, "tests": [testcase names]}`;
+  }
   return null;
 };
 

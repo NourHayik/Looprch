@@ -78,6 +78,8 @@ export interface Finding {
   obligations?: string[];
   /** Id of an earlier finding about the same rule (a new way to break it). */
   related?: string;
+  /** Review findings: the acceptance checks a repair must pass (kept from the first report). */
+  checks?: string[];
 }
 
 /** One review finding lineage (an id plus the findings `related` to it) across the review rounds of a phase. */
@@ -88,6 +90,8 @@ export interface LedgerEntry {
   owner: FindingOwner | null;
   /** The Fix of the first report; re-reports keep it. */
   fix: string | null;
+  /** The acceptance checks of the first report; re-reports keep them. */
+  checks?: string[];
   first_round: number;
   last_round: number;
   reports: number;
@@ -109,7 +113,15 @@ export interface Verification {
   status: "verified" | "failed" | "inspected";
   tests: string[];
   variants: string[];
+  /** Review findings with checks: the testcases that prove each check (n is 1-based). */
+  checks?: { n: number; tests: string[] }[];
   note?: string;
+}
+
+/** Testcases that passed in a gate batch, for deciding which tests are new. */
+export interface CaseSet {
+  available: boolean;
+  cases: { name: string; classname: string; file: string }[];
 }
 
 /** Instructions carried into the next brief for a role (repair findings, re-ask, user note). */
@@ -168,6 +180,10 @@ export interface Current {
   designed_this_round?: string[];
   /** The Tester's verifications of its last run (checked against the gate evidence). */
   tester_verifications?: Verification[];
+  /** Testcases that passed in the latest passing gate batch. */
+  passing_cases?: CaseSet;
+  /** Testcases that passed on the tree the last changes-requesting review looked at. */
+  reviewed_cases?: CaseSet;
   /** Contract ids a contract amendment retired (their old verifications are no longer checked). */
   retired_obligations?: string[];
   /** Obligation status from the latest review that reported it. */
