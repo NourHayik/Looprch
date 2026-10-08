@@ -2,6 +2,16 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.6.3 - 2026-10-08
+
+### Fixed
+
+- The test-repair budget (`limits.repair_rounds`) was phase-wide. In CoreBit P-001, five test
+  repairs were spent before the first review. After the review repair, which ran as 11 Planner
+  repair packages executed by DeepSeek, the first test failure blocked at once. Each review that
+  requests changes now starts a new cycle with a fresh test-repair budget (`test_repairs` and
+  the extra rounds granted by `resume` reset).
+
 ## 0.6.2 - 2026-10-08
 
 ### Fixed

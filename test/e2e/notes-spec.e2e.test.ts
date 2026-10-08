@@ -853,6 +853,19 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     p.s.cleanup();
   });
 
+  test("C-26 each review cycle gets its own test-repair budget", () => {
+    const p = setupProject({ config: { "limits.repair_rounds": "1" } });
+    p.setScenario([
+      { role: "tester", phase: "P-001", nth: 1, decision: "fail", failures: [{ id: "T-1", summary: "before the review" }] },
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "tester", phase: "P-001", nth: 3, decision: "fail", failures: [{ id: "T-2", summary: "after the review repair" }] },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    assert.ok(!events(p).some((e) => e.type === "blocked"), "the test repair after the review repair has a fresh budget");
+    p.s.cleanup();
+  });
+
   test("C-15 a phase started on protocol 1 without a contract pauses, then resumes and closes", () => {
     const p = setupProject();
     drive({ root: p.root, env: p.env, onAction: stopAt((a) => a.action === "run_role" && a.role === "implementer") });

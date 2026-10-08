@@ -1594,6 +1594,9 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         c.review_findings = findings;
         c.review_changes = (c.review_changes ?? 0) + 1;
         c.acknowledged_open = [];
+        c.test_repairs = 0;
+        c.extra_rounds = 0;
+        c.last_test_keys = [];
         c.reviewed_tree = c.snapshots.gates;
         c.reviewed_cases = c.passing_cases ?? { available: false, cases: [] };
         if (reviewsExhausted(e)) c.final_review_pending = true;
