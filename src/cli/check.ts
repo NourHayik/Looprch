@@ -9,7 +9,8 @@ const USAGE = `looprch check <run_id> [--stdin | --file <path>] [--root <dir>] [
   Check a role's report the way Looprch will when the run ends: the looprch-result block, its
   shape, the task's decisions and the phase rules (contract coverage, plan lint, dispositions,
   verifications, review coverage). Changes nothing. Without --stdin or --file it reads the run's
-  report file .looprch/runs/<run_id>/report.md. A block without markdown above it is checked
+  report file .looprch/runs/<run_id>/report.md, which is what Looprch validates when the run
+  ends, with every rule. A block without markdown above it, from --stdin or --file, is checked
   without the rules about the markdown (plan sections, blueprints, ## Coverage).`;
 
 async function readStdin(): Promise<string> {
@@ -33,7 +34,7 @@ export async function run(argv: string[]): Promise<number> {
     if (!existsSync(path)) throw new LrError("no_report", `No report at ${path}`, `Write your report to ${reportPath(e, runId)} or pass --stdin`);
     text = readFileSync(path, "utf8");
   }
-  const r = checkResult(e, run, text);
+  const r = checkResult(e, run, text, !!values.stdin || values.file !== undefined);
   out(!!values.json, r, () => (r.ok ? `ok: the report passes Looprch's checks (decision ${r.decision}).` : ["The report would be rejected. Fix each problem, then check again:", ...r.errors.map((x) => `  - ${x}`)].join("\n")));
   return r.ok ? 0 : 1;
 }

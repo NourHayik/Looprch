@@ -154,6 +154,51 @@ describe("lifecycle transition rows", () => {
     p.s.cleanup();
   });
 
+  test("T-check: the run's end validates the report file that looprch check validated, not the short final message", () => {
+    const p = setupProject({ roles: { ...defaultRolesDelegatePlanner() } });
+    p.setScenario([
+      { role: "planner", phase: "P-001", task: "planning", nth: 1, report_file: true, omit_sections: true, report_final: "block" },
+      { role: "planner", phase: "P-001", task: "planning", nth: 2, report_file: true, report_final: 'Done; see report.md.\n\n```looprch-result\n{"role":"planner","decision":"plan_ready"}\n```' },
+    ]);
+    const a1 = until(p, (x) => x.action === "run_role" && x.role === "planner");
+    cli(p, ["dispatch", a1.run_id]);
+    const events = () => readFileSync(join(p.root, ".looprch/events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const rejected = events().find((x) => x.type === "result.rejected" && x.run_id === a1.run_id);
+    assert.match(rejected.data.errors.join(";"), /the report \(the markdown above the looprch-result block\) needs these sections .*Objectives/);
+    const a2 = next(p);
+    assert.equal(a2.role, "planner");
+    assert.notEqual(a2.run_id, a1.run_id);
+    assert.match(readFileSync(join(p.root, a2.brief), "utf8"), /to your report file \(named in the self-check below\), and run looprch check until it prints ok/);
+    const report1 = readFileSync(join(p.root, `.looprch/runs/${a1.run_id}/report.md`), "utf8");
+    const report2 = join(p.root, `.looprch/runs/${a2.run_id}/report.md`);
+    writeFileSync(report2, report1);
+    const bad = runCli(["check", a2.run_id, "--json"], { cwd: p.root, env: p.env });
+    assert.equal(bad.code, 1, "check rejects the report file the run's end rejects");
+    assert.match(bad.json.errors.join(";"), /needs these sections .*Objectives/);
+    writeFileSync(report2, report1.replace("# Plan for P-001\n\n", "# Plan for P-001\n\n## Objectives\n\nNone.\n\n"));
+    const good = runCli(["check", a2.run_id, "--json"], { cwd: p.root, env: p.env });
+    assert.equal(good.code, 0, JSON.stringify(good.json));
+    cli(p, ["dispatch", a2.run_id]);
+    const d = until(p, (x) => x.action === "run_role" && x.role === "plan_debater");
+    assert.equal(d.role, "plan_debater", "the report file was accepted although the final message's block had no contract");
+    const run2 = join(p.root, `.looprch/runs/${a2.run_id}`);
+    assert.equal(readFileSync(join(run2, "final.md"), "utf8"), readFileSync(join(run2, "report.md"), "utf8"), "final.md records the report file");
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/plan.md"), "utf8"), /## Objectives[\s\S]*## Deferred/);
+    p.s.cleanup();
+  });
+
+  test("T-check: a final message with the contract but no markdown does not replace the report file", () => {
+    const p = setupProject({ roles: { ...defaultRolesDelegatePlanner() } });
+    p.setScenario([{ role: "planner", phase: "P-001", task: "planning", nth: 1, report_file: true, report_final: "block" }]);
+    const a = until(p, (x) => x.action === "run_role" && x.role === "planner");
+    cli(p, ["dispatch", a.run_id]);
+    const d = until(p, (x) => x.action === "run_role" && x.role === "plan_debater");
+    assert.equal(d.role, "plan_debater");
+    assert.equal(readJson(join(p.root, `.looprch/runs/${a.run_id}/run.json`)).status, "completed", "the plan sections in report.md were linted, not the block-only final message");
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/plan.md"), "utf8"), /## Objectives/);
+    p.s.cleanup();
+  });
+
   test("T-planning: expansion limit blocks", () => {
     const p = setupProject({ roles: defaultRolesDelegatePlanner(), config: { "limits.expansion_rounds": "0" } });
     p.setScenario([{ role: "planner", decision: "needs_expansion", final: '```looprch-result\n{"role":"planner","decision":"needs_expansion","expansion_requests":[{"kind":"document","id":"F-NOTES","question":"q","reason":"r"}]}\n```' }]);

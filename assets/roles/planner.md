@@ -57,7 +57,8 @@ one comes back to you. Each package (at most 25 steps and 25 files; prefer 5 to 
 
 - `precision`: `spec` (exact files, signatures and steps) or `full_content`. A package that builds
   a `boundary` or `invariant` obligation must be `full_content`: mark its critical files
-  `"blueprint": true` and write each one in full in plan.md as a fenced block whose info string
+  `"blueprint": true` and write each one in full in your report (the markdown above the
+  looprch-result block, which becomes plan.md) as a fenced block whose info string
   names the path, for example ` ```php blueprint=app/Support/Gate.php `. The Implementer copies
   blueprints byte for byte and only does the wiring the steps name.
 - `files`: every file it creates, modifies or deletes, with `content` saying what the file holds

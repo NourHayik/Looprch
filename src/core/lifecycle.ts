@@ -7,7 +7,7 @@ import { addEntries, applyDispositions, applyVerdicts, closeEntries, entryLine, 
 import { writeTraceability } from "./trace.js";
 import { readRelayUsage } from "../delegate/usage.js";
 import type { Action, RunRoleAction } from "./actions.js";
-import { assembleBrief, writeBrief, type Task } from "./briefs.js";
+import { assembleBrief, REPORT_FILE_TASKS, writeBrief, type Task } from "./briefs.js";
 import { now, nowIso, reviewTimeout } from "./clock.js";
 import { LrError, errorMessage } from "./errors.js";
 import { ensureDir, writeFileAtomic } from "./fsx.js";
@@ -1042,25 +1042,32 @@ export function reportPath(e: Engine, runId: string): string {
   return join(projectPaths(e.root).run(runId), "report.md");
 }
 
-/** The final message, or the run's report file when the message carries no result block. */
+/**
+ * The run's report file when it carries a result block, else the final message. The report file
+ * is what `looprch check` validates, so a short final message never replaces it.
+ */
 function resultText(e: Engine, runId: string, finalMessage: string): string {
-  if (extractResultBlock(finalMessage).ok) return finalMessage;
   const p = reportPath(e, runId);
-  return existsSync(p) ? readFileSync(p, "utf8") : finalMessage;
+  if (existsSync(p)) {
+    const report = readFileSync(p, "utf8");
+    if (extractResultBlock(report).ok) return report;
+  }
+  return finalMessage;
 }
 
 /**
  * The checks acceptResult applies to a role's report (block, shape, task decision, phase rules),
  * without any side effect: `looprch check` lets a role fix its report before it ends, instead of a
- * re-ask that repeats the whole run. Rules about the markdown are skipped for a block-only check.
+ * re-ask that repeats the whole run. A `partial` check of a block-only text skips the rules about
+ * the markdown; the run's report file is always checked in full, as the run's end reads it.
  */
-export function checkResult(e: Engine, run: RunRecord, text: string): { ok: boolean; decision: string | null; errors: string[] } {
+export function checkResult(e: Engine, run: RunRecord, text: string, partial = false): { ok: boolean; decision: string | null; errors: string[] } {
   const ex = extractResultBlock(text);
   if (!ex.ok) return { ok: false, decision: null, errors: [ex.error!] };
   const v = validateResult(run.role, ex.json, run.run_id);
   if (!v.ok) return { ok: false, decision: null, errors: v.errors };
   if (!TASK_DECISIONS[run.task].includes(v.result.decision)) return { ok: false, decision: v.result.decision, errors: [`decision "${v.result.decision}" is not valid for this task; use one of ${TASK_DECISIONS[run.task].join(", ")}`] };
-  const blockOnly = !ex.artifact.trim();
+  const blockOnly = partial && !ex.artifact.trim();
   const why = run.side ? null : phaseRuleViolation(e, run, v.result, blockOnly ? "## Coverage\n\n" + PLAN_SECTIONS_STUB : ex.artifact, blockOnly);
   return why ? { ok: false, decision: v.result.decision, errors: why.split("; ") } : { ok: true, decision: v.result.decision, errors: [] };
 }
@@ -1120,7 +1127,11 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessageIn: string, 
     const c = cur(e);
     if (c.reask_count < 1) {
       c.reask_count++;
-      c.deltas[run.role] = { ...(c.deltas[run.role] ?? {}), kind: "reask", text: `Your previous final message was rejected: ${errors.join("; ")}. Reply again with your complete report and exactly one valid looprch-result block at the end.${c.deltas[run.role]?.text ? `\n\nEarlier instructions still apply:\n${c.deltas[run.role]!.text}` : ""}` };
+      const again =
+        run.role === "planner" && REPORT_FILE_TASKS.has(run.task)
+          ? "Write your complete report again, the markdown and exactly one valid looprch-result block at the end, to your report file (named in the self-check below), and run looprch check until it prints ok. Looprch validates that file, not your final message."
+          : "Reply again with your complete report and exactly one valid looprch-result block at the end.";
+      c.deltas[run.role] = { ...(c.deltas[run.role] ?? {}), kind: "reask", text: `Your previous report was rejected: ${errors.join("; ")}. ${again}${c.deltas[run.role]?.text ? `\n\nEarlier instructions still apply:\n${c.deltas[run.role]!.text}` : ""}` };
       ev(e, { type: "run.reask", role: run.role, agent: run.agent, run_id: run.run_id, data: { errors } });
       return { status: "reask", decision: null, artifact: null, errors };
     }
@@ -1215,7 +1226,7 @@ function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: 
     case "revise": {
       if (!r.contract) break;
       problems.push(...contractProblems(r.contract, contractContext(e)));
-      problems.push(...planLint(r.contract, artifact, (p) => existsSync(join(e.root, p))).errors.filter((x) => !blockOnly || !/is a blueprint, but plan\.md has no/.test(x)));
+      problems.push(...planLint(r.contract, artifact, (p) => existsSync(join(e.root, p))).errors.filter((x) => !blockOnly || !/is a blueprint, but the report has no/.test(x)));
       if (run.task === "planning") break;
       const open = openEntries(loadLedger(e.root, c.phase)).map((x) => x.id);
       if (open.length) problems.push(...dispositionProblems(r.debate_dispositions, open, r.contract, loadContract(e.root, c.phase)));

@@ -210,7 +210,7 @@ function deltaText(d: Delta | null, note: string | null): string {
 }
 
 /** Tasks whose report is large enough that a role writes it to its report file and fixes it in place. */
-const REPORT_FILE_TASKS = new Set<Task>(["planning", "synthesis", "revise", "context_answer"]);
+export const REPORT_FILE_TASKS = new Set<Task>(["planning", "synthesis", "revise", "context_answer"]);
 
 function selfCheck(input: BriefInput): string[] {
   const check = `looprch check ${input.runId} --root ${input.root}`;

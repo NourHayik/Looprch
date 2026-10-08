@@ -202,7 +202,7 @@
         "interfaces": { "$ref": "#/$defs/ids" },
         "sources": { "$ref": "#/$defs/ids" },
         "precision": { "enum": ["spec", "full_content"], "description": "full_content is required for packages that build boundary or invariant obligations" },
-        "files": { "type": "array", "items": { "type": "object", "required": ["path", "action"], "properties": { "path": { "type": "string" }, "action": { "enum": ["create", "modify", "delete"] }, "content": { "type": "string" }, "blueprint": { "type": "boolean", "description": "plan.md carries the full file as a ```<lang> blueprint=<path> block" } } } },
+        "files": { "type": "array", "items": { "type": "object", "required": ["path", "action"], "properties": { "path": { "type": "string" }, "action": { "enum": ["create", "modify", "delete"] }, "content": { "type": "string" }, "blueprint": { "type": "boolean", "description": "the report (later plan.md) carries the full file as a ```<lang> blueprint=<path> block" } } } },
         "steps": { "type": "array", "items": { "type": "string" } },
         "done_when": { "type": "array", "items": { "type": "string" } },
         "tests": { "type": "array", "items": { "$ref": "#/$defs/planned_test" } }

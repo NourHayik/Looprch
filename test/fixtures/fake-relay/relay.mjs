@@ -11,6 +11,8 @@
 // no_change, resolution_status, verifications, omit_verifications, bad_tests, raw_findings,
 // omit_prior, prior, contract_review, omit_contract_review, no_test_change, omit_checks,
 // two_packages, omit_work_packages, omit_repair_packages, package_size, omit_work_package.
+// report_file writes the report to the run's report.md; report_final is then the final message:
+// "block" (a pointer plus the result block without the markdown) or a literal string.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -312,7 +314,10 @@ const block = JSON.stringify({ role, decision, ...extra });
 let finalMessage = rule.final ?? (rule.omit_block ? body : `${body}\n\n\`\`\`looprch-result\n${block}\n\`\`\``);
 if (rule.report_file && meta.run_id) {
   writeFileSync(join(cwd, ".looprch", "runs", meta.run_id, "report.md"), finalMessage);
-  finalMessage = "Report written to the report file; looprch check printed ok.";
+  finalMessage =
+    rule.report_final === "block"
+      ? `Report written to .looprch/runs/${meta.run_id}/report.md.\n\n\`\`\`looprch-result\n${block}\n\`\`\``
+      : rule.report_final ?? "Report written to the report file; looprch check printed ok.";
 }
 const statusMap = { unavailable: `${agent}_unavailable` };
 const status = rule.status ? statusMap[rule.status] || rule.status : "completed";

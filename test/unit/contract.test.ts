@@ -92,12 +92,12 @@ describe("phase contract", () => {
     assert.ok(r.errors.some((e) => /WP-1 done_when 1: "TBD"/.test(e)), r.errors.join("\n"));
     assert.ok(r.errors.some((e) => /WP-1: modify gone.py, but the file does not exist/.test(e)));
     assert.ok(!r.errors.some((e) => /WP-2: modify new.py/.test(e)), "an earlier package creates it");
-    assert.ok(r.errors.some((e) => /WP-2: app\/g.py is a blueprint, but plan.md has no/.test(e)));
+    assert.ok(r.errors.some((e) => /WP-2: app\/g.py is a blueprint, but the report has no/.test(e)));
     assert.deepEqual(r.ambiguities.map((a) => [a.package, a.phrases]), [["WP-1", ["as appropriate"]]]);
     const withBlueprint = planLint({ obligations: [], deferrals: [], work_packages: [wps[1]!] }, `${sections}\n\n\`\`\`python blueprint=app/g.py\ndef g():\n    return 1\n\`\`\`\n`, (p) => p === "new.py");
     assert.deepEqual(withBlueprint.errors, []);
     assert.equal(blueprintsIn("```python blueprint=app/g.py\ndef g():\n    return 1\n```\n").get("app/g.py"), "def g():\n    return 1\n");
-    assert.match(planLint({ obligations: [], deferrals: [], work_packages: [] }, "## Objectives\n", () => true).errors.join(";"), /plan.md needs these sections .*Decisions/);
+    assert.match(planLint({ obligations: [], deferrals: [], work_packages: [] }, "## Objectives\n", () => true).errors.join(";"), /the report \(the markdown above the looprch-result block\) needs these sections .*Decisions/);
     const domain = planLint({ obligations: [], deferrals: [], work_packages: [{ ...wps[0]!, files: [{ path: "new.py", action: "create", content: "Status enum TODO, DONE; ids P-XXX" }], steps: ["Add the TODO status."], done_when: ["d"] }] }, sections, () => false);
     assert.deepEqual(domain.errors, [], "domain words (a TODO status, P-XXX ids) are not markers");
     assert.match(planLint({ obligations: [], deferrals: [], work_packages: [{ ...wps[0]!, files: [{ path: "new.py", action: "create", content: "c" }], steps: ["TODO: pick the parser"], done_when: ["d"] }] }, sections, () => false).errors.join(";"), /"TODO:" leaves the work undecided/);

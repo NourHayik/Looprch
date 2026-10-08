@@ -86,7 +86,7 @@ export interface WorkFile {
   action: (typeof WORK_FILE_ACTIONS)[number];
   /** What the file contains after this package: classes, functions with signatures, keys, columns. */
   content: string;
-  /** The full content is a blueprint in plan.md (```lang blueprint=<path>); the Implementer copies it. */
+  /** The full content is a blueprint in the Planner's report, later plan.md (```lang blueprint=<path>); the Implementer copies it. */
   blueprint?: boolean;
 }
 
@@ -368,7 +368,7 @@ export function executabilityProblems(body: ContractBody, complete = true): stri
     const builds = (w.obligations ?? []).map((id) => obligations.get(id)).filter((o): o is Obligation => !!o);
     if (builds.some((o) => BLUEPRINT_KINDS.has(o.kind))) {
       if (w.precision !== "full_content") problems.push(`${w.id} builds a ${builds.filter((o) => BLUEPRINT_KINDS.has(o.kind)).map((o) => `${o.kind} (${o.id})`).join(", ")}: precision must be "full_content" with the critical files as blueprints`);
-      else if (!w.files.some((f) => f.blueprint)) problems.push(`${w.id} is full_content: mark the critical files "blueprint": true and write each one in full in plan.md`);
+      else if (!w.files.some((f) => f.blueprint)) problems.push(`${w.id} is full_content: mark the critical files "blueprint": true and write each one in full in the report`);
     }
   }
   if (complete) {
@@ -446,14 +446,15 @@ export interface LintResult {
 /**
  * Deterministic checks of an executable plan before any model reads it: the files exist (or an
  * earlier package creates them), nothing is marked to be decided later, every blueprint file has
- * its full content in plan.md, plan.md has the required sections, and the wording that leaves a
+ * its full content in the report (the markdown that becomes plan.md), the report has the required
+ * sections, and the wording that leaves a
  * decision to the executor is reported per package.
  */
 export function planLint(body: ContractBody, planMd: string, exists: (path: string) => boolean): LintResult {
   const errors: string[] = [];
   const ambiguities: LintResult["ambiguities"] = [];
   const missing = PLAN_HEADINGS.filter((h) => !new RegExp(`^#{1,4}\\s+(?:\\d+[.)]?\\s*)?${h.replace(/ /g, "\\s+")}\\b`, "im").test(planMd));
-  if (missing.length) errors.push(`plan.md needs these sections (write "None." under one that does not apply): ${missing.join(", ")}`);
+  if (missing.length) errors.push(`the report (the markdown above the looprch-result block) needs these sections (write "None." under one that does not apply): ${missing.join(", ")}`);
   const blueprints = blueprintsIn(planMd);
   const order = orderWork(body.work_packages ?? []) ?? body.work_packages ?? [];
   const created = new Set<string>();
@@ -478,7 +479,7 @@ export function planLint(body: ContractBody, planMd: string, exists: (path: stri
       const present = (exists(p) || created.has(p)) && !deleted.has(p);
       if ((f.action === "modify" || f.action === "delete") && !present) errors.push(`${w.id}: ${f.action} ${p}, but the file does not exist and no earlier package creates it (use action create, or fix the path)`);
       if (f.action === "create" && present) errors.push(`${w.id}: create ${p}, but the file already exists (use action modify)`);
-      if (f.blueprint && !blueprints.has(p)) errors.push(`${w.id}: ${p} is a blueprint, but plan.md has no \`\`\`<lang> blueprint=${p} block with its full content`);
+      if (f.blueprint && !blueprints.has(p)) errors.push(`${w.id}: ${p} is a blueprint, but the report has no \`\`\`<lang> blueprint=${p} block with its full content`);
       if (f.action === "create") created.add(p);
       if (f.action === "delete") deleted.add(p);
     }

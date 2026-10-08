@@ -2,6 +2,27 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.7.3 - 2026-10-08
+
+### Fixed
+
+- **A Planner report that passed `looprch check` was rejected when the run ended.** The brief tells
+  the Planner to write its full report to `.looprch/runs/<run_id>/report.md`, check it, and end
+  with a short message. But the run's end used the short message whenever it carried a parseable
+  result block. A bare `{"role":"planner","decision":"plan_ready"}` was rejected with `contract is
+  required`. A block with the contract but no markdown failed the plan lint for sections and
+  blueprints that were already in `report.md`. The run's end now validates `report.md` whenever its
+  result block parses, and records it as `final.md`. The final message is used only when there is
+  no such file.
+- `looprch check` on the run's report file applies every rule the run's end applies, including
+  the plan sections and blueprints for a block-only file. With `--stdin` or `--file`, a block
+  without markdown is still checked without the markdown rules.
+- Plan lint messages say "the report (the markdown above the looprch-result block)" instead of
+  `plan.md`, which is written only after the report is accepted. The Planner role guide says the
+  same.
+- A re-ask for a Planner report-file task tells the Planner to rewrite the report file and run
+  `looprch check`, instead of asking for a longer final message.
+
 ## 0.7.2 - 2026-10-08
 
 In the CoreBit2 validation run on 0.7.1, 3 of the first 7 expensive runs were re-asks:
