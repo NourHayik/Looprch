@@ -258,8 +258,8 @@ export function unbackedTests(verifs: Claim[], index: CaseIndex, root: string): 
   for (const v of verifs) {
     if (v.status !== "verified") continue;
     for (const t of claimedTests(v)) {
-      if (index.available) {
-        const hits = index.cases.filter((c) => refMatches(t, c, root));
+      const hits = index.cases.filter((c) => refMatches(t, c, root));
+      if (index.available || hits.length) {
         if (!hits.length) out.push({ id: v.id, test: t, reason: "no such testcase in the gate evidence" });
         else if (!hits.some((c) => c.status === "passed")) out.push({ id: v.id, test: t, reason: `the testcase ${hits[0]!.status} in the gate evidence` });
         continue;
@@ -281,6 +281,42 @@ export interface GatesOutcome {
   all_passed: boolean;
   results: { gate_run_id: string; gate_id: string; ok: boolean; reason: string | null }[];
   runs: GateRun[];
+  /** The runs are the latest passing runs on this same tree (nothing was executed). */
+  cached?: boolean;
+}
+
+/**
+ * The latest run of every gate when all of them passed on exactly this tree and their JUnit
+ * evidence is unchanged; null otherwise. Gates are deterministic on a tree, so running them again
+ * (for example after a Tester-only evidence round that changed no file) proves nothing new.
+ * Manual gates are never cached.
+ */
+export function cachedOutcome(root: string, phase: PhaseDef, snapshot: string): GatesOutcome | null {
+  if (!phase.gates.length || phase.gates.some((g) => g.kind === "manual")) return null;
+  const file = loadGates(root, phase.id);
+  const runs = phase.gates.map((g) => file.runs.find((r) => r.gate_run_id === file.latest[g.id]));
+  if (runs.some((r) => !r || !r.ok || r.snapshot_tree !== snapshot)) return null;
+  for (const r of runs as GateRun[]) {
+    if (r.evidence.format !== "junit") continue;
+    const abs = r.evidence.path ? join(root, r.evidence.path) : null;
+    if (!abs || !existsSync(abs) || sha256(readFileSync(abs, "utf8")) !== r.evidence.sha256) return null;
+  }
+  const list = runs as GateRun[];
+  return { phase: phase.id, snapshot_tree: snapshot, all_passed: true, results: list.map((r) => ({ gate_run_id: r.gate_run_id, gate_id: r.gate_id, ok: r.ok, reason: r.reason })), runs: list, cached: true };
+}
+
+/** Append a run Looprch made outside the SEV3 gates (the optional e2e gate) to gates.json. */
+export function recordExtraRun(root: string, phaseId: string, run: GateRun): void {
+  const file = loadGates(root, phaseId);
+  file.runs.push(run);
+  file.latest[run.gate_id] = run.gate_run_id;
+  writeJsonAtomic(gatesPath(root, phaseId), file);
+}
+
+/** Directory and next gate run id for a run outside the SEV3 batch. */
+export function extraRunSlot(root: string, phaseId: string): { outDir: string; gateRunId: string } {
+  const n = loadGates(root, phaseId).runs.length + 1;
+  return { outDir: join(projectPaths(root).runs, `${phaseId}-e2e-${n}`), gateRunId: `${phaseId}-g-${n}` };
 }
 
 export function runPhaseGates(root: string, cfg: Config, phase: PhaseDef, snapshot: string, manualReports: Record<string, string>): GatesOutcome {

@@ -7,18 +7,21 @@ configured roles and posts every workflow step in the chat (see
 
 | Role | Responsibility |
 |---|---|
-| Planner | the implementation-ready plan and its contract (obligations, deferrals and work packages written for a literal executor); answers context requests; turns every review round's findings into repair packages and, where needed, contract amendments |
-| Plan Debater | challenges the plan, the contract and the executability of its packages once before any code exists, and repair designs that change the contract for serious findings or replace a design that did not hold; read-only |
-| Implementer | executes one work package or repair package per run, literally; application code only, never tests |
-| Tester | test code and gates; verifies every obligation and tries to falsify every repair; never application code |
-| Reviewer | reviews the phase against the contract and beyond it; classifies each finding by cause; read-only |
+| Planner | the architect: the implementation-ready plan and its contract (obligations with closed rules, decisions, interfaces, work packages written for a literal executor, planned tests, full-content blueprints for boundaries and invariants); answers every debate item; answers context requests; designs repairs for plan-caused, repeated and boundary findings |
+| Plan Debater | the Planner's opponent in a multi-round debate before any code exists: raises findings with evidence and a failure scenario, then judges every answer (resolved, conceded, upheld) until it agrees or the limit is reached; challenges repair designs; read-only |
+| Implementer | reads every package back before approval (questions and decisions it would have to make go to the Planner); then executes one package (or a short chain) per run, literally, reporting every file outside the package as a deviation; application code only, never tests |
+| Tester | test code and gates; writes the planned tests, verifies every obligation and tries to falsify every repair; never application code |
+| Reviewer | reviews the phase against the contract and beyond it; classifies each finding by cause and writes the repair package for implementation defects; read-only |
 
 All of them work from the same `contract.json`; see
 [running-phases.md](running-phases.md#the-phase-contract).
 
-Cost model: give the Planner, Plan Debater and Reviewer your strongest models. They decide and
-judge, and their runs are short. The Implementer executes small, fully specified packages, so a
-cheaper model is enough. The Tester proves the contract and tries to break repairs, so it needs
+Cost model: give the Planner, Plan Debater and Reviewer your strongest models, and give the Plan
+Debater a different model family from the Planner (two copies of one model share their blind
+spots). They decide and judge. The Implementer executes small, fully specified packages, so a
+cheaper model is enough: before approval, that same model reads the packages back and every
+question it would have to ask goes to the Planner first. `looprch status --json` shows the
+measured `usage` (runs, minutes, and the tokens the relays report) per role and model. The Tester proves the contract and tries to break repairs, so it needs
 more than the cheapest model: in CoreBit, a fast Tester wrote tests that passed without
 exercising the behavior.
 

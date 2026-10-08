@@ -5,8 +5,9 @@ agents you already have (Codex, Cursor, Antigravity, Kimi Code, OpenCode, Grok B
 Hermes as a Lead host).
 
 - **SEV3** defines the project: requirements, contracts, phases, gates and `phases/todo.md`.
-- **Looprch** executes it: for every phase it runs Planner → one Plan Debate → Implementer →
-  Tester → Reviewer → handover, checks machine evidence, commits on a phase branch and merges.
+- **Looprch** executes it: for every phase it runs Planner ⇄ Plan Debater (a real debate) →
+  executability readback by the Implementer's model → Implementer → Tester → Reviewer →
+  handover, checks machine evidence, commits on a phase branch and merges.
 - **delegate-skills** is the transport Looprch uses when a role runs in another agent's CLI.
 
 The `looprch` CLI owns a deterministic state machine. Your agent (the Lead) only asks
@@ -23,7 +24,7 @@ continue from the files in `.looprch/`.
 
 - [Attach a project](attach-a-project.md) · [/lr-init](lr-init.md) · [Roles and modes](roles-and-modes.md)
 - [Running phases](running-phases.md) · [Status and logs](status-and-logs.md)
-- [Handover and git](handover-and-git.md) · [Quota and fallbacks](quota-and-fallbacks.md)
+- [Handover and git](handover-and-git.md) · [Quota and fallbacks](quota-and-fallbacks.md) · [E2E testing](e2e-testing.md)
 - [Update and rollback](update-and-rollback.md) · [Troubleshooting](troubleshooting.md)
 - [Command reference](command-reference.md) · [Workflows and examples](workflows-and-examples.md) · [FAQ](faq.md)
 

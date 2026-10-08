@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 declare const __LOOPRCH_VERSION__: string | undefined;
 
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 export const TOOLKIT_VERSION = "1.2.0";
 export const CONFIG_SCHEMA = 1;
 export const STATE_SCHEMA = 1;
@@ -24,6 +24,7 @@ export const SKILLS = [
   "lr-review",
   "lr-finish",
   "lr-worker",
+  "lr-e2e-test-init",
 ] as const;
 
 export const ROLES = ["planner", "plan_debater", "implementer", "tester", "reviewer", "worker"] as const;

@@ -12,4 +12,12 @@ Recorded by Looprch from the run history of this phase (one line per agent and m
 ## Phase contract (recorded by Looprch)
 
 {{contract}}
+
+## Plan debate (recorded by Looprch)
+
+{{debate}}
+
+## Traceability (recorded by Looprch)
+
+{{traceability}}
 {{unreviewed}}

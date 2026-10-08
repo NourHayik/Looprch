@@ -18,8 +18,14 @@ preflight → planning → debating → [synthesizing] → [plan approval] → i
 - **Preflight** (seconds): config valid, package still verified with the recorded fingerprint,
   toolkit trusted, gate commands acknowledged, relays and CLIs present, git clean on the base
   branch. The first phase also offers the baseline commit.
-- **Planning / debating**: exactly one Plan Debate pass; findings go back to the same Planner
-  session for synthesis.
+- **Planning / debating**: a real debate. The Plan Debater raises findings; the Planner answers
+  each one (accept with a real contract change, partial, or reject with evidence); the Debater
+  judges every answer in the next round (`resolved`, `conceded`, `upheld`), up to
+  `limits.debate_rounds` passes (default 3). Serious items still disputed at the limit come to
+  you (`debate_unresolved`).
+- **Readback**: before approval, the Implementer's model reads every work package and lists what
+  it would have to ask or decide; each item goes back to the Planner and the Debater
+  (`limits.readback_rounds`, default 2).
 - **Implementing**: one sequential Implementer writes application code only.
 - **Testing and gating**: the Tester writes tests; Looprch then runs every declared gate itself
   and judges machine evidence (unittest counts, JUnit XML). Failures go back to the Implementer.
@@ -48,12 +54,17 @@ Result: Changes recommended (1 finding: 1 medium).
 Summary: D-1 (medium): Clarify error handling.
 [PLAN UPDATE START] The Planner is updating the plan.
 [PLAN UPDATED] The Planner updated the plan after the debate: .looprch/phases/P-001/plan.md
+[DEBATE START] Plan sent for debate.
+[TASK START] P-001-plan_debater-2: Plan Debater (rebuttal) on kimi/kimi-k · delegate
+[REBUTTAL COMPLETE] The Plan Debater agrees with the revised plan.
+[DEBATE ROUND 2 OF 3]
+Verdicts on the Planner's answers: 1 resolved, 0 conceded, 0 upheld. New items: 0. Still open: 0.
+[DEBATE CLOSED] 2 Debater pass(es), 1 item(s): 1 resolved, 0 conceded, 0 contested, 0 decided by you; 1 contract change(s).
+[TASK START] P-001-implementer-1: Implementer (readback) on opencode/oc/impl · delegate
+[READBACK COMPLETE] Ready: no questions.
+[READBACK 1 OF 2] The Implementer's model can execute every package without asking or deciding.
 [IMPLEMENTATION START] P-001 implementation started.
-[ISSUE]
-Task P-001-implementer-1 (Implementer on opencode) failed.
-Reason: failed: boom
-Action: Retry with the same agent.
-[RETRY] P-001-implementer-2: Implementer (implementation) on opencode/oc/impl · delegate · attempt 2
+[TASK START] P-001-implementer-2: Implementer (implementation) on opencode/oc/impl · delegate
 [IMPLEMENTATION COMPLETE] The Implementer on opencode finished; 1 file touched.
 [TESTING START] P-001 testing started.
 [TESTING COMPLETE] Tester verdict: pass (codex).
@@ -103,8 +114,21 @@ phase, and how this phase fails closed until then). Looprch checks it before the
 The Plan Debater challenges the plan and the contract (missing requirements, trust sources,
 dependency direction, enforcement that only recognizes known bad cases, untestable rules,
 missing failure behavior and deferrals, places where the Implementer would have to invent a
-design). The synthesis must accept or reject every debate finding; an accepted one names the
-obligations that carry it.
+design). Each finding names its evidence, a concrete failure scenario and a proposed resolution;
+the first pass also lists the risks the Debater derived from the packet alone, and any the plan
+does not cover becomes an item. The Planner answers every open item: an accept or partial accept
+names the contract elements that carry the change, and Looprch rejects it if none of them
+changed; a reject needs evidence. The Debater then judges each answer. The whole debate is in
+`.looprch/phases/P-NNN/debate.json`; the handover summarizes it.
+
+Since protocol 4 the contract also carries **decisions** (what was decided and why), exact
+**interfaces** (signatures, errors), a closed **rule** for every boundary, invariant and failure
+obligation, and **planned tests** per work package. Packages that build a boundary or invariant
+are `full_content`: plan.md carries their critical files in full (` ```php blueprint=app/X.php `)
+and the Implementer copies them. Looprch lints the plan before the debate: files to modify must
+exist, nothing may be TBD, plan.md needs its sections (Objectives, Decisions, Interfaces, Data,
+Security, Error handling, Edge cases, Sequence, Tests, Verification, Definition of Done,
+Deferred), and vague wording ("as appropriate", "etc.") becomes a debate item.
 
 The contract also carries **work packages**: the Planner's breakdown of the implementation into
 small, ordered packages, each with the exact files (and what each contains: classes, signatures,
@@ -125,7 +149,14 @@ The same contract is the input of every later role:
   finding by `cause` (`implementation`, `plan`, `requirement`, `cross_phase` or `test`) and names
   the obligations it concerns.
 
-`handover.md` ends with the contract status and the deferrals to later phases.
+The Implementer reports every file it changed outside its package in `deviations`; the first
+review judges each one. The Tester also verifies every planned test. The Reviewer gets
+`changed-files.txt` (and must list every changed file in `files_reviewed`) and
+`traceability.md`: requirement → obligation → decision → package → planned test → bound
+testcase → review status, generated by Looprch.
+
+`handover.md` ends with the contract status, the deferrals to later phases, the plan debate
+summary and the traceability matrix.
 
 ## Review rounds
 
@@ -160,14 +191,20 @@ second is a safety net, and a third is for exceptional cases.
   A testcase that already passed on the tree where the Reviewer found the defect cannot prove the
   repair, so Looprch requires at least one cited testcase per check that did not pass there; a
   claim without one goes back to the Tester (`[EVIDENCE MISMATCH]`).
-- **The Planner designs every repair; the Implementer executes it.** Before the Implementer
-  repairs, the Planner turns the review's findings into repair packages (at most 5 findings
-  each, with exact files, steps and checks), and the Implementer executes one package per run
-  (`[REPAIR DESIGN]`, `[PACKAGE DONE]`). For findings the Reviewer traced to the plan, a missed
+- **Repairs are routed by cause; the Implementer only executes.** A plain implementation defect
+  carries the Reviewer's own repair package (exact files, steps, checks), which runs directly:
+  no extra Planner run (`[REPAIR PACKAGES]`). Findings the Reviewer traced to the plan, a missed
   requirement or a later phase, findings a re-review reports as `unfixed`, `related` findings,
-  and `needs_design` resolutions, the design also amends the contract to define the enforcement. When the design covers a high or critical finding, or replaces a design
-  that did not hold, the Plan Debater challenges it once (`[DESIGN DEBATE COMPLETE]`) and the
-  Planner revises it if needed. The Implementer, Tester and Reviewer get the amended contract.
+  `needs_design` resolutions, and high or critical findings on a boundary or invariant
+  obligation go to the Planner first: it writes repair packages and amends the contract to
+  define the enforcement (`[REPAIR DESIGN]`). When the design covers a high or critical finding,
+  or replaces a design that did not hold, the Plan Debater challenges it (up to two passes,
+  `[DESIGN DEBATE COMPLETE]`). The Implementer executes one package per run (`[PACKAGE DONE]`).
+- **A finding that keeps coming back stops the loop.** When one lineage was reported more than
+  `limits.lineage_attempts` times (default 2: the Reviewer's repair, then a Planner redesign),
+  Looprch asks you (`lineage_stuck`) instead of repeating it: the Planner writes the full code of
+  the repair (blueprints), the repair runs on the Implementer's fallback model, the rule is
+  deferred with a fail-closed interim, or pause.
 - **Round 2 is the safety net.** The re-review gets the open findings, the repair reports and the
   repair diff (from the tree it last reviewed to the current one). It says `fixed` or `unfixed`
   for every earlier finding, looks for regressions and over-fixes, and reports anything round 1

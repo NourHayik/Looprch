@@ -36,6 +36,9 @@ export const QUESTION_KINDS = [
   "host_conflict",
   "rate_limit_long",
   "final_review",
+  "debate_unresolved",
+  "readback_unresolved",
+  "lineage_stuck",
 ] as const;
 export type QuestionKind = (typeof QUESTION_KINDS)[number];
 
@@ -81,7 +84,12 @@ export interface Finding {
   related?: string;
   /** Review findings: the acceptance checks a repair must pass (kept from the first report). */
   checks?: string[];
+  /** Implementation-cause review findings: the repair package the Reviewer wrote. */
+  repair?: ReviewerRepair;
 }
+
+/** The executable repair a Reviewer writes for an implementation defect (a repair package without id, title and findings). */
+export type ReviewerRepair = Omit<WorkItem, "id" | "title" | "findings" | "obligations">;
 
 /** One review finding lineage (an id plus the findings `related` to it) across the review rounds of a phase. */
 export interface LedgerEntry {
@@ -106,9 +114,24 @@ export interface DesignState {
   findings: string[];
   step: "design" | "debate" | "revise";
   debate: boolean;
-  reason: "plan_cause" | "unfixed" | "related" | "needs_design" | "repair_plan" | "test_repeat";
+  reason: "plan_cause" | "unfixed" | "related" | "needs_design" | "repair_plan" | "test_repeat" | "boundary" | "stuck";
   /** Findings whose design must also amend the contract (the others only need repair packages). */
   amend?: string[];
+  /** Plan Debater challenges of this design so far. */
+  passes?: number;
+  /** The user chose full-content blueprints for a stuck lineage: every repair package is full_content. */
+  blueprint?: boolean;
+  /** The user chose to defer a stuck lineage: the amendment defers it with a fail-closed interim. */
+  defer?: boolean;
+}
+
+/** An Implementer change outside its package's files, reported in `deviations`. */
+export interface Deviation {
+  id: string;
+  file: string;
+  what: string;
+  why: string;
+  run: string;
 }
 
 export interface Verification {
@@ -129,7 +152,7 @@ export interface CaseSet {
 
 /** Instructions carried into the next brief for a role (repair findings, re-ask, user note). */
 export interface Delta {
-  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "design_review" | "revise" | "retry" | "switch";
+  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "design_review" | "revise" | "retry" | "switch" | "synthesis" | "rebuttal" | "readback";
   text: string;
   findings?: Finding[];
   paths?: string[];
@@ -184,7 +207,7 @@ export interface Current {
   /** The Tester's verifications of its last run (checked against the gate evidence). */
   tester_verifications?: Verification[];
   /** Packages the Implementer executes one run at a time: the plan's work packages, or a review round's repair packages. */
-  work?: { kind: "implementation" | "repair"; items: WorkItem[]; done: string[]; base?: Delta | null } | null;
+  work?: { kind: "implementation" | "repair"; items: WorkItem[]; done: string[]; base?: Delta | null; chain?: string[]; started?: { id: string; tree: string } | null } | null;
   /** Tester-only rounds for unbacked or stale verifications before the next review (own budget, limits.repair_rounds). */
   evidence_rounds?: number;
   /** Gate ids and failure ids of the last test/gate repair, to detect a failure that came back. */
@@ -201,6 +224,20 @@ export interface Current {
   retired_obligations?: string[];
   /** Obligation status from the latest review that reported it. */
   contract_review?: { id: string; status: "met" | "not_met" }[];
+  /** Executability readback before plan approval: runs so far and whether the last one was clean. */
+  readback?: { runs: number; clean: boolean; unresolved?: boolean } | null;
+  /** Debate items the user decided for the Plan Debater; the next synthesis must accept them, then the debate ends. */
+  debate_final?: string[] | null;
+  /** Implementer changes outside their packages (judged by the Reviewer). */
+  deviations?: Deviation[];
+  /** Reviewer repair packages waiting for a Planner repair design of the same round to finish. */
+  pending_reviewer_packages?: WorkItem[] | null;
+  /** The user's answer to lineage_stuck for the current review round. */
+  stuck_choice?: string | null;
+  /** A review requested changes for lineages past limits.lineage_attempts; the user decides first. */
+  stuck_pending?: boolean;
+  /** Tree on which the optional e2e gate last passed (it is not run again on the same tree). */
+  e2e_passed_tree?: string | null;
   expansion_round: number;
   reask_count: number;
   extra_rounds: number;

@@ -1,6 +1,7 @@
 import { isNonEmptyString, isObject, isStringArray, oneOf } from "./validate.js";
-import { FINDING_CAUSES, FINDING_ORIGINS, FINDING_OWNERS, type FindingCause, type FindingOrigin, type FindingOwner, type Verification } from "./state.js";
-import { amendmentShapeErrors, contractShapeErrors, dispositionShape, workItemShape, type Amendment, type ContractBody, type Disposition, type WorkItem } from "./contract.js";
+import { FINDING_CAUSES, FINDING_ORIGINS, FINDING_OWNERS, type FindingCause, type FindingOrigin, type FindingOwner, type ReviewerRepair, type Verification } from "./state.js";
+import { amendmentShapeErrors, contractShapeErrors, dispositionShape, reviewerRepairShape, workItemShape, type Amendment, type ContractBody, type Disposition, type WorkItem } from "./contract.js";
+import { VERDICTS, type Verdict } from "./debate.js";
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export const RESOLUTION_STATUSES = ["fixed", "not_fixed", "needs_design"] as const;
@@ -8,8 +9,8 @@ export const VERIFICATION_STATUSES = ["verified", "failed", "inspected"] as cons
 
 export const DECISIONS = {
   planner: ["plan_ready", "plan_final", "needs_expansion", "context_answer"],
-  plan_debater: ["no_findings", "findings", "needs_expansion"],
-  implementer: ["implemented", "needs_context", "handover_ready"],
+  plan_debater: ["no_findings", "findings", "agree", "needs_expansion"],
+  implementer: ["implemented", "needs_context", "handover_ready", "ready", "questions"],
   tester: ["pass", "fail"],
   reviewer: ["approve", "changes_requested"],
   worker: ["answered"],
@@ -39,6 +40,22 @@ export interface ResultFinding {
   related?: string;
   refs?: string[];
   checks?: string[];
+  /** Plan Debater: the packet quote or contract id that shows the defect. */
+  evidence?: string;
+  /** Plan Debater: how a literal executor would go wrong because of it. */
+  failure_scenario?: string;
+  /** Plan Debater: the change that would close it. */
+  proposed_resolution?: string;
+  /** Reviewer, implementation cause: the executable repair. */
+  repair?: ReviewerRepair;
+}
+
+/** Executability readback of one work package by the Implementer's model. */
+export interface ReadbackPackage {
+  id: string;
+  questions: string[];
+  decisions_needed: string[];
+  would_create: { path: string; symbols: string[] }[];
 }
 
 export interface Resolution {
@@ -78,6 +95,18 @@ export interface RoleResult {
   verifications?: Verification[];
   contract_review?: { id: string; status: "met" | "not_met"; note?: string }[];
   prior?: { id: string; status: "fixed" | "unfixed"; note?: string; failed_checks?: number[] }[];
+  /** Plan Debater, first pass: the riskiest decisions it derived from the packet alone, and the contract ids that cover each. */
+  independent_risks?: { risk: string; covered_by: string[] }[];
+  /** Plan Debater, rebuttal: its verdict on the Planner's answer to every open item. */
+  verdicts?: { id: string; verdict: Verdict; note?: string }[];
+  /** Implementer readback: one entry per work package. */
+  packages?: ReadbackPackage[];
+  /** Implementer: changes outside the package's files. */
+  deviations?: { file: string; what: string; why: string }[];
+  /** Implementer: the packages of a chain run. */
+  work_packages?: string[];
+  /** Reviewer: every changed file it read. */
+  files_reviewed?: string[];
 }
 
 export interface Extracted {
@@ -115,8 +144,17 @@ function checkList(errors: string[], obj: Record<string, unknown>, key: string, 
   });
 }
 
-const finding = (reviewer: boolean) => (x: unknown) => {
+const finding = (reviewer: boolean, debater = false) => (x: unknown) => {
   if (!isObject(x)) return "must be an object";
+  if (debater)
+    for (const k of ["evidence", "failure_scenario", "proposed_resolution"])
+      if (!isNonEmptyString(x[k])) return `${String(x.id ?? "?")}: ${k} is required (evidence: the packet quote or contract id; failure_scenario: how a literal executor would go wrong; proposed_resolution: the change that closes it)`;
+  if (reviewer && x.repair !== undefined) {
+    const e = reviewerRepairShape(x.repair);
+    if (e) return `${String(x.id ?? "?")}: ${e}`;
+  }
+  if (reviewer && x.cause === "implementation" && x.owner !== "tester" && x.severity !== "low" && x.origin !== "unfixed" && x.related === undefined && x.repair === undefined)
+    return `${String(x.id ?? "?")}: an implementation finding carries "repair" {files, steps, done_when}: the exact package the Implementer executes (Looprch runs it without a Planner design)`;
   if (!isNonEmptyString(x.id)) return "id is required";
   if (!isNonEmptyString(x.summary)) return "summary is required";
   if (x.severity !== undefined && !oneOf(x.severity, SEVERITIES)) return `severity must be one of ${SEVERITIES.join(", ")}`;
@@ -189,12 +227,28 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       checkList(errors, raw, "repair_packages", workItemShape("repair"));
       break;
     case "plan_debater":
-      checkList(errors, raw, "findings", finding(false));
-      if (raw.decision === "findings" && (!Array.isArray(raw.findings) || raw.findings.length === 0)) errors.push("decision findings needs a non-empty findings list");
+      checkList(errors, raw, "findings", finding(false, true));
+      checkList(errors, raw, "verdicts", (x) => (isObject(x) && isNonEmptyString(x.id) && oneOf(x.verdict, VERDICTS) ? null : `needs id and verdict (${VERDICTS.join("|")})`));
+      checkList(errors, raw, "independent_risks", (x) => (isObject(x) && isNonEmptyString(x.risk) && isStringArray(x.covered_by) ? null : 'needs {"risk", "covered_by": [contract ids, or [] when the plan does not cover it]}'));
+      if (raw.decision === "findings" && (!Array.isArray(raw.findings) || raw.findings.length === 0) && !(Array.isArray(raw.verdicts) && raw.verdicts.some((v) => isObject(v) && v.verdict === "upheld")))
+        errors.push("decision findings needs a non-empty findings list (or, in a rebuttal, an upheld verdict)");
       break;
     case "implementer":
       checkList(errors, raw, "files_changed", strings);
       checkList(errors, raw, "resolutions", resolution);
+      checkList(errors, raw, "deviations", (x) => (isObject(x) && isNonEmptyString(x.file) && isNonEmptyString(x.what) && isNonEmptyString(x.why) ? null : "needs file, what and why"));
+      checkList(errors, raw, "packages", (x) => {
+        if (!isObject(x) || !isNonEmptyString(x.id)) return "needs the package id";
+        if (!isStringArray(x.questions) || !isStringArray(x.decisions_needed)) return `${x.id}: questions and decisions_needed must be lists (use [] for none)`;
+        if (!Array.isArray(x.would_create) || !x.would_create.every((w) => isObject(w) && isNonEmptyString(w.path) && isStringArray(w.symbols))) return `${x.id}: would_create must list {"path", "symbols": [...]}`;
+        return null;
+      });
+      if (raw.decision === "ready" || raw.decision === "questions") {
+        if (!Array.isArray(raw.packages)) errors.push("a readback lists every work package in packages");
+        else if (raw.decision === "ready" && raw.packages.some((p) => isObject(p) && ((Array.isArray(p.questions) && p.questions.length > 0) || (Array.isArray(p.decisions_needed) && p.decisions_needed.length > 0))))
+          errors.push("decision ready with questions or decisions_needed: use decision questions");
+      }
+      if (raw.work_packages !== undefined && !isStringArray(raw.work_packages)) errors.push("work_packages must list the package ids you implemented");
       if (raw.work_package !== undefined && !isNonEmptyString(raw.work_package)) errors.push("work_package must be the id of the package you implemented");
       if (raw.decision === "needs_context") {
         const cr = raw.context_request;
@@ -218,6 +272,7 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       checkList(errors, raw, "manual_gate_reports", (x) => (isObject(x) && isNonEmptyString(x.gate_id) && isNonEmptyString(x.path) ? null : "needs gate_id and path"));
       checkList(errors, raw, "contract_review", statusEntry(["met", "not_met"]));
       checkList(errors, raw, "prior", statusEntry(["fixed", "unfixed"]));
+      checkList(errors, raw, "files_reviewed", strings);
       if (raw.decision === "changes_requested" && (!Array.isArray(raw.findings) || raw.findings.length === 0)) errors.push("changes_requested needs a non-empty findings list");
       else if (raw.decision === "changes_requested" && (raw.findings as unknown[]).every((f) => isObject(f) && f.severity === "low"))
         errors.push("every finding is low: use approve and list the low findings as notes");

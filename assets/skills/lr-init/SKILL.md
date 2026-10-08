@@ -47,11 +47,25 @@ Persist each answer:
 - `looprch config add-fallback <role> --mode <m> --agent <agent> --model <model>`
 Role keys: `planner`, `plan_debater`, `implementer`, `tester`, `reviewer`, `worker`.
 
+Recommend a Plan Debater from a different model family than the Planner: a debate between two
+copies of one model shares its blind spots. Recommend the strongest models for Planner, Plan
+Debater and Reviewer, and a cheaper model for the Implementer: the Planner's packages are written
+for a literal executor, and the Implementer's model reads them back before approval.
+
 Optional settings, only if the user asks: `looprch config set approvals.plan high-risk`,
 `approvals.merge`, `limits.repair_rounds`, `limits.review_rounds` (reviews that may request
-changes per phase, default 3), `gates.env.<NAME> <value>`, `context_kb.<agent> <KB>`.
+changes per phase, default 3), `limits.debate_rounds` (Plan Debater passes, default 3),
+`limits.readback_rounds` (executability readbacks, default 2, 0 turns them off),
+`limits.lineage_attempts` (reports of one finding before you are asked, default 2),
+`gates.env.<NAME> <value>`, `context_kb.<agent> <KB>`.
 
-## 4. Finish
+## 4. E2E testing (optional)
+
+Ask whether the user wants end-to-end tests with the TesterArmy `e2e` runner as an extra gate. If
+yes, follow the steps of `/lr-e2e-test-init` now. If no, skip it: Looprch works normally without
+it, and the user can run `/lr-e2e-test-init` at any time later.
+
+## 5. Finish
 
 Run `looprch config validate --json` and fix any error with the user. Then `looprch status` and
 tell the user the next step: `/lr-phase` (one phase) or `/lr-auto` (all phases until closure).

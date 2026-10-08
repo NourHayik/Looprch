@@ -19,7 +19,8 @@
         "question.asked", "question.answered", "paused", "resumed", "blocked",
         "todo.ticked", "review.skipped", "handover.accepted", "phase.merged", "phase.closed", "project.done",
         "spec.changed", "protocol.mismatch", "lock.stale_recovered", "warning",
-        "contract.accepted", "contract.amended", "design.escalated", "evidence.checked", "evidence.unbacked", "work.done"
+        "contract.accepted", "contract.amended", "design.escalated", "evidence.checked", "evidence.unbacked", "evidence.integrity",
+        "work.done", "work.deviations", "debate.round", "debate.closed", "readback.done", "repair.packaged"
       ]
     },
     "phase": { "type": ["string", "null"] },

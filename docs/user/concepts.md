@@ -17,7 +17,7 @@ runs Looprch performs on your code are evidence for the application.
 |---|---|---|
 | Lead | Your agent running `/lr-*`; follows `looprch next` | nothing in `.looprch/` |
 | Planner | Implementation plan from the exact-source packet | `plan.md` (through Looprch) |
-| Plan Debater | One critical pass over the plan, read-only | `debate.md` |
+| Plan Debater | A multi-round debate with the Planner: findings, then a verdict on every answer, read-only | `debate.md`, `debate.json` |
 | Implementer | The single sequential author of application code | application code |
 | Tester | Owns test code and every declared gate | tests |
 | Reviewer | Checks the actual code and evidence, read-only | `review.md` |

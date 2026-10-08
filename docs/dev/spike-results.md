@@ -90,6 +90,38 @@ verify_package.py --root sev3/examples/notes-spec      0.09 s   ok, 3 phases
 
 Both were run with `python3 -B` and `PYTHONDONTWRITEBYTECODE=1` from the vendored copy.
 
+## S-11: TesterArmy `e2e` 0.18.0 (optional E2E gate)
+
+Run on 2026-10-08 in `/tmp/e2e-spike` (Node 24.21.0, `e2e@0.18.0`, `@e2e-dev/web`, Chromium
+already in the Playwright cache). The app was a static page served by the runner itself through
+`app.command` (`python3 -m http.server`); the tests used locators only, so no model was needed.
+Every command ran with `CI=1 E2E_TELEMETRY_DISABLED=1`.
+
+| Case | Command | Exit | Output |
+|---|---|---:|---|
+| dry run | `e2e list --reporter json` | 0 | `{"pairs": [{file, title, target, disposition}]}` on stdout |
+| passing test | `e2e run --reporter list,junit --output out1` | 0 | `out1/junit.xml` (`<testcase name="home shows ready [web]" classname="tests/pass.e2e.ts">`), `out1/report.json` |
+| failing test | same, one test fails | 1 | `junit.xml` with one `<failure>`, `testsuites failures="1"` |
+| invalid config (unknown key) | same | 2 | no output directory written |
+| app command cannot start | same | 3 | no output directory written |
+| empty selection (`--grep nomatch`) | same | 2 | `NO_TESTS`, no output |
+| package missing | `npx --no-install e2e --version` in a project without it | 1 | npm error, no `node_modules/.bin/e2e` |
+
+Consequences for Looprch:
+
+- A run that stops before its tests keeps the **previous** run's `junit.xml`. Looprch passes a
+  fresh `--output` directory per gate run and never reads a report it did not see written.
+- Looprch runs `node_modules/.bin/e2e` directly (never `npx`, which may download).
+- Exit 0 and 1 are test verdicts (JUnit is the evidence); 2 is configuration (the user must fix
+  it); 3 is the environment; 4 and 130 are runner failures.
+- The cloud `testerarmy` CLI was not tested: its browsers cannot reach `localhost`.
+
+Looprch's own gate code was then run against the same real binary (`checkE2e` and `runE2eGate`
+from the 0.7.0 build): configure check ok (`e2e 0.18.0`, 1 test); passing run → `pass`, exit 0,
+1 testcase; with the failing test enabled → `fail`, exit 1, 2 testcases, 1 failure; `--grep
+nomatch` → `config` (exit 2); a missing config file → `config` before running; timeout 1s →
+`environment` ("timed out after 1s").
+
 ## Spikes still to run (manual, with your go-ahead)
 
 Use a throwaway repository `/tmp/lr-spike-<agent>` and the skill in

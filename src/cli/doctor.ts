@@ -22,6 +22,7 @@ import { pythonVersion } from "../sev3/toolkit.js";
 import { baselineStatus } from "../git/baseline.js";
 import { assertNot5x } from "./attach.js";
 import { validationContext } from "./config.js";
+import { e2eDoctorSummary } from "./e2e.js";
 import { parse, projectRoot } from "./args.js";
 import { out } from "./output.js";
 
@@ -158,6 +159,9 @@ export function runDoctor(root: string, quick: boolean): DoctorReport {
 
   const v = validateConfig(cfg, validationContext(root, true));
   checks.push(v.ok ? c("roles_valid", v.warnings.length ? "warn" : "ok", v.warnings.length ? `Roles valid; ${v.warnings.join("; ")}` : "Roles configured and valid") : c("roles_valid", "fail", v.errors.join("; "), "Run /lr-init or looprch config set-role ..."));
+
+  const e2e = e2eDoctorSummary(root, cfg);
+  checks.push(c("e2e", e2e.status, e2e.summary, e2e.fix));
 
   const state = loadState(root);
   if (state.current) {

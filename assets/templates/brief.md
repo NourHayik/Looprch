@@ -10,7 +10,7 @@
 - Work in `{{root}}`. Never commit, never push, never change git history or branches.
 - Never edit `phases/todo.md` or anything under `.looprch/`; Looprch owns them.
 - {{write_rule}}
-- Read every input listed below completely. Never summarize or skip the packet.
+- {{read_rule}}
 {{session_note}}
 
 ## Read completely, in order

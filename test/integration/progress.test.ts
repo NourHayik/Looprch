@@ -19,7 +19,7 @@ function assertInOrder(progress: string[], expected: string[]) {
 describe("Lead progress lines (integration)", () => {
   test("one phase reports every workflow step once, including a debate with findings", () => {
     const p = setupProject();
-    p.setScenario([{ role: "plan_debater", decision: "findings" }]);
+    p.setScenario([{ role: "plan_debater", task: "debate", decision: "findings" }]);
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r.last.action, "phase_closed");
     assertInOrder(r.progress, [
@@ -33,6 +33,12 @@ describe("Lead progress lines (integration)", () => {
       "DEBATE COMPLETE",
       "PLAN UPDATE START",
       "PLAN UPDATED",
+      "DEBATE START",
+      "TASK START",
+      "REBUTTAL COMPLETE",
+      "DEBATE CLOSED",
+      "TASK START",
+      "READBACK COMPLETE",
       "IMPLEMENTATION START",
       "TASK START",
       "IMPLEMENTATION COMPLETE",
@@ -78,9 +84,10 @@ describe("Lead progress lines (integration)", () => {
     assert.match(issues[0]!, /^\[ISSUE\]\nTask P-001-implementer-1 \(Implementer on opencode\) failed\.\nReason: failed/);
     assert.match(issues[0]!, /Action: Retry with the same agent\./);
     assert.match(issues[1]!, /Action: Switching the Implementer to codex\/codex-impl\./);
-    assert.ok(r.progress.some((l) => /^\[RETRY\] P-001-implementer-2: Implementer \(implementation\) on opencode\/oc\/impl · delegate · attempt 2$/.test(l)), r.progress.join("\n"));
+    assert.ok(r.progress.some((l) => /^\[RETRY\] P-001-implementer-2: Implementer \(readback\) on opencode\/oc\/impl · delegate · attempt 2$/.test(l)), r.progress.join("\n"));
     assert.ok(r.progress.includes("[FALLBACK] Implementer: opencode/oc/impl replaced by codex/codex-impl (run failed fallback)."), r.progress.join("\n"));
-    assert.ok(r.progress.some((l) => /^\[TASK START\] P-001-implementer-3: Implementer \(implementation\) on codex\/codex-impl · delegate · fallback: earlier runs failed$/.test(l)), r.progress.join("\n"));
+    assert.ok(r.progress.some((l) => /^\[TASK START\] P-001-implementer-3: Implementer \(readback\) on codex\/codex-impl · delegate · fallback: earlier runs failed$/.test(l)), r.progress.join("\n"));
+    assert.ok(r.progress.some((l) => /^\[TASK START\] P-001-implementer-4: Implementer \(implementation\) on codex\/codex-impl/.test(l)), r.progress.join("\n"));
     p.s.cleanup();
   });
 });

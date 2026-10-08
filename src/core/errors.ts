@@ -16,6 +16,13 @@ export class UsageError extends LrError {
   }
 }
 
+/** `--help` on any command: print its usage and exit 0, before the command does anything. */
+export class HelpRequested extends Error {
+  constructor(public readonly usage: string) {
+    super(usage);
+  }
+}
+
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

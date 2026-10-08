@@ -19,7 +19,8 @@ const USAGE = `looprch config <subcommand> [--root <dir>] [--json]
   add-fallback <role> --mode <m> --agent <id> --model <m> [--effort <e>] [--timeout <dur>] [--context-kb <n>]
   clear-fallbacks <role>
   set <key> <value>                      keys: lead_host, limits.*, approvals.plan|merge, git.phase_branches,
-                                         gates.env.<NAME>, context_kb.<agent>, integrations.commit_generated
+                                         gates.env.<NAME>, context_kb.<agent>, integrations.commit_generated,
+                                         integrations.e2e.enabled (or: looprch e2e enable|disable)
 roles: ${ROLES.join(", ")}`;
 
 export function validationContext(root: string, requirePrimaryRoles = false): ValidationContext {
@@ -73,7 +74,10 @@ function setKey(cfg: Config, key: string, raw: string): void {
     else cfg.gates.env[parts[2]!] = String(raw);
   } else if (parts[0] === "context_kb" && parts.length === 2) cfg.context_kb[parts[1] as AgentId] = value as number | null;
   else if (key === "integrations.commit_generated") cfg.integrations.commit_generated = value === true;
-  else throw new UsageError(`Unsupported config key "${key}"`, USAGE);
+  else if (key === "integrations.e2e.enabled") {
+    if (value === true && !cfg.integrations.e2e?.configured_at) throw new LrError("e2e_not_configured", "E2E testing is not configured yet", "Run /lr-e2e-test-init (or looprch e2e configure) first");
+    if (cfg.integrations.e2e) cfg.integrations.e2e.enabled = value === true;
+  } else throw new UsageError(`Unsupported config key "${key}"`, USAGE);
 }
 
 export async function run(argv: string[]): Promise<number> {

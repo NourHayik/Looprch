@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://looprch.dev/schemas/role-results.schema.json",
-  "title": "The looprch-result block at the end of every role's final message",
-  "description": "Documentation schema. The CLI validates with src/core/results.ts (validateResult) and additionally checks the phase rules in src/core/lifecycle.ts (phaseRuleViolation): contract coverage, debate dispositions, resolution files against the diff, verification coverage, contract_review coverage and re-review consistency.",
+  "title": "The looprch-result block at the end of every role's final message (protocol 4)",
+  "description": "Documentation schema. The CLI validates with src/core/results.ts (validateResult) and additionally checks the phase rules in src/core/lifecycle.ts (phaseRuleViolation): contract coverage and executability (src/core/contract.ts), the plan lint, debate dispositions against the ledger (an accept must change its refs), rebuttal verdicts for every open item, readback coverage, the package scope (deviations), resolution files against the diff, verification coverage (obligations, deferrals, planned tests), contract_review and files_reviewed coverage, and re-review consistency.",
   "type": "object",
   "required": ["role", "decision"],
   "properties": {
@@ -18,29 +18,60 @@
         "decision": { "enum": ["plan_ready", "plan_final", "needs_expansion", "context_answer"] },
         "contract": { "$ref": "#/$defs/contract", "description": "Required with plan_ready and plan_final" },
         "debate_dispositions": {
-          "description": "Synthesis: one entry per Plan Debate finding",
+          "description": "Synthesis and revise: one entry per open debate item (Plan Debater findings, lint items L-n, readback items K-n, independent risks I-n). accept and partial name the changed contract elements in refs; reject needs evidence.",
           "type": "array",
-          "items": { "type": "object", "required": ["id", "decision", "reason"], "properties": { "id": { "type": "string" }, "decision": { "enum": ["accept", "reject"] }, "reason": { "type": "string" }, "refs": { "$ref": "#/$defs/ids" } } }
+          "items": {
+            "type": "object",
+            "required": ["id", "decision", "reason"],
+            "properties": { "id": { "type": "string" }, "decision": { "enum": ["accept", "partial", "reject"] }, "reason": { "type": "string" }, "refs": { "$ref": "#/$defs/ids" }, "evidence": { "type": "string" } }
+          }
         },
         "contract_amendment": {
           "description": "context_answer: required for a repair design; each repair obligation lists the finding ids it answers in resolves",
           "type": "object",
-          "properties": { "obligations": { "type": "array", "items": { "$ref": "#/$defs/obligation" } }, "deferrals": { "type": "array", "items": { "$ref": "#/$defs/deferral" } }, "retire": { "$ref": "#/$defs/ids" } }
-        }
+          "properties": {
+            "obligations": { "type": "array", "items": { "$ref": "#/$defs/obligation" } },
+            "deferrals": { "type": "array", "items": { "$ref": "#/$defs/deferral" } },
+            "decisions": { "type": "array", "items": { "$ref": "#/$defs/decision" } },
+            "interfaces": { "type": "array", "items": { "$ref": "#/$defs/interface" } },
+            "work_packages": { "type": "array", "items": { "$ref": "#/$defs/work_package" } },
+            "retire": { "$ref": "#/$defs/ids" }
+          }
+        },
+        "repair_packages": { "type": "array", "items": { "$ref": "#/$defs/work_package" }, "description": "Repair design: packages with findings (at most 5 each)" }
       }
     },
     {
       "properties": {
         "role": { "const": "plan_debater" },
-        "decision": { "enum": ["findings", "no_findings", "needs_expansion"] },
-        "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+        "decision": { "enum": ["findings", "no_findings", "agree", "needs_expansion"], "description": "agree: rebuttal only, nothing upheld and nothing new above low" },
+        "findings": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/finding" }], "required": ["evidence", "failure_scenario", "proposed_resolution"] } },
+        "independent_risks": { "description": "First debate pass: risks derived from the packet before reading the plan; covered_by [] raises an item", "type": "array", "items": { "type": "object", "required": ["risk", "covered_by"], "properties": { "risk": { "type": "string" }, "covered_by": { "$ref": "#/$defs/ids" } } } },
+        "verdicts": { "description": "Rebuttal: one per open item", "type": "array", "items": { "type": "object", "required": ["id", "verdict"], "properties": { "id": { "type": "string" }, "verdict": { "enum": ["resolved", "conceded", "upheld"] }, "note": { "type": "string" } } } }
       }
     },
     {
       "properties": {
         "role": { "const": "implementer" },
-        "decision": { "enum": ["implemented", "needs_context", "handover_ready"] },
+        "decision": { "enum": ["implemented", "needs_context", "handover_ready", "ready", "questions"], "description": "ready and questions: the executability readback" },
         "files_changed": { "$ref": "#/$defs/paths" },
+        "work_package": { "type": "string" },
+        "work_packages": { "$ref": "#/$defs/ids", "description": "A chain run: every package of the chain" },
+        "deviations": { "description": "Every changed file the package does not list", "type": "array", "items": { "type": "object", "required": ["file", "what", "why"], "properties": { "file": { "type": "string" }, "what": { "type": "string" }, "why": { "type": "string" } } } },
+        "packages": {
+          "description": "Readback: one entry per work package",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "questions", "decisions_needed", "would_create"],
+            "properties": {
+              "id": { "type": "string" },
+              "questions": { "type": "array", "items": { "type": "string" } },
+              "decisions_needed": { "type": "array", "items": { "type": "string" } },
+              "would_create": { "type": "array", "items": { "type": "object", "required": ["path", "symbols"], "properties": { "path": { "type": "string" }, "symbols": { "type": "array", "items": { "type": "string" } } } } }
+            }
+          }
+        },
         "resolutions": {
           "description": "Repair after a review: one entry per finding the Delta assigns to the Implementer. fixed needs files that changed since the review.",
           "type": "array",
@@ -72,7 +103,7 @@
         "decision": { "enum": ["pass", "fail"] },
         "tests_written": { "$ref": "#/$defs/paths" },
         "verifications": {
-          "description": "One per contract obligation and deferral (first run) and per review finding in the Delta. verified tests must match passing testcases of Looprch's gate run.",
+          "description": "One per contract obligation, deferral and planned test T-n (first run) and per review finding in the Delta. verified tests must match passing testcases of Looprch's gate run.",
           "type": "array",
           "items": {
             "type": "object",
@@ -96,7 +127,8 @@
         "role": { "const": "reviewer" },
         "decision": { "enum": ["approve", "changes_requested"] },
         "findings": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/finding" }], "required": ["files", "cause"] } },
-        "contract_review": { "description": "First review: met or not_met for every obligation and deferral", "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["met", "not_met"] } } } },
+        "contract_review": { "description": "First review: met or not_met for every obligation, deferral, decision, contested debate item and Implementer deviation", "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["met", "not_met"] } } } },
+        "files_reviewed": { "$ref": "#/$defs/paths", "description": "Every file the phase (first review) or the repair (re-review) changed" },
         "prior": { "description": "Re-reviews: fixed or unfixed for every earlier finding in the Delta", "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "unfixed"] }, "failed_checks": { "type": "array", "items": { "type": "integer" } } } } },
         "manual_gate_reports": { "$ref": "#/$defs/reports" }
       }
@@ -120,6 +152,7 @@
         "requirements": { "$ref": "#/$defs/ids" },
         "kind": { "enum": ["behavior", "invariant", "boundary", "interface", "data", "failure", "production", "procedure"] },
         "statement": { "type": "string" },
+        "rule": { "type": "string", "description": "Required for boundary, invariant and failure: the closed condition (what is accepted; everything else is rejected)" },
         "enforcement": { "type": "string" },
         "verify": { "type": "string" },
         "gates": { "$ref": "#/$defs/ids" },
@@ -140,10 +173,51 @@
         "resolves": { "$ref": "#/$defs/ids" }
       }
     },
+    "decision": {
+      "type": "object",
+      "required": ["id", "decision", "rationale", "rejected_alternatives", "requirements", "obligations"],
+      "properties": { "id": { "type": "string" }, "decision": { "type": "string" }, "rationale": { "type": "string" }, "rejected_alternatives": { "type": "array", "items": { "type": "string" } }, "requirements": { "$ref": "#/$defs/ids" }, "obligations": { "$ref": "#/$defs/ids" } }
+    },
+    "interface": {
+      "type": "object",
+      "required": ["id", "file", "symbol", "signature", "errors", "invariants"],
+      "properties": { "id": { "type": "string" }, "file": { "type": "string" }, "symbol": { "type": "string" }, "signature": { "type": "string" }, "errors": { "type": "array", "items": { "type": "string" } }, "invariants": { "type": "array", "items": { "type": "string" } } }
+    },
+    "planned_test": {
+      "type": "object",
+      "required": ["id", "obligation", "kind", "given", "when", "then", "file"],
+      "properties": { "id": { "type": "string" }, "obligation": { "type": "string" }, "kind": { "enum": ["positive", "negative", "boundary", "adversarial"] }, "given": { "type": "string" }, "when": { "type": "string" }, "then": { "type": "string" }, "file": { "type": "string" } }
+    },
+    "work_package": {
+      "type": "object",
+      "required": ["id", "title", "files", "steps", "done_when"],
+      "description": "Plan packages also need obligations, precision and tests (at most 25 steps and 25 files). Repair packages need findings (at most 5).",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "depends_on": { "$ref": "#/$defs/ids" },
+        "obligations": { "$ref": "#/$defs/ids" },
+        "findings": { "$ref": "#/$defs/ids" },
+        "decisions": { "$ref": "#/$defs/ids" },
+        "interfaces": { "$ref": "#/$defs/ids" },
+        "sources": { "$ref": "#/$defs/ids" },
+        "precision": { "enum": ["spec", "full_content"], "description": "full_content is required for packages that build boundary or invariant obligations" },
+        "files": { "type": "array", "items": { "type": "object", "required": ["path", "action"], "properties": { "path": { "type": "string" }, "action": { "enum": ["create", "modify", "delete"] }, "content": { "type": "string" }, "blueprint": { "type": "boolean", "description": "plan.md carries the full file as a ```<lang> blueprint=<path> block" } } } },
+        "steps": { "type": "array", "items": { "type": "string" } },
+        "done_when": { "type": "array", "items": { "type": "string" } },
+        "tests": { "type": "array", "items": { "$ref": "#/$defs/planned_test" } }
+      }
+    },
     "contract": {
       "type": "object",
-      "required": ["obligations", "deferrals"],
-      "properties": { "obligations": { "type": "array", "items": { "$ref": "#/$defs/obligation" } }, "deferrals": { "type": "array", "items": { "$ref": "#/$defs/deferral" } } }
+      "required": ["obligations", "deferrals", "decisions", "interfaces", "work_packages"],
+      "properties": {
+        "obligations": { "type": "array", "items": { "$ref": "#/$defs/obligation" } },
+        "deferrals": { "type": "array", "items": { "$ref": "#/$defs/deferral" } },
+        "decisions": { "type": "array", "items": { "$ref": "#/$defs/decision" } },
+        "interfaces": { "type": "array", "items": { "$ref": "#/$defs/interface" } },
+        "work_packages": { "type": "array", "items": { "$ref": "#/$defs/work_package" } }
+      }
     },
     "finding": {
       "type": "object",
@@ -156,8 +230,12 @@
         "section": { "type": "string" },
         "requirement_ids": { "type": "array", "items": { "type": "string" } },
         "refs": { "$ref": "#/$defs/ids", "description": "Plan Debater: contract ids the finding concerns" },
+        "evidence": { "type": "string", "description": "Plan Debater: the packet quote or contract id that shows the defect" },
+        "failure_scenario": { "type": "string", "description": "Plan Debater: how a literal executor would go wrong" },
+        "proposed_resolution": { "type": "string", "description": "Plan Debater: the change that closes it" },
         "fix": { "type": "string", "description": "Reviewer: the acceptance condition of the repair (kept unchanged across rounds)" },
         "checks": { "type": "array", "items": { "type": "string" }, "description": "Reviewer: acceptance checks the repair must pass, one testable condition each (required for high and critical; kept unchanged across rounds)" },
+        "repair": { "description": "Reviewer, cause implementation (not low, not unfixed or related): the executable repair package without id, title and findings", "type": "object", "required": ["files", "steps", "done_when"] },
         "owner": { "enum": ["implementer", "tester"], "description": "Reviewer: the role that fixes it (default implementer; cause test means tester)" },
         "cause": { "enum": ["implementation", "plan", "requirement", "cross_phase", "test"], "description": "Reviewer: where the defect comes from; plan, requirement and cross_phase go to a Planner repair design first" },
         "obligations": { "$ref": "#/$defs/ids", "description": "Reviewer: contract ids the finding concerns" },

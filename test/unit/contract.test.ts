@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { amend, contractProblems, dispositionProblems, newContract, orderWork, repairPackageProblems, unresolvedByAmendment, workPackageProblems, type ContractBody, type WorkItem } from "../../src/core/contract.js";
+import { amend, blueprintsIn, contractChanges, contractProblems, dispositionProblems, executabilityProblems, newContract, orderWork, PLAN_HEADINGS, planLint, repairPackageProblems, unresolvedByAmendment, workPackageProblems, type ContractBody, type WorkItem } from "../../src/core/contract.js";
 import { junitCases } from "../../src/gates/junit.js";
 import { unittestCases } from "../../src/gates/unittest.js";
 import { staleClaims, unbackedTests, type CaseIndex } from "../../src/gates/runner.js";
@@ -53,7 +53,54 @@ describe("phase contract", () => {
     const p = dispositionProblems([{ id: "D-1", decision: "accept", reason: "r" }, { id: "D-2", decision: "accept", reason: "r", refs: ["O-9"] }], ["D-1", "D-2"], body).join(";");
     assert.match(p, /D-1 is accepted: refs must name/);
     assert.match(p, /D-2: refs O-9 are not in the contract/);
-    assert.deepEqual(dispositionProblems([{ id: "D-1", decision: "reject", reason: "out of scope" }, { id: "D-2", decision: "accept", reason: "r", refs: ["O-1"] }], ["D-1", "D-2"], body), []);
+    assert.match(dispositionProblems([{ id: "D-1", decision: "reject", reason: "out of scope" }], ["D-1"], body).join(";"), /D-1 is rejected: "evidence" must cite/);
+    assert.deepEqual(dispositionProblems([{ id: "D-1", decision: "reject", reason: "out of scope", evidence: "packet: P-002 owns auth" }, { id: "D-2", decision: "accept", reason: "r", refs: ["O-1"] }], ["D-1", "D-2"], body), []);
+  });
+
+  test("an accepted debate item must change one of its refs; partial counts like accept", () => {
+    const before = { obligations: [ob("O-1", ["R-1.01"]), ob("O-2", ["R-1.02"])], deferrals: [] };
+    const after = { ...before, obligations: [{ ...ob("O-1", ["R-1.01"]), statement: "rejects empty ids" }, ob("O-2", ["R-1.02"])] };
+    assert.deepEqual(contractChanges(before, after), { added: [], changed: ["O-1"], removed: [] });
+    assert.deepEqual(dispositionProblems([{ id: "D-1", decision: "accept", reason: "r", refs: ["O-1"] }], ["D-1"], after, before), []);
+    assert.match(dispositionProblems([{ id: "D-1", decision: "accept", reason: "r", refs: ["O-2"] }], ["D-1"], after, before).join(";"), /none of its refs \(O-2\) changed/);
+    assert.match(dispositionProblems([{ id: "D-1", decision: "partial", reason: "r", refs: ["O-2"] }], ["D-1"], after, before).join(";"), /partly accepted, but none of its refs/);
+    const added = { ...after, decisions: [{ id: "AD-1", decision: "d", rationale: "r", rejected_alternatives: [], requirements: [], obligations: ["O-1"] }] };
+    assert.deepEqual(dispositionProblems([{ id: "D-1", decision: "accept", reason: "r", refs: ["AD-1"] }], ["D-1"], added, before), [], "a new decision counts as a change");
+  });
+
+  test("executability: planned tests per obligation, closed rules get a failing case, boundary packages carry blueprints", () => {
+    const t = (id: string, obligation: string, kind: "positive" | "adversarial" = "positive") => ({ id, obligation, kind, given: "g", when: "w", then: "t", file: "tests/t.py" });
+    const wp = (over: Partial<WorkItem>): WorkItem => ({ id: "WP-1", title: "t", obligations: ["O-1", "O-2"], precision: "spec", files: [{ path: "a.py", action: "create", content: "c" }], steps: ["s"], done_when: ["d"], tests: [t("T-1", "O-1")], ...over });
+    const body = { obligations: [ob("O-1", ["R-1.01"]), { ...ob("O-2", ["R-1.02"]), kind: "boundary" as const, rule: "only x" }], deferrals: [], decisions: [], interfaces: [] };
+    const p = executabilityProblems({ ...body, work_packages: [wp({})] }).join("\n");
+    assert.match(p, /needs a planned test .*none for: O-2/);
+    assert.match(p, /WP-1 builds a boundary \(O-2\): precision must be "full_content"/);
+    const p2 = executabilityProblems({ ...body, work_packages: [wp({ precision: "full_content", tests: [t("T-1", "O-1"), t("T-2", "O-2")] })] }).join("\n");
+    assert.match(p2, /mark the critical files "blueprint": true/);
+    assert.match(p2, /only positive tests for: O-2/);
+    const ok = wp({ precision: "full_content", files: [{ path: "a.py", action: "create", content: "c", blueprint: true }], tests: [t("T-1", "O-1"), t("T-2", "O-2", "adversarial")], decisions: ["AD-9"] });
+    assert.deepEqual(executabilityProblems({ ...body, work_packages: [ok] }), ["WP-1: decisions AD-9 are not in contract.decisions"]);
+  });
+
+  test("plan lint: paths exist, nothing TBD, blueprints present, required sections, vague wording per package", () => {
+    const sections = PLAN_HEADINGS.map((h) => `## ${h}\n\nNone.`).join("\n\n");
+    const wps = [
+      { id: "WP-1", title: "t", obligations: [], precision: "spec" as const, files: [{ path: "new.py", action: "create" as const, content: "c" }, { path: "gone.py", action: "modify" as const, content: "c" }], steps: ["Handle errors as appropriate.", "Write f"], done_when: ["TBD"], tests: [] },
+      { id: "WP-2", title: "t", depends_on: ["WP-1"], obligations: [], precision: "full_content" as const, files: [{ path: "new.py", action: "modify" as const, content: "c" }, { path: "app/g.py", action: "create" as const, content: "c", blueprint: true }], steps: ["Copy the blueprint."], done_when: ["d"], tests: [] },
+    ];
+    const r = planLint({ obligations: [], deferrals: [], work_packages: wps }, `# Plan\n\n${sections}\n`, (p) => p === "exists.py");
+    assert.ok(r.errors.some((e) => /WP-1 done_when 1: "TBD"/.test(e)), r.errors.join("\n"));
+    assert.ok(r.errors.some((e) => /WP-1: modify gone.py, but the file does not exist/.test(e)));
+    assert.ok(!r.errors.some((e) => /WP-2: modify new.py/.test(e)), "an earlier package creates it");
+    assert.ok(r.errors.some((e) => /WP-2: app\/g.py is a blueprint, but plan.md has no/.test(e)));
+    assert.deepEqual(r.ambiguities.map((a) => [a.package, a.phrases]), [["WP-1", ["as appropriate"]]]);
+    const withBlueprint = planLint({ obligations: [], deferrals: [], work_packages: [wps[1]!] }, `${sections}\n\n\`\`\`python blueprint=app/g.py\ndef g():\n    return 1\n\`\`\`\n`, (p) => p === "new.py");
+    assert.deepEqual(withBlueprint.errors, []);
+    assert.equal(blueprintsIn("```python blueprint=app/g.py\ndef g():\n    return 1\n```\n").get("app/g.py"), "def g():\n    return 1\n");
+    assert.match(planLint({ obligations: [], deferrals: [], work_packages: [] }, "## Objectives\n", () => true).errors.join(";"), /plan.md needs these sections .*Decisions/);
+    const domain = planLint({ obligations: [], deferrals: [], work_packages: [{ ...wps[0]!, files: [{ path: "new.py", action: "create", content: "Status enum TODO, DONE; ids P-XXX" }], steps: ["Add the TODO status."], done_when: ["d"] }] }, sections, () => false);
+    assert.deepEqual(domain.errors, [], "domain words (a TODO status, P-XXX ids) are not markers");
+    assert.match(planLint({ obligations: [], deferrals: [], work_packages: [{ ...wps[0]!, files: [{ path: "new.py", action: "create", content: "c" }], steps: ["TODO: pick the parser"], done_when: ["d"] }] }, sections, () => false).errors.join(";"), /"TODO:" leaves the work undecided/);
   });
 
   test("amendments retire, replace and add; repair designs resolve every finding", () => {

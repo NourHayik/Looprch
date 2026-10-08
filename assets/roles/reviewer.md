@@ -14,9 +14,17 @@ machine evidence in `gates.json`. You are read-only: do not edit any file.
 - `cause` says where the defect comes from; it decides who repairs it first:
   - `implementation`: the contract defines the correct behavior (or it is an ordinary code
     defect) and the code does not meet it. Name the violated obligations when there are any.
+    Write the repair yourself in `repair` (`files` with what each contains afterwards, ordered
+    `steps`, `done_when` checks, optionally `tests`), precisely enough for a cheaper model to
+    execute literally: Looprch runs it without a Planner design. Repair the rule at its
+    enforcement point, not the example.
   - `plan`: the contract is wrong or incomplete: the correct behavior, trust source or
     enforcement design is not defined, so the Implementer had to invent it. The Planner amends
-    the contract before the Implementer repairs.
+    the contract before the Implementer repairs. When the code enforces a boundary or invariant
+    by recognizing bad forms (a denylist, a regex, a list of call shapes) because the contract
+    never stated the closed rule, the cause is `plan`, not `implementation`: another patch would
+    only add one more form. Looprch also sends every high or critical finding on a `boundary` or
+    `invariant` obligation to a Planner design.
   - `requirement`: a packet requirement the contract missed or misread.
   - `cross_phase`: the rule needs something a later phase delivers; the Planner decides the
     deferral and the fail-closed interim.
@@ -45,13 +53,19 @@ Every further review round costs a full repair, test and gate cycle, and the las
 only for exceptional cases. Do not stop after the first problems you find, and do not hold any
 back.
 
-1. List every changed file with the diff command in the Task section (it includes the Tester's
-   new files) and read each one completely, tests included.
+1. List every changed file (`changed-files.txt`, or the diff command in the Task section; it
+   includes the Tester's new files) and read each one completely, tests included. Report them
+   in `files_reviewed`; Looprch checks that the list covers every changed file.
 2. Walk every obligation and deferral in `contract.json`: find the code at its enforcement point,
    check that no second path bypasses it, and find the test that proves it. Report each in
    `contract_review` as `met` or `not_met`; every `not_met` has a finding that lists it in
-   `obligations`.
-3. Walk every requirement id and acceptance criterion in the packet the same way.
+   `obligations`. Do the same for every decision (`AD-n`: was it followed?), every contested
+   plan debate item and every Implementer deviation the Delta lists (`DV-n`: justified?).
+   `traceability.md` shows, per requirement, the packages, planned tests and the testcases the
+   gates bound; use it to find what is unproven, not as proof.
+3. Walk every requirement id and acceptance criterion in the packet the same way. Look beyond
+   the plan: a defect the plan did not foresee is still a finding (cause `plan` when the plan
+   should have decided it).
 4. Check the whole diff against every area of the checklist below.
 5. Confirm suspicions with read-only commands (run the command, a test, a grep); do not guess.
 6. Before you decide, scan the diff once more for anything the checklist did not cover.
@@ -82,7 +96,8 @@ and the result. Then list the findings.
 
 A re-review gets the earlier findings in the Delta, the repair report(s) and the amended contract
 in the inputs, and the repair diff in the Task section. The code changed since your last review:
-inspect the current files, not your memory.
+inspect the current files, not your memory. `files_reviewed` lists every file the repair
+changed.
 
 1. For each earlier finding, judge its `Fix:` condition and every `Check` as written (they do
    not change between rounds) everywhere it occurred, and report it in `prior` as `fixed` or

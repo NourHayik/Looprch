@@ -49,12 +49,68 @@ export interface Config {
     expansion_rounds: number;
     /** Reviews that may request changes in one phase; absent in older configs (default 3). */
     review_rounds?: number;
+    /** Plan Debater passes on the initial plan (debate plus rebuttals); default 3. */
+    debate_rounds?: number;
+    /** Executability readbacks by the Implementer's model before plan approval; 0 disables; default 2. */
+    readback_rounds?: number;
+    /** Review reports of one finding lineage before Looprch asks the user instead of repairing again; default 2. */
+    lineage_attempts?: number;
   };
   approvals: { plan: Approval; merge: Approval };
   git: { phase_branches: boolean };
   gates: { env: Record<string, string> };
-  integrations: { commit_generated: boolean };
+  integrations: { commit_generated: boolean; e2e?: E2eConfig };
   spec: { gates_ack: GatesAck | null };
+}
+
+/** Optional TesterArmy `e2e` gate (https://tester.army/e2e), run by Looprch after the SEV3 gates pass. */
+export interface E2eConfig {
+  enabled: boolean;
+  /** Set by `looprch e2e configure` after its checks passed; null means not configured. */
+  configured_at: string | null;
+  /** The e2e config file, relative to the project root. */
+  config: string;
+  /** The e2e executable, relative to the project root (never npx, which may download). */
+  bin: string;
+  /** Extra `e2e run` arguments (selection only: --target, --tag, --grep, files). Looprch adds --config, --reporter and --output. */
+  args: string[];
+  timeout: string;
+  /** Environment for the run (in addition to gates.env). */
+  env: Record<string, string>;
+  /** Variables that must be set when the gate runs (for example a model key); values are never stored. */
+  required_env: string[];
+  /** Phases that run the gate. */
+  phases: "all" | string[];
+}
+
+export function defaultE2e(): E2eConfig {
+  return {
+    enabled: false,
+    configured_at: null,
+    config: "e2e.config.ts",
+    bin: "node_modules/.bin/e2e",
+    args: [],
+    timeout: "20m",
+    env: { CI: "1", E2E_TELEMETRY_DISABLED: "1" },
+    required_env: [],
+    phases: "all",
+  };
+}
+
+export const DEFAULT_DEBATE_ROUNDS = 3;
+export const DEFAULT_READBACK_ROUNDS = 2;
+export const DEFAULT_LINEAGE_ATTEMPTS = 2;
+
+export function debateRounds(cfg: Config): number {
+  return cfg.limits.debate_rounds ?? DEFAULT_DEBATE_ROUNDS;
+}
+
+export function readbackRounds(cfg: Config): number {
+  return cfg.limits.readback_rounds ?? DEFAULT_READBACK_ROUNDS;
+}
+
+export function lineageAttempts(cfg: Config): number {
+  return cfg.limits.lineage_attempts ?? DEFAULT_LINEAGE_ATTEMPTS;
 }
 
 export const DEFAULT_TIMEOUTS: Record<Role, string> = {
@@ -80,7 +136,17 @@ export function defaultConfig(): Config {
     agents: [],
     roles: {},
     context_kb: {},
-    limits: { repair_rounds: 3, quota_wait_minutes: 60, run_attempts: 2, dispatch_max_wait: "10m", expansion_rounds: 2, review_rounds: DEFAULT_REVIEW_ROUNDS },
+    limits: {
+      repair_rounds: 3,
+      quota_wait_minutes: 60,
+      run_attempts: 2,
+      dispatch_max_wait: "10m",
+      expansion_rounds: 2,
+      review_rounds: DEFAULT_REVIEW_ROUNDS,
+      debate_rounds: DEFAULT_DEBATE_ROUNDS,
+      readback_rounds: DEFAULT_READBACK_ROUNDS,
+      lineage_attempts: DEFAULT_LINEAGE_ATTEMPTS,
+    },
     approvals: { plan: "never", merge: "never" },
     git: { phase_branches: true },
     gates: { env: {} },
@@ -189,6 +255,9 @@ export function validateConfig(raw: unknown, ctx: ValidationContext): Issues {
     if (!isDuration(l.dispatch_max_wait)) issues.error("limits.dispatch_max_wait must be a duration like 10m");
     if (!isInt(l.expansion_rounds, 0, 5)) issues.error("limits.expansion_rounds must be 0..5");
     if (l.review_rounds !== undefined && !isInt(l.review_rounds, 1, 10)) issues.error("limits.review_rounds must be 1..10");
+    if (l.debate_rounds !== undefined && !isInt(l.debate_rounds, 1, 5)) issues.error("limits.debate_rounds must be 1..5");
+    if (l.readback_rounds !== undefined && !isInt(l.readback_rounds, 0, 3)) issues.error("limits.readback_rounds must be 0..3");
+    if (l.lineage_attempts !== undefined && !isInt(l.lineage_attempts, 1, 5)) issues.error("limits.lineage_attempts must be 1..5");
   }
   if (!isObject(cfg.approvals) || !oneOf(cfg.approvals.plan, APPROVALS) || !oneOf(cfg.approvals.merge, APPROVALS))
     issues.error(`approvals.plan and approvals.merge must be one of ${APPROVALS.join(", ")}`);
@@ -200,8 +269,30 @@ export function validateConfig(raw: unknown, ctx: ValidationContext): Issues {
       if (typeof v !== "string") issues.error(`gates.env.${k} must be a string`);
     }
   if (!isObject(cfg.integrations) || typeof cfg.integrations.commit_generated !== "boolean") issues.error("integrations.commit_generated must be true or false");
+  else if (cfg.integrations.e2e !== undefined) for (const p of e2eProblems(cfg.integrations.e2e)) issues.error(`integrations.e2e: ${p}`);
   if (!isObject(cfg.spec)) issues.error("spec must be an object");
   return issues;
+}
+
+/** Shape problems of integrations.e2e. Whether the setup actually works is `looprch e2e configure`'s job. */
+export function e2eProblems(raw: unknown): string[] {
+  if (!isObject(raw)) return ["must be an object"];
+  const p: string[] = [];
+  if (typeof raw.enabled !== "boolean") p.push("enabled must be true or false");
+  if (raw.configured_at !== null && !isNonEmptyString(raw.configured_at)) p.push("configured_at must be a timestamp or null");
+  for (const k of ["config", "bin"]) {
+    const v = raw[k];
+    if (!isNonEmptyString(v)) p.push(`${k} is required`);
+    else if (v.startsWith("/") || v.split("/").includes("..")) p.push(`${k} must be a path inside the project`);
+  }
+  if (!Array.isArray(raw.args) || !raw.args.every((a) => typeof a === "string")) p.push("args must be a list of strings");
+  else if (raw.args.some((a) => /^--(config|reporter|output)(=|$)/.test(a))) p.push("args must not set --config, --reporter or --output (Looprch sets them)");
+  if (!isDuration(raw.timeout)) p.push("timeout must look like 20m");
+  if (!isObject(raw.env) || !Object.entries(raw.env).every(([k, v]) => /^[A-Z_][A-Z0-9_]*$/.test(k) && typeof v === "string")) p.push("env must map NAMES to strings");
+  if (!Array.isArray(raw.required_env) || !raw.required_env.every((k) => typeof k === "string" && /^[A-Z_][A-Z0-9_]*$/.test(k))) p.push("required_env must be a list of variable names");
+  if (raw.phases !== "all" && !(Array.isArray(raw.phases) && raw.phases.every((x) => typeof x === "string" && /^P-\d{3,}$/.test(x)))) p.push('phases must be "all" or a list of phase ids');
+  if (raw.enabled === true && raw.configured_at === null) p.push("enabled before it was configured: run /lr-e2e-test-init (looprch e2e configure)");
+  return p;
 }
 
 export function configExists(root: string): boolean {

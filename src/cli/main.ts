@@ -1,4 +1,4 @@
-import { UsageError } from "../core/errors.js";
+import { HelpRequested, UsageError } from "../core/errors.js";
 import { VERSION } from "../core/constants.js";
 import { printError } from "./output.js";
 import { run as version } from "./version.js";
@@ -18,6 +18,7 @@ import { run as doctor } from "./doctor.js";
 import { run as next } from "./next.js";
 import { run as record } from "./record.js";
 import { run as gates } from "./gates.js";
+import { run as e2e } from "./e2e.js";
 import { run as dispatch, runWrapper } from "./dispatch.js";
 import { runAnswer, runCheckpoint, runPause, runResume, runWait } from "./flow.js";
 import { runReview, runWorker } from "./side.js";
@@ -43,6 +44,7 @@ const COMMANDS: Record<string, Command> = {
   next,
   record,
   gates,
+  e2e,
   dispatch,
   answer: runAnswer,
   wait: runWait,
@@ -84,6 +86,10 @@ async function main(argv: string[]): Promise<number> {
   try {
     return await handler(rest);
   } catch (err) {
+    if (err instanceof HelpRequested) {
+      process.stdout.write(`${err.usage}\n`);
+      return 0;
+    }
     return printError(err, json);
   }
 }

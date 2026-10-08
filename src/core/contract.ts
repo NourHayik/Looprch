@@ -20,11 +20,53 @@ export interface Obligation {
   /** What the Tester must prove, including negative cases and variants. */
   verify: string;
   gates: string[];
+  /** Kinds boundary, invariant and failure: the closed rule (what is accepted; everything else is rejected). */
+  rule?: string;
   /** Incoming deferrals (`P-NNN/X-n`) this obligation takes over. */
   covers?: string[];
   /** Review findings this obligation answers (contract amendments). */
   resolves?: string[];
 }
+
+/** An architecture decision the Planner took, so no executor has to take it. */
+export interface Decision {
+  id: string;
+  decision: string;
+  rationale: string;
+  rejected_alternatives: string[];
+  requirements: string[];
+  obligations: string[];
+}
+
+/** An exact interface the packages build and the Reviewer checks. */
+export interface InterfaceSpec {
+  id: string;
+  file: string;
+  symbol: string;
+  signature: string;
+  errors: string[];
+  invariants: string[];
+}
+
+export const TEST_KINDS = ["positive", "negative", "boundary", "adversarial"] as const;
+
+/** A test the Planner requires; the Tester writes it and proves it in the gates. */
+export interface PlannedTest {
+  id: string;
+  obligation: string;
+  kind: (typeof TEST_KINDS)[number];
+  given: string;
+  when: string;
+  then: string;
+  file: string;
+}
+
+export const PRECISIONS = ["spec", "full_content"] as const;
+export type Precision = (typeof PRECISIONS)[number];
+
+/** Obligation kinds whose packages must carry full-content blueprints (CoreBit P-001: denylists where a closed rule was needed). */
+const CLOSED_RULE_KINDS = new Set<ObligationKind>(["boundary", "invariant", "failure"]);
+const BLUEPRINT_KINDS = new Set<ObligationKind>(["boundary", "invariant"]);
 
 export interface Deferral {
   id: string;
@@ -44,6 +86,8 @@ export interface WorkFile {
   action: (typeof WORK_FILE_ACTIONS)[number];
   /** What the file contains after this package: classes, functions with signatures, keys, columns. */
   content: string;
+  /** The full content is a blueprint in plan.md (```lang blueprint=<path>); the Implementer copies it. */
+  blueprint?: boolean;
 }
 
 /**
@@ -61,16 +105,31 @@ export interface WorkItem {
   steps: string[];
   /** Commands or observations the Implementer runs to check its own work, with the expected result. */
   done_when: string[];
+  /** Plan packages: the tests the Tester must write for this package's obligations. */
+  tests?: PlannedTest[];
+  /** `spec` (exact files, signatures, steps) or `full_content` (blueprints the Implementer copies). */
+  precision?: Precision;
+  /** Interface ids (contract.interfaces) this package builds. */
+  interfaces?: string[];
+  /** Decision ids (contract.decisions) this package follows. */
+  decisions?: string[];
+  /** SEV3 source ids (documents or requirement ids) this package relies on; the Implementer opens only these. */
+  sources?: string[];
 }
 
 /** Bounds that keep one package small enough for one focused run of a cheaper model. */
 export const WORK_LIMITS = { steps: 25, files: 25, findings: 5 } as const;
+/** Bounds of a chain of small dependent packages that one Implementer run executes together. */
+export const CHAIN_LIMITS = { packages: 3, steps: 25, files: 25 } as const;
 
 export interface ContractBody {
   obligations: Obligation[];
   deferrals: Deferral[];
   /** Ordered work packages the Implementer executes one run at a time (protocol 3). */
   work_packages?: WorkItem[];
+  /** Protocol 4: the architecture decisions and exact interfaces of the phase. */
+  decisions?: Decision[];
+  interfaces?: InterfaceSpec[];
 }
 
 export interface Contract extends ContractBody {
@@ -83,6 +142,8 @@ export interface Amendment {
   obligations?: Obligation[];
   deferrals?: Deferral[];
   work_packages?: WorkItem[];
+  decisions?: Decision[];
+  interfaces?: InterfaceSpec[];
   retire?: string[];
 }
 
@@ -113,7 +174,32 @@ function obligationShape(x: unknown): string | null {
   if (!oneOf(x.kind, OBLIGATION_KINDS)) return `${x.id}: kind must be one of ${OBLIGATION_KINDS.join(", ")}`;
   for (const k of ["statement", "enforcement", "verify"]) if (!isNonEmptyString(x[k])) return `${x.id}: ${k} is required`;
   if (!isStringArray(x.gates)) return `${x.id}: gates must be a list of gate ids (use [] for none)`;
+  if (x.rule !== undefined && typeof x.rule !== "string") return `${x.id}: rule must be a string`;
+  if (CLOSED_RULE_KINDS.has(x.kind as ObligationKind) && !isNonEmptyString(x.rule))
+    return `${x.id}: kind ${String(x.kind)} needs "rule": the closed condition (exactly what is accepted, and that everything else is rejected), never a list of known bad cases`;
   return optionalIds(x, "covers") ?? optionalIds(x, "resolves");
+}
+
+function decisionShape(x: unknown): string | null {
+  if (!isObject(x) || !isNonEmptyString(x.id)) return "id is required";
+  for (const k of ["decision", "rationale"]) if (!isNonEmptyString(x[k])) return `${x.id}: ${k} is required`;
+  for (const k of ["rejected_alternatives", "requirements", "obligations"]) if (!isStringArray(x[k])) return `${x.id}: ${k} must be a list (use [] for none)`;
+  return null;
+}
+
+function interfaceShape(x: unknown): string | null {
+  if (!isObject(x) || !isNonEmptyString(x.id)) return "id is required";
+  for (const k of ["file", "symbol", "signature"]) if (!isNonEmptyString(x[k])) return `${x.id}: ${k} is required`;
+  for (const k of ["errors", "invariants"]) if (!isStringArray(x[k])) return `${x.id}: ${k} must be a list (use [] for none)`;
+  return null;
+}
+
+function testShape(x: unknown): string | null {
+  if (!isObject(x) || !isNonEmptyString(x.id)) return "each test needs an id (T-1)";
+  if (!isNonEmptyString(x.obligation)) return `${x.id}: obligation is required`;
+  if (!oneOf(x.kind, TEST_KINDS)) return `${x.id}: kind must be one of ${TEST_KINDS.join(", ")}`;
+  for (const k of ["given", "when", "then", "file"]) if (!isNonEmptyString(x[k])) return `${x.id}: ${k} is required`;
+  return null;
 }
 
 function deferralShape(x: unknown): string | null {
@@ -129,6 +215,8 @@ function workFileShape(x: unknown): string | null {
   if (!oneOf(x.action, WORK_FILE_ACTIONS)) return `${x.path}: action must be one of ${WORK_FILE_ACTIONS.join(", ")}`;
   if (x.action !== "delete" && !isNonEmptyString(x.content)) return `${x.path}: content must say what the file contains (classes, functions with signatures, keys, columns)`;
   if (x.content !== undefined && typeof x.content !== "string") return `${x.path}: content must be a string`;
+  if (x.blueprint !== undefined && typeof x.blueprint !== "boolean") return `${x.path}: blueprint must be true or false`;
+  if (x.blueprint === true && x.action === "delete") return `${x.path}: a deleted file has no blueprint`;
   return null;
 }
 
@@ -148,12 +236,28 @@ export function workItemShape(kind: "plan" | "repair") {
     if (x.steps.length > WORK_LIMITS.steps) return `${x.id} has ${x.steps.length} steps (max ${WORK_LIMITS.steps}): split it into smaller packages`;
     if (x.files.length > WORK_LIMITS.files) return `${x.id} touches ${x.files.length} files (max ${WORK_LIMITS.files}): split it into smaller packages`;
     if (kind === "plan" && !isStringArray(x.obligations)) return `${x.id}: obligations must list the contract obligations (or deferral interims) the package implements ([] for scaffolding)`;
+    if (kind === "plan" && !oneOf(x.precision, PRECISIONS)) return `${x.id}: precision must be "spec" or "full_content"`;
+    if (kind === "repair" && x.precision !== undefined && !oneOf(x.precision, PRECISIONS)) return `${x.id}: precision must be "spec" or "full_content"`;
+    if (kind === "plan" && !Array.isArray(x.tests)) return `${x.id}: tests must list the tests the Tester writes for this package's obligations ([] for scaffolding)`;
+    if (x.tests !== undefined) {
+      if (!Array.isArray(x.tests)) return `${x.id}: tests must be a list`;
+      for (const t of x.tests) {
+        const e = testShape(t);
+        if (e) return `${x.id}: ${e}`;
+      }
+    }
     if (kind === "repair") {
       if (!isStringArray(x.findings) || !x.findings.length) return `${x.id}: findings must name the review findings the package repairs`;
       if (x.findings.length > WORK_LIMITS.findings) return `${x.id} repairs ${x.findings.length} findings (max ${WORK_LIMITS.findings}): split it`;
     }
-    return optionalIds(x, "depends_on") ?? optionalIds(x, "obligations") ?? optionalIds(x, "findings");
+    return optionalIds(x, "depends_on") ?? optionalIds(x, "obligations") ?? optionalIds(x, "findings") ?? optionalIds(x, "interfaces") ?? optionalIds(x, "decisions") ?? optionalIds(x, "sources");
   };
+}
+
+/** Shape of a review finding's `repair`: the package the Reviewer writes for an implementation defect. */
+export function reviewerRepairShape(x: unknown): string | null {
+  if (!isObject(x)) return "repair must be an object";
+  return workItemShape("repair")({ id: "repair", title: "repair", findings: ["F"], ...x });
 }
 
 function listShape(errors: string[], obj: Record<string, unknown>, key: string, item: (v: unknown) => string | null, required: boolean): void {
@@ -176,6 +280,8 @@ export function contractShapeErrors(raw: unknown): string[] {
   listShape(errors, raw, "obligations", obligationShape, true);
   listShape(errors, raw, "deferrals", deferralShape, true);
   listShape(errors, raw, "work_packages", workItemShape("plan"), true);
+  listShape(errors, raw, "decisions", decisionShape, true);
+  listShape(errors, raw, "interfaces", interfaceShape, true);
   return errors.map((e) => `contract.${e}`);
 }
 
@@ -186,6 +292,8 @@ export function amendmentShapeErrors(raw: unknown): string[] {
   listShape(errors, raw, "obligations", obligationShape, false);
   listShape(errors, raw, "deferrals", deferralShape, false);
   listShape(errors, raw, "work_packages", workItemShape("plan"), false);
+  listShape(errors, raw, "decisions", decisionShape, false);
+  listShape(errors, raw, "interfaces", interfaceShape, false);
   if (raw.retire !== undefined && !isStringArray(raw.retire)) errors.push("retire must be a list of ids");
   return errors.map((e) => `contract_amendment.${e}`);
 }
@@ -224,7 +332,159 @@ export function contractProblems(body: ContractBody, ctx: ContractContext, opts:
   const open = ctx.incoming.filter((d) => !covers.has(d.ref)).map((d) => d.ref);
   if (open.length) problems.push(`deferrals from earlier phases to ${ctx.phase.id} must be covered (list the id in "covers" of an obligation, or defer it again): ${listed(open)}`);
   if (body.work_packages) problems.push(...workPackageProblems(body.work_packages, body.obligations, !opts.amended, body.deferrals));
+  if (body.work_packages) problems.push(...executabilityProblems(body, !opts.amended));
   return problems;
+}
+
+/**
+ * Protocol 4: decisions and interfaces are referenced consistently, every obligation has planned
+ * tests (closed rules a failing case), and packages that build a boundary or invariant carry
+ * full-content blueprints instead of a description the executor would have to design from.
+ */
+export function executabilityProblems(body: ContractBody, complete = true): string[] {
+  const problems: string[] = [];
+  const wps = body.work_packages ?? [];
+  const obligations = new Map(body.obligations.map((o) => [o.id, o]));
+  const contractIdSet = new Set([...body.obligations, ...body.deferrals].map((x) => x.id));
+  const decisionIds = new Set((body.decisions ?? []).map((d) => d.id));
+  const interfaceIds = new Set((body.interfaces ?? []).map((i) => i.id));
+  const dupOf = (ids: string[]) => ids.filter((id, i) => ids.indexOf(id) !== i);
+  const allIds = [...contractIdSet, ...(body.decisions ?? []).map((d) => d.id), ...(body.interfaces ?? []).map((i) => i.id), ...wps.map((w) => w.id)];
+  const dup = [...new Set(dupOf(allIds))].filter((id) => !(body.obligations.filter((o) => o.id === id).length + body.deferrals.filter((d) => d.id === id).length > 1));
+  if (dup.length) problems.push(`ids must be unique across obligations, deferrals, decisions, interfaces and packages: ${listed(dup)}`);
+  for (const d of body.decisions ?? []) {
+    const bad = d.obligations.filter((o) => !contractIdSet.has(o));
+    if (bad.length) problems.push(`${d.id}: obligations ${bad.join(", ")} are not in the contract`);
+  }
+  const tests = wps.flatMap((w) => (w.tests ?? []).map((t) => ({ ...t, wp: w.id })));
+  const dupTests = [...new Set(dupOf(tests.map((t) => t.id)))];
+  if (dupTests.length) problems.push(`planned test ids must be unique: ${listed(dupTests)}`);
+  for (const t of tests) if (!contractIdSet.has(t.obligation)) problems.push(`${t.wp} ${t.id}: obligation ${t.obligation} is not in the contract`);
+  for (const w of wps) {
+    const badD = (w.decisions ?? []).filter((d) => !decisionIds.has(d));
+    const badI = (w.interfaces ?? []).filter((i) => !interfaceIds.has(i));
+    if (badD.length) problems.push(`${w.id}: decisions ${badD.join(", ")} are not in contract.decisions`);
+    if (badI.length) problems.push(`${w.id}: interfaces ${badI.join(", ")} are not in contract.interfaces`);
+    const builds = (w.obligations ?? []).map((id) => obligations.get(id)).filter((o): o is Obligation => !!o);
+    if (builds.some((o) => BLUEPRINT_KINDS.has(o.kind))) {
+      if (w.precision !== "full_content") problems.push(`${w.id} builds a ${builds.filter((o) => BLUEPRINT_KINDS.has(o.kind)).map((o) => `${o.kind} (${o.id})`).join(", ")}: precision must be "full_content" with the critical files as blueprints`);
+      else if (!w.files.some((f) => f.blueprint)) problems.push(`${w.id} is full_content: mark the critical files "blueprint": true and write each one in full in plan.md`);
+    }
+  }
+  if (complete) {
+    const tested = new Map<string, Set<string>>();
+    for (const t of tests) tested.set(t.obligation, (tested.get(t.obligation) ?? new Set()).add(t.kind));
+    const untested = body.obligations.filter((o) => o.kind !== "procedure" && !tested.has(o.id)).map((o) => o.id);
+    if (untested.length && wps.length) problems.push(`every obligation (except procedure) needs a planned test in a package's "tests"; none for: ${listed(untested)}`);
+    const noNegative = body.obligations.filter((o) => CLOSED_RULE_KINDS.has(o.kind) && tested.has(o.id) && ![...tested.get(o.id)!].some((k) => k !== "positive")).map((o) => o.id);
+    if (noNegative.length) problems.push(`a closed rule needs a negative, boundary or adversarial planned test; only positive tests for: ${listed(noNegative)}`);
+  }
+  return problems;
+}
+
+/** Contract ids a disposition, a finding or a Reviewer may refer to. */
+export function referableIds(body: ContractBody | null): Set<string> {
+  if (!body) return new Set();
+  const wps = body.work_packages ?? [];
+  return new Set([
+    ...body.obligations.map((x) => x.id),
+    ...body.deferrals.map((x) => x.id),
+    ...(body.decisions ?? []).map((x) => x.id),
+    ...(body.interfaces ?? []).map((x) => x.id),
+    ...wps.map((x) => x.id),
+    ...wps.flatMap((w) => (w.tests ?? []).map((t) => t.id)),
+  ]);
+}
+
+function elementById(body: ContractBody, id: string): unknown {
+  const wps = body.work_packages ?? [];
+  return (
+    body.obligations.find((x) => x.id === id) ??
+    body.deferrals.find((x) => x.id === id) ??
+    (body.decisions ?? []).find((x) => x.id === id) ??
+    (body.interfaces ?? []).find((x) => x.id === id) ??
+    wps.find((x) => x.id === id) ??
+    wps.flatMap((w) => w.tests ?? []).find((t) => t.id === id)
+  );
+}
+
+/** Ids added, changed or removed between two contracts (obligations, deferrals, decisions, interfaces, packages, tests). */
+export function contractChanges(prev: ContractBody | null, next: ContractBody): { added: string[]; changed: string[]; removed: string[] } {
+  const before = referableIds(prev);
+  const after = referableIds(next);
+  const added = [...after].filter((id) => !before.has(id));
+  const removed = [...before].filter((id) => !after.has(id));
+  const changed = [...after].filter((id) => before.has(id) && JSON.stringify(elementById(prev!, id)) !== JSON.stringify(elementById(next, id)));
+  return { added, changed, removed };
+}
+
+/** Planned tests of the contract with their package. */
+export function plannedTests(body: ContractBody | null): (PlannedTest & { wp: string })[] {
+  return (body?.work_packages ?? []).flatMap((w) => (w.tests ?? []).map((t) => ({ ...t, wp: w.id })));
+}
+
+export const PLAN_HEADINGS = ["Objectives", "Decisions", "Interfaces", "Data", "Security", "Error handling", "Edge cases", "Sequence", "Tests", "Verification", "Definition of Done", "Deferred"] as const;
+
+const HARD_MARKERS = /\bTBD\b|\bFIXME\b|\bTODO\s*:|\?\?\?/;
+const VAGUE = /\b(as needed|as appropriate|if appropriate|where appropriate|if needed|if necessary|or similar|or equivalent|and so on|etc\.?|something like|some kind of|some sort of|choose (?:a|an|the|whether|which)|decide (?:on|whether|how|which)|consider (?:using|adding|whether)|maybe|possibly|might want|could (?:use|add)|handle (?:it )?(?:gracefully|properly|appropriately)|properly|robust(?:ly)?|reasonable|sensible|best practices?)\b/gi;
+const BLUEPRINT_BLOCK = /^```[^\n`]*\bblueprint=(\S+)[^\n]*\n([\s\S]*?)^```[ \t]*$/gm;
+
+/** Full-content files the plan markdown carries as ```lang blueprint=<path> blocks. */
+export function blueprintsIn(planMd: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of planMd.matchAll(BLUEPRINT_BLOCK)) out.set(m[1]!.replace(/^\.\//, ""), m[2]!);
+  return out;
+}
+
+export interface LintResult {
+  /** Problems that make Looprch ask the Planner again. */
+  errors: string[];
+  /** Wording that leaves a decision to the executor; one entry per package, fed into the debate. */
+  ambiguities: { package: string; phrases: string[]; where: string[] }[];
+}
+
+/**
+ * Deterministic checks of an executable plan before any model reads it: the files exist (or an
+ * earlier package creates them), nothing is marked to be decided later, every blueprint file has
+ * its full content in plan.md, plan.md has the required sections, and the wording that leaves a
+ * decision to the executor is reported per package.
+ */
+export function planLint(body: ContractBody, planMd: string, exists: (path: string) => boolean): LintResult {
+  const errors: string[] = [];
+  const ambiguities: LintResult["ambiguities"] = [];
+  const missing = PLAN_HEADINGS.filter((h) => !new RegExp(`^#{1,4}\\s+(?:\\d+[.)]?\\s*)?${h.replace(/ /g, "\\s+")}\\b`, "im").test(planMd));
+  if (missing.length) errors.push(`plan.md needs these sections (write "None." under one that does not apply): ${missing.join(", ")}`);
+  const blueprints = blueprintsIn(planMd);
+  const order = orderWork(body.work_packages ?? []) ?? body.work_packages ?? [];
+  const created = new Set<string>();
+  const deleted = new Set<string>();
+  for (const w of order) {
+    const where: string[] = [];
+    const phrases = new Set<string>();
+    const scan = (label: string, text: string) => {
+      if (HARD_MARKERS.test(text)) errors.push(`${w.id} ${label}: "${HARD_MARKERS.exec(text)![0]}" leaves the work undecided; decide it in the plan`);
+      const hits = [...text.matchAll(VAGUE)].map((m) => m[0].toLowerCase());
+      if (hits.length) {
+        hits.forEach((h) => phrases.add(h));
+        where.push(`${label}: "${text.length > 140 ? `${text.slice(0, 140)}…` : text}"`);
+      }
+    };
+    w.steps.forEach((s, i) => scan(`step ${i + 1}`, s));
+    w.done_when.forEach((d, i) => scan(`done_when ${i + 1}`, d));
+    for (const f of w.files) {
+      const p = f.path.replace(/^\.\//, "");
+      if (p.startsWith("/") || p.split("/").includes("..")) errors.push(`${w.id}: ${f.path} is outside the project`);
+      if (f.action !== "delete" && !f.blueprint) scan(`file ${p}`, f.content);
+      const present = (exists(p) || created.has(p)) && !deleted.has(p);
+      if ((f.action === "modify" || f.action === "delete") && !present) errors.push(`${w.id}: ${f.action} ${p}, but the file does not exist and no earlier package creates it (use action create, or fix the path)`);
+      if (f.action === "create" && present) errors.push(`${w.id}: create ${p}, but the file already exists (use action modify)`);
+      if (f.blueprint && !blueprints.has(p)) errors.push(`${w.id}: ${p} is a blueprint, but plan.md has no \`\`\`<lang> blueprint=${p} block with its full content`);
+      if (f.action === "create") created.add(p);
+      if (f.action === "delete") deleted.add(p);
+    }
+    if (phrases.size) ambiguities.push({ package: w.id, phrases: [...phrases], where: where.slice(0, 8) });
+  }
+  return { errors, ambiguities };
 }
 
 /**
@@ -283,34 +543,51 @@ export function orderWork(items: WorkItem[]): WorkItem[] | null {
   return out;
 }
 
+export const DISPOSITIONS = ["accept", "partial", "reject"] as const;
+
 export interface Disposition {
   id: string;
-  decision: "accept" | "reject";
+  decision: (typeof DISPOSITIONS)[number];
   reason: string;
   refs?: string[];
+  /** Reject: the packet section, contract id or code that shows the finding does not hold. */
+  evidence?: string;
 }
 
 export function dispositionShape(x: unknown): string | null {
   if (!isObject(x) || !isNonEmptyString(x.id)) return "needs id";
-  if (!oneOf(x.decision, ["accept", "reject"] as const)) return `${x.id}: decision must be accept or reject`;
+  if (!oneOf(x.decision, DISPOSITIONS)) return `${x.id}: decision must be accept, partial or reject`;
   if (!isNonEmptyString(x.reason)) return `${x.id}: reason is required`;
-  if (x.refs !== undefined && !isStringArray(x.refs)) return `${x.id}: refs must be a list of obligation or deferral ids`;
+  if (x.refs !== undefined && !isStringArray(x.refs)) return `${x.id}: refs must be a list of contract ids`;
+  if (x.evidence !== undefined && typeof x.evidence !== "string") return `${x.id}: evidence must be a string`;
   return null;
 }
 
-/** Every debate finding is accepted (with the obligations/deferrals that carry it) or rejected with a reason. */
-export function dispositionProblems(list: Disposition[] | undefined, debateIds: string[], body: ContractBody): string[] {
+/**
+ * Every open debate item is accepted or partly accepted (naming the contract elements that carry
+ * the change, at least one of which really changed), or rejected with a reason and evidence.
+ */
+export function dispositionProblems(list: Disposition[] | undefined, openIds: string[], body: ContractBody, prev: ContractBody | null = null): string[] {
   const got = new Map((list ?? []).map((d) => [d.id, d]));
-  const missing = debateIds.filter((id) => !got.has(id));
+  const missing = openIds.filter((id) => !got.has(id));
   const problems: string[] = [];
-  if (missing.length) problems.push(`debate_dispositions must list every Plan Debate finding ({"id","decision":"accept|reject","reason","refs"}); missing: ${missing.join(", ")}`);
-  const ids = new Set([...body.obligations, ...body.deferrals].map((x) => x.id));
+  if (missing.length) problems.push(`debate_dispositions must answer every open debate item ({"id","decision":"accept|partial|reject","reason","refs","evidence"}); missing: ${missing.join(", ")}`);
+  const ids = referableIds(body);
+  const changes = prev ? contractChanges(prev, body) : null;
+  const touched = new Set([...(changes?.added ?? []), ...(changes?.changed ?? [])]);
   for (const d of list ?? []) {
-    if (d.decision !== "accept") continue;
+    if (d.decision === "reject") {
+      if (!isNonEmptyString(d.evidence)) problems.push(`${d.id} is rejected: "evidence" must cite the packet section, contract id or code that shows the finding does not hold`);
+      continue;
+    }
     const refs = d.refs ?? [];
-    if (!refs.length) problems.push(`${d.id} is accepted: refs must name the obligation(s) or deferral(s) that carry it`);
+    if (!refs.length) {
+      problems.push(`${d.id} is ${d.decision === "accept" ? "accepted" : "partly accepted"}: refs must name the contract elements (obligations, deferrals, decisions, interfaces, packages, tests) that carry the change`);
+      continue;
+    }
     const bad = refs.filter((r) => !ids.has(r));
     if (bad.length) problems.push(`${d.id}: refs ${bad.join(", ")} are not in the contract`);
+    else if (changes && !refs.some((r) => touched.has(r))) problems.push(`${d.id} is ${d.decision === "accept" ? "accepted" : "partly accepted"}, but none of its refs (${refs.join(", ")}) changed in the contract: make the change, or reject the finding with evidence`);
   }
   return problems;
 }
@@ -328,12 +605,16 @@ export function amend(c: Contract, a: Amendment): Contract {
     return out;
   };
   const packages = c.work_packages || a.work_packages ? merge(c.work_packages ?? [], a.work_packages).map((w) => ({ ...w, obligations: (w.obligations ?? []).filter((o) => !retire.has(o)) })) : null;
+  const decisions = c.decisions || a.decisions ? merge(c.decisions ?? [], a.decisions) : null;
+  const interfaces = c.interfaces || a.interfaces ? merge(c.interfaces ?? [], a.interfaces) : null;
   return {
     ...c,
     revision: c.revision + 1,
     obligations: merge(c.obligations, a.obligations),
     deferrals: merge(c.deferrals, a.deferrals),
     ...(packages ? { work_packages: packages } : {}),
+    ...(decisions ? { decisions } : {}),
+    ...(interfaces ? { interfaces } : {}),
   };
 }
 
@@ -368,7 +649,16 @@ export function saveContract(root: string, phase: string, c: Contract): string {
 }
 
 export function newContract(phase: string, body: ContractBody, revision = 1): Contract {
-  return { schema_version: 1, phase, revision, obligations: body.obligations, deferrals: body.deferrals, ...(body.work_packages ? { work_packages: body.work_packages } : {}) };
+  return {
+    schema_version: 1,
+    phase,
+    revision,
+    obligations: body.obligations,
+    deferrals: body.deferrals,
+    ...(body.work_packages ? { work_packages: body.work_packages } : {}),
+    ...(body.decisions ? { decisions: body.decisions } : {}),
+    ...(body.interfaces ? { interfaces: body.interfaces } : {}),
+  };
 }
 
 /** Deferrals that closed phases made to `phaseId`. */

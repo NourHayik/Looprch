@@ -96,7 +96,7 @@ describe("lifecycle transition rows", () => {
     assert.equal(a.action, "paused");
     assert.match(a.reason, /protocol_changed/);
     cli(p, ["resume"]);
-    assert.equal(state(p).protocol, 3);
+    assert.equal(state(p).protocol, 4);
     assert.notEqual(next(p).action, "paused");
     p.s.cleanup();
   });
@@ -135,8 +135,9 @@ describe("lifecycle transition rows", () => {
     assert.equal(r.task, "revise");
     assert.match(readFileSync(join(p.root, r.brief), "utf8"), /Add input validation notes/);
     runDirect(r, { root: p.root, env: p.env });
-    const q2 = next(p);
+    const q2 = until(p, (x) => x.action === "ask_user" && x.kind === "approve_plan");
     assert.equal(q2.kind, "approve_plan");
+    assert.equal(readJson(join(p.root, ".looprch/phases/P-001/debate.json")).readbacks, 2, "the revised plan is read back again before approval");
     assert.notEqual(q2.question_id, q.question_id);
     p.s.cleanup();
   });
@@ -148,9 +149,9 @@ describe("lifecycle transition rows", () => {
     assert.equal(a.role, "tester");
     assert.ok(existsSync(join(p.root, ".looprch/phases/P-001/plan-addendum-1.md")));
     const calls = readFileSync(p.scenario.replace("scenario.json", "fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-    const impl = calls.filter((c) => c.role === "implementer");
+    const impl = calls.filter((c) => c.role === "implementer" && c.task === "implementation");
     assert.equal(impl.length, 2);
-    assert.equal(impl[1].session, JSON.parse(readFileSync(join(p.root, ".looprch/runs/P-001-implementer-1/relay/result.json"), "utf8")).sessionId);
+    assert.equal(impl[1].session, JSON.parse(readFileSync(join(p.root, ".looprch/runs/P-001-implementer-2/relay/result.json"), "utf8")).sessionId);
     p.s.cleanup();
   });
 

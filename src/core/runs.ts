@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentId, Mode } from "./config.js";
 import type { Role } from "./constants.js";
@@ -45,6 +45,68 @@ export interface RunRecord {
   question?: string;
   output_path?: string;
   error?: string;
+  /** Usage telemetry (absent in runs issued before 0.7.0). */
+  brief_bytes?: number;
+  input_bytes?: number;
+  result_bytes?: number;
+  wall_ms?: number;
+  /** Token usage as the relay reported it; null when the relay reports none. */
+  usage?: Usage | null;
+}
+
+export interface Usage {
+  input: number;
+  cached_input: number;
+  output: number;
+  /** Where the numbers come from (relay result field or events file). */
+  source: string;
+}
+
+export interface RoleUsage {
+  role: Role;
+  agent: AgentId;
+  model: string;
+  runs: number;
+  wall_ms: number;
+  brief_bytes: number;
+  input_bytes: number;
+  result_bytes: number;
+  /** Runs whose relay reported token usage; the token sums cover only those. */
+  runs_with_tokens: number;
+  tokens: { input: number; cached_input: number; output: number };
+}
+
+/** Measured usage per role and model for one phase (or every run): wall time, bytes, and the tokens relays reported. */
+export function usageSummary(root: string, phase: string | null): RoleUsage[] {
+  const dir = projectPaths(root).runs;
+  if (!existsSync(dir)) return [];
+  const out = new Map<string, RoleUsage>();
+  for (const id of readdirSync(dir)) {
+    const p = join(dir, id, "run.json");
+    if (!existsSync(p)) continue;
+    let r: RunRecord;
+    try {
+      r = readJson<RunRecord>(p);
+    } catch {
+      continue;
+    }
+    if (!r.role || (phase && r.phase !== phase)) continue;
+    const key = `${r.role}|${r.agent}|${r.model}`;
+    const u = out.get(key) ?? { role: r.role, agent: r.agent, model: r.model, runs: 0, wall_ms: 0, brief_bytes: 0, input_bytes: 0, result_bytes: 0, runs_with_tokens: 0, tokens: { input: 0, cached_input: 0, output: 0 } };
+    u.runs++;
+    u.wall_ms += r.wall_ms ?? 0;
+    u.brief_bytes += r.brief_bytes ?? 0;
+    u.input_bytes += r.input_bytes ?? 0;
+    u.result_bytes += r.result_bytes ?? 0;
+    if (r.usage) {
+      u.runs_with_tokens++;
+      u.tokens.input += r.usage.input;
+      u.tokens.cached_input += r.usage.cached_input;
+      u.tokens.output += r.usage.output;
+    }
+    out.set(key, u);
+  }
+  return [...out.values()].sort((a, b) => a.role.localeCompare(b.role) || a.model.localeCompare(b.model));
 }
 
 export function runPath(root: string, runId: string): string {

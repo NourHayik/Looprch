@@ -12,7 +12,9 @@ export type Task =
   | "revise"
   | "context_answer"
   | "debate"
+  | "rebuttal"
   | "design_review"
+  | "readback"
   | "implementation"
   | "repair"
   | "handover"
@@ -40,6 +42,10 @@ export interface BriefInput {
   gateIds: string[];
   /** Task review only: round number, review limit, reviewed tree, tree of the previous review, time budget. */
   reviewRound?: { n: number; of: number; tree: string | null; prevTree: string | null; timeout: string };
+  /** The run may not change files (read-only roles, and the Implementer's readback). */
+  readOnly?: boolean;
+  /** Debate rounds: this pass and the limit. */
+  debateRound?: { n: number; of: number };
 }
 
 const ROLE_FILE: Record<Role, string> = {
@@ -57,7 +63,9 @@ const TASK_DECISIONS: Record<Task, string[]> = {
   revise: ["plan_final"],
   context_answer: ["context_answer"],
   debate: ["findings", "no_findings", "needs_expansion"],
+  rebuttal: ["agree", "findings"],
   design_review: ["findings", "no_findings"],
+  readback: ["ready", "questions"],
   implementation: ["implemented", "needs_context"],
   repair: ["implemented", "needs_context"],
   handover: ["handover_ready"],
@@ -68,23 +76,28 @@ const TASK_DECISIONS: Record<Task, string[]> = {
 };
 
 const CONTRACT_FIELD =
-  '"contract": {"obligations": [{"id":"O-1","requirements":["R-001.01"],"kind":"behavior|invariant|boundary|interface|data|failure|production|procedure","statement":"the rule, decidable by a test","enforcement":"the single code path or structural constraint that enforces it","verify":"what the Tester must prove, with negative cases and variants","gates":["<gate id>"],"covers":["P-000/X-1 (incoming deferrals only)"]}], "deferrals": [{"id":"X-1","requirements":["…"],"what":"…","to_phase":"P-00N","interim":"fail-closed behavior in this phase"}], "work_packages": [{"id":"WP-1","title":"…","depends_on":[],"obligations":["O-1"],"files":[{"path":"app/…","action":"create|modify|delete","content":"what the file contains afterwards: classes, functions with signatures, keys, columns"}],"steps":["one concrete instruction per entry, in order"],"done_when":["a command or observation with its expected result"]}]}';
+  '"contract": {"obligations": [{"id":"O-1","requirements":["R-001.01"],"kind":"behavior|invariant|boundary|interface|data|failure|production|procedure","statement":"the rule, decidable by a test","rule":"boundary, invariant and failure: the closed condition (only X is accepted; everything else is rejected)","enforcement":"the single code path or structural constraint that enforces it","verify":"what the Tester must prove, with negative cases and variants","gates":["<gate id>"],"covers":["P-000/X-1 (incoming deferrals only)"]}], "deferrals": [{"id":"X-1","requirements":["…"],"what":"…","to_phase":"P-00N","interim":"fail-closed behavior in this phase"}], "decisions": [{"id":"AD-1","decision":"…","rationale":"…","rejected_alternatives":["…"],"requirements":["…"],"obligations":["O-1"]}], "interfaces": [{"id":"IF-1","file":"app/…","symbol":"Class::method","signature":"full signature with types","errors":["exception or error code and when"],"invariants":["…"]}], "work_packages": [{"id":"WP-1","title":"…","depends_on":[],"obligations":["O-1"],"decisions":["AD-1"],"interfaces":["IF-1"],"sources":["SEV3 document or requirement ids this package relies on"],"precision":"spec|full_content","files":[{"path":"app/…","action":"create|modify|delete","content":"what the file contains afterwards: classes, functions with signatures, keys, columns","blueprint":"true when plan.md carries the full file as ```<lang> blueprint=<path>"}],"steps":["one concrete instruction per entry, in order"],"done_when":["a command or observation with its expected result"],"tests":[{"id":"T-1","obligation":"O-1","kind":"positive|negative|boundary|adversarial","given":"…","when":"…","then":"…","file":"tests/…"}]}]}';
 const AMENDMENT_FIELD =
-  '"contract_amendment": {"obligations": [ {…same shape as a contract obligation, plus "resolves":["R-4"]} ], "deferrals": [ {… plus "resolves"} ], "work_packages": [ {…same shape as a work package; during implementation, every new obligation needs one} ], "retire": ["O-7"]}; for a repair design also "repair_packages": [{"id":"RP-1","title":"…","findings":["R-1"],"depends_on":[],"files":[{"path":"…","action":"create|modify|delete","content":"…"}],"steps":["…"],"done_when":["…"]}]';
+  '"contract_amendment": {"obligations": [ {…same shape as a contract obligation, plus "resolves":["R-4"]} ], "deferrals": [ {… plus "resolves"} ], "decisions": [ … ], "interfaces": [ … ], "work_packages": [ {…same shape as a work package; during implementation, every new obligation needs one} ], "retire": ["O-7"]}; for a repair design also "repair_packages": [{"id":"RP-1","title":"…","findings":["R-1"],"depends_on":[],"precision":"spec|full_content","files":[{"path":"…","action":"create|modify|delete","content":"…","blueprint":false}],"steps":["…"],"done_when":["…"],"tests":[{"id":"T-R1","obligation":"O-3","kind":"adversarial","given":"…","when":"…","then":"…","file":"tests/…"}]}]';
+const DEBATE_FINDING =
+  '{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…","refs":["O-2"],"evidence":"the packet quote or contract id that shows it","failure_scenario":"how a literal executor would go wrong","proposed_resolution":"the change that closes it"}';
 
 function fields(role: Role, task: Task): string {
   switch (role) {
     case "planner":
       if (task === "context_answer") return `${AMENDMENT_FIELD} (a repair design needs repair_packages, and an amendment for the findings the Delta names; both are optional for a context answer)`;
-      return `${CONTRACT_FIELD}${task === "synthesis" ? '; "debate_dispositions": [{"id":"D-1","decision":"accept|reject","reason":"…","refs":["O-3"]}] (one per Plan Debate finding)' : ""}; with needs_expansion: "expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]`;
+      return `${CONTRACT_FIELD}${task === "synthesis" || task === "revise" ? '; "debate_dispositions": [{"id":"D-1","decision":"accept|partial|reject","reason":"…","refs":["contract ids that carry the change (accept, partial)"],"evidence":"reject: the packet section, contract id or code that shows the item does not hold"}] (one per open debate item in the Delta)' : ""}; with needs_expansion: "expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]`;
     case "plan_debater":
-      return '"findings": [{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…","refs":["O-2"]}]';
+      if (task === "rebuttal") return `"verdicts": [{"id":"D-1","verdict":"resolved|conceded|upheld","note":"what you checked; for upheld, your counter-argument"}] (one per open item in the Delta), "findings": [${DEBATE_FINDING}] (new defects only)`;
+      if (task === "debate") return `"independent_risks": [{"risk":"a risky decision or boundary you derived from the packet before reading the plan","covered_by":["contract ids that answer it, or [] when the plan does not"]}], "findings": [${DEBATE_FINDING}]`;
+      return `"findings": [${DEBATE_FINDING}]`;
     case "implementer":
-      return '"files_changed": ["…"]; "work_package": "WP-1" (the package the Delta assigns, when it assigns one); after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed|needs_design","note":"what changed or why not","files":["paths your repair changed (required for fixed)"]}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]';
+      if (task === "readback") return '"packages": [{"id":"WP-1","questions":["anything you do not know how to do"],"decisions_needed":["anything you would have to choose yourself: a class, signature, library, algorithm, error behavior"],"would_create":[{"path":"…","symbols":["Class::method(…)"]}]}] (one per work package)';
+      return '"files_changed": ["…"]; "work_package": "WP-1" (the package the Delta assigns; for a chain of packages, "work_packages": ["WP-1","WP-2"]); "deviations": [{"file":"…","what":"…","why":"…"}] (every file you changed that the package does not list; [] when none); after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed|needs_design","note":"what changed or why not","files":["paths your repair changed (required for fixed)"]}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]';
     case "tester":
-      return '"tests_written": ["…"], "verifications": [{"id":"O-1 or R-1","status":"verified|failed|inspected","tests":["testcase name as in the JUnit report, or path::name"],"checks":[{"n":1,"tests":["…"]}] (review findings with Check lines: every check),"variants":["…"],"note":"…"}], "failures": [{"id":"T-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"tests_written": ["…"], "verifications": [{"id":"O-1, T-1 or R-1","status":"verified|failed|inspected","tests":["testcase name as in the JUnit report, or path::name"],"checks":[{"n":1,"tests":["…"]}] (review findings with Check lines: every check),"variants":["…"],"note":"…"}], "failures": [{"id":"F-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "reviewer":
-      return '"findings": [{"id":"R-1","severity":"high","summary":"the broken rule","files":["…"],"fix":"the condition the repair must meet","checks":["one concrete, testable acceptance check per line (required for high and critical)"],"owner":"implementer|tester","cause":"implementation|plan|requirement|cross_phase|test","obligations":["O-3"],"related":"R-2 (optional)","origin":"unfixed|regression|missed (re-reviews only)"}], "contract_review": [{"id":"O-1","status":"met|not_met"}] (first review: every obligation and deferral), "prior": [{"id":"R-1","status":"fixed|unfixed","failed_checks":[2]}] (re-reviews: every earlier finding in the Delta), "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"findings": [{"id":"R-1","severity":"high","summary":"the broken rule","files":["…"],"fix":"the condition the repair must meet","checks":["one concrete, testable acceptance check per line (required for high and critical)"],"owner":"implementer|tester","cause":"implementation|plan|requirement|cross_phase|test","obligations":["O-3"],"related":"R-2 (optional)","origin":"unfixed|regression|missed (re-reviews only)","repair":{"files":[{"path":"…","action":"modify","content":"what the file contains afterwards"}],"steps":["exact instruction"],"done_when":["command and expected result"]} (cause implementation: required)}], "contract_review": [{"id":"O-1","status":"met|not_met"}] (first review: every obligation, deferral, decision, contested debate item and deviation listed in the Delta), "files_reviewed": ["every changed file you read"], "prior": [{"id":"R-1","status":"fixed|unfixed","failed_checks":[2]}] (re-reviews: every earlier finding in the Delta), "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "worker":
       return '"evidence": [{"path":"…","lines":"10-20","note":"…"}]';
     default: {
@@ -109,7 +122,13 @@ function taskText(input: BriefInput): string {
       lines.push(`Write the implementation plan for ${input.phase}.`);
       break;
     case "synthesis":
-      lines.push("Synthesize the final plan from your plan and the single Plan Debate pass.");
+      lines.push(`Answer every open debate item in the Delta${input.debateRound ? ` (debate round ${input.debateRound.n} of ${input.debateRound.of})` : ""} and write the full revised plan and contract.`);
+      break;
+    case "rebuttal":
+      lines.push(`Judge the Planner's answers to the open debate items${input.debateRound ? ` (debate round ${input.debateRound.n} of ${input.debateRound.of})` : ""} against the revised plan and contract, then look for new defects in what changed.`);
+      break;
+    case "readback":
+      lines.push("Read every work package as the executor who will implement it. Do not implement anything and do not edit files. Report, per package, every question and every decision you would have to make yourself.");
       break;
     case "revise":
       lines.push("Revise the plan as the user asked (see Delta).");
@@ -118,7 +137,7 @@ function taskText(input: BriefInput): string {
       lines.push("Answer the context request or write the repair design in the Delta, from approved sources only.");
       break;
     case "debate":
-      lines.push("Critically review the plan and its contract once.");
+      lines.push(`Critically review the plan and its contract${input.debateRound ? ` (debate round ${input.debateRound.n} of ${input.debateRound.of}; the Planner answers every finding and you judge the answers in the next round)` : ""}. Write your independent risks from the packet before you read plan.md.`);
       break;
     case "design_review":
       lines.push("Challenge the Planner's repair design and its contract amendment once (see Delta). Do not re-review the code.");
@@ -209,12 +228,18 @@ export function assembleBrief(input: BriefInput): string {
   const tpl = readFileSync(join(packageRoot(), "assets", "templates", "brief.md"), "utf8");
   const inputs: string[] = [];
   let n = 1;
-  if (input.packet) inputs.push(`${n++}. \`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). Read all of it.`);
+  const packageRun = input.role === "implementer" && (input.task === "implementation" || input.task === "repair");
+  if (input.packet)
+    inputs.push(
+      packageRun
+        ? `${n++}. \`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). The package in the Delta is your instruction; open the packet only for the sources the package cites.`
+        : `${n++}. \`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). Read all of it.`,
+    );
   else if (input.phaseSource) inputs.push(`${n++}. \`${input.phaseSource}\` — current phase source.`);
   const rules = projectPaths(input.root).userRules;
   if (existsSync(rules)) inputs.push(`${n++}. \`.looprch/user-rules.md\` — project rules every role follows.`);
   for (const i of input.inputs) inputs.push(`${n++}. \`${i.path}\` — ${i.why}`);
-  const readOnly = READ_ONLY_ROLES.includes(input.role);
+  const readOnly = input.readOnly ?? READ_ONLY_ROLES.includes(input.role);
   const writeRule = readOnly
     ? "You are read-only: do not create, edit or delete any file. Looprch checks git status before and after."
     : input.role === "implementer"
@@ -235,6 +260,9 @@ export function assembleBrief(input: BriefInput): string {
     role_text: roleText(input.role, input.task),
     root: input.root,
     write_rule: writeRule,
+    read_rule: packageRun
+      ? "Read the package in the Delta completely and follow it. Open the other inputs where the package refers to them; the packet only for the sources the package cites."
+      : "Read every input listed below completely. Never summarize or skip the packet.",
     session_note: !input.resume
       ? ""
       : input.role === "reviewer" || input.role === "tester"

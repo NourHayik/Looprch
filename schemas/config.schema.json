@@ -25,7 +25,10 @@
         "run_attempts": { "type": "integer", "minimum": 1, "maximum": 5 },
         "dispatch_max_wait": { "$ref": "#/$defs/duration" },
         "expansion_rounds": { "type": "integer", "minimum": 0, "maximum": 5 },
-        "review_rounds": { "type": "integer", "minimum": 1, "maximum": 10 }
+        "review_rounds": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "debate_rounds": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Plan Debater passes on the initial plan (debate plus rebuttals), default 3" },
+        "readback_rounds": { "type": "integer", "minimum": 0, "maximum": 3, "description": "Executability readbacks by the Implementer's model before plan approval, default 2; 0 disables" },
+        "lineage_attempts": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Review reports of one finding lineage before the user is asked, default 2" }
       }
     },
     "approvals": {
@@ -39,7 +42,29 @@
       "required": ["env"],
       "properties": { "env": { "type": "object", "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" }, "additionalProperties": { "type": "string" } } }
     },
-    "integrations": { "type": "object", "required": ["commit_generated"], "properties": { "commit_generated": { "type": "boolean" } } },
+    "integrations": {
+      "type": "object",
+      "required": ["commit_generated"],
+      "properties": {
+        "commit_generated": { "type": "boolean" },
+        "e2e": {
+          "description": "Optional TesterArmy e2e gate (looprch e2e configure|enable|disable, /lr-e2e-test-init)",
+          "type": "object",
+          "required": ["enabled", "configured_at", "config", "bin", "args", "timeout", "env", "required_env", "phases"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "configured_at": { "type": ["string", "null"], "description": "Set by looprch e2e configure after its checks passed" },
+            "config": { "type": "string", "description": "e2e config file, relative to the project root" },
+            "bin": { "type": "string", "description": "e2e executable, relative to the project root" },
+            "args": { "type": "array", "items": { "type": "string" }, "description": "Selection arguments for e2e run (not --config, --reporter or --output)" },
+            "timeout": { "$ref": "#/$defs/duration" },
+            "env": { "type": "object", "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" }, "additionalProperties": { "type": "string" } },
+            "required_env": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" } },
+            "phases": { "oneOf": [{ "const": "all" }, { "type": "array", "items": { "type": "string", "pattern": "^P-\\d{3,}$" } }] }
+          }
+        }
+      }
+    },
     "spec": {
       "type": "object",
       "properties": {

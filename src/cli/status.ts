@@ -6,7 +6,8 @@ import { now } from "../core/clock.js";
 import { readEvents, type LrEvent } from "../core/journal.js";
 import { nextDescription } from "../core/lifecycle.js";
 import { projectPaths } from "../core/paths.js";
-import { loadRun } from "../core/runs.js";
+import { loadRun, usageSummary } from "../core/runs.js";
+import { ledgerSummary, loadLedger } from "../core/debate.js";
 import { loadState } from "../core/state.js";
 import { readManifest } from "../sev3/manifest.js";
 import { parse, projectRoot } from "./args.js";
@@ -53,10 +54,18 @@ export function buildStatus(root: string) {
     pending_question: st.pending_question,
     project_status: st.project.status,
     next: { action: nextDescription(st), summary: nextDescription(st) },
+    debate: c ? ledgerSummary(loadLedger(root, c.phase)) : null,
+    usage: usageSummary(root, c?.phase ?? null),
   };
 }
 
-export function humanStatus(s: ReturnType<typeof buildStatus>): string {
+function kb(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)} M` : n >= 1000 ? `${Math.round(n / 1000)} k` : String(n);
+}
+
+type Status = ReturnType<typeof buildStatus>;
+
+export function humanStatus(s: Omit<Status, "debate" | "usage"> & Partial<Pick<Status, "debate" | "usage">>): string {
   const lines = [`Looprch ${s.version} · project ${s.project.id ?? "?"} · spec ${s.spec.phases_total} phases (fingerprint ${s.spec.package_fingerprint?.slice(0, 4) ?? "—"}…) · ${s.spec.phases_closed} closed`];
   if (s.current) lines.push(`Phase ${s.current.phase} (${s.current.index}/${s.spec.phases_total}) "${s.current.title}"  stage: ${s.current.stage}  repair round ${s.current.round} (test/gate repairs ${s.current.test_repairs}/${s.current.cap})  review changes ${s.current.review_changes}/${s.current.review_cap}`);
   else lines.push(s.project_status === "done" ? "Project complete." : "No phase in progress.");
@@ -68,6 +77,8 @@ export function humanStatus(s: ReturnType<typeof buildStatus>): string {
   const blockers = s.flags.blocked ? `${s.flags.blocked.code}: ${s.flags.blocked.reason}` : s.flags.paused ? `paused: ${s.flags.paused.reason}` : s.flags.waiting ? `waiting until ${s.flags.waiting.until}` : "none";
   lines.push(`Blockers: ${blockers}${" ".repeat(4)}Next: ${s.next.summary}`);
   if (s.flags.blocked) lines.push(`Fix: ${s.flags.blocked.hint}`);
+  for (const u of s.usage ?? [])
+    lines.push(`Usage ${u.role} ${u.agent}/${u.model}: ${u.runs} run(s), ${Math.round(u.wall_ms / 60000)} min${u.runs_with_tokens ? `, tokens in ${kb(u.tokens.input)} (+${kb(u.tokens.cached_input)} cached) out ${kb(u.tokens.output)}` : ""}`);
   return lines.join("\n");
 }
 

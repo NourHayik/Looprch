@@ -61,7 +61,7 @@ describe("delegate dispatch", () => {
     const last = drive({ root: p.root, env: p.env, onAction: (a) => (a.action === "run_role" && a.role === "tester" ? "stop" : undefined) }).last;
     assert.equal(last.role, "tester");
     const impl = calls(p).filter((c) => c.role === "implementer");
-    assert.deepEqual(impl.map((c) => c.agent), ["opencode", "opencode", "codex"]);
+    assert.deepEqual(impl.map((c) => `${c.agent}:${c.task}`), ["opencode:readback", "opencode:readback", "codex:readback", "codex:implementation"], "the executability readback runs on the Implementer's agent first");
     const st = readJson(join(p.root, ".looprch/state.json"));
     assert.equal(st.assignments_history.at(-1).reason, "run_failed_fallback");
     p.s.cleanup();
@@ -136,7 +136,7 @@ describe("delegate dispatch", () => {
     const p = setupProject();
     p.setScenario([{ agent: "opencode", role: "implementer", status: "failed", stderr: "Error: 429 Too Many Requests" }]);
     drive({ root: p.root, env: p.env, onAction: (a) => (a.action === "run_role" && a.role === "tester" ? "stop" : undefined) });
-    assert.deepEqual(calls(p).filter((c) => c.role === "implementer").map((c) => c.agent), ["opencode", "codex"]);
+    assert.deepEqual(calls(p).filter((c) => c.role === "implementer").map((c) => `${c.agent}:${c.task}`), ["opencode:readback", "codex:readback", "codex:implementation"]);
     assert.ok(events(p).some((e) => e.type === "ratelimit.detected"));
     p.s.cleanup();
   });

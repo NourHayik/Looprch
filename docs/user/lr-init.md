@@ -17,8 +17,12 @@ later phases, new chats and other agents reuse it.
    manifest hash. A changed manifest asks again.
 4. **Roles**: for Planner, Plan Debater, Implementer, Tester, Reviewer and Worker you choose the
    agent, Direct or Delegate, the model (from `looprch models <agent>`, never invented), and
-   optional effort, timeout and fallbacks.
-5. **Validation**: `looprch config validate` must pass.
+   optional effort, timeout and fallbacks. Recommended: the strongest models for Planner, Plan
+   Debater and Reviewer, a Plan Debater from a different model family than the Planner, and a
+   cheaper Implementer.
+5. **E2E testing (optional)**: answer yes to set up the TesterArmy `e2e` gate now (the steps of
+   [/lr-e2e-test-init](e2e-testing.md)), or skip it; you can run `/lr-e2e-test-init` later.
+6. **Validation**: `looprch config validate` must pass.
 
 ## Equivalent commands
 
