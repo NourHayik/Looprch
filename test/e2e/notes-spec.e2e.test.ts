@@ -193,9 +193,9 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     cli(p, ["resume", "--note", "Implement validate_id exactly as the contract says"]);
     const r2 = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r2.last.action, "phase_closed");
-    const repairs = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-implementer-")).sort();
-    const lastRepair = repairs.map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).find((b) => b.includes("User note:"));
-    assert.ok(lastRepair, "the note reached a repair brief");
+    const runs = readdirSync(join(p.root, ".looprch/runs")).filter((d) => /^P-001-(implementer|planner)-/.test(d)).sort();
+    const noted = runs.map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).find((b) => b.includes("User note:"));
+    assert.ok(noted && /task=context_answer/.test(noted), "the note reached the Planner, who designs the granted round");
     p.s.cleanup();
   });
 
@@ -242,7 +242,7 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.equal(st.round, 3, "one review repair and two test repairs");
     cli(p, ["resume", "--note", "Fix T-1"]);
     const a = next(p);
-    assert.equal(`${a.role}:${a.task}`, "implementer:repair");
+    assert.equal(`${a.role}:${a.task}`, "planner:context_answer", "the granted round is a repair (designed by the Planner), never another review");
     p.s.cleanup();
   });
 
@@ -802,6 +802,41 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r.last.action, "phase_closed");
     assert.match(rejected(p, "planner")[0]!, /a repair design returns "repair_packages"/);
+    p.s.cleanup();
+  });
+
+  test("C-23 a test failure that comes back after the Implementer's own repair gets the Planner's repair packages", () => {
+    const p = setupProject();
+    p.setScenario([
+      { role: "tester", phase: "P-001", nth: 1, decision: "fail", failures: [{ id: "O-1", summary: "nested objects accept executable source" }] },
+      { role: "tester", phase: "P-001", nth: 2, decision: "fail", failures: [{ id: "O-1", summary: "nested objects still accept executable source" }] },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    assert.deepEqual(after(roleSeq(r), "tester:testing").slice(0, 7), ["tester:testing", "implementer:repair", "tester:testing", "planner:context_answer", "implementer:repair", "tester:testing", "reviewer:review"]);
+    const design = events(p).find((e) => e.type === "design.escalated");
+    assert.equal(design.data.reason, "test_repeat");
+    assert.deepEqual(design.data.findings, ["O-1"]);
+    assert.equal(design.data.debate, false);
+    const plannerBrief = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-planner-")).map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).find((b) => /task=context_answer/.test(b))!;
+    assert.match(plannerBrief, /the same tests or gates failed again/);
+    assert.match(plannerBrief, /- O-1: nested objects still accept executable source/);
+    p.s.cleanup();
+  });
+
+  test("C-24 a round granted after the repair limit is designed by the Planner", () => {
+    const p = setupProject({ config: { "limits.repair_rounds": "1" } });
+    p.setScenario([
+      { role: "tester", phase: "P-001", nth: 1, decision: "fail", failures: [{ id: "T-1", summary: "first problem" }] },
+      { role: "tester", phase: "P-001", nth: 2, decision: "fail", failures: [{ id: "T-2", summary: "second problem" }] },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.code, "repair_limit");
+    cli(p, ["resume"]);
+    const r2 = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r2.last.action, "phase_closed");
+    assert.deepEqual(roleSeq(r2).slice(0, 3), ["planner:context_answer", "implementer:repair", "tester:testing"]);
+    assert.ok(events(p).some((e) => e.type === "design.escalated" && e.data.reason === "test_repeat" && e.data.findings.includes("T-2")));
     p.s.cleanup();
   });
 

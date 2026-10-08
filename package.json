@@ -1,6 +1,6 @@
 {
   "name": "looprch",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Orchestrates coding agents phase by phase from a SEV3 project specification.",
   "license": "MIT",
   "repository": {

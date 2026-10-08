@@ -1206,9 +1206,9 @@ function designReason(c: NonNullable<State["current"]>, f: Finding): DesignState
  * Plan Debater challenges the design once when it amends the contract for a high or critical
  * finding, or replaces a design that did not hold.
  */
-function startDesign(e: Engine, ids: string[], reason: DesignState["reason"]): void {
+export function startDesign(e: Engine, ids: string[], reason: DesignState["reason"], known: Finding[] = []): void {
   const c = cur(e);
-  const list = ids.map((id) => c.review_findings.find((f) => f.id === id) ?? { id, summary: id }).filter(Boolean) as Finding[];
+  const list = ids.map((id) => c.review_findings.find((f) => f.id === id) ?? known.find((f) => f.id === id) ?? { id, summary: id });
   const redesign = list.filter((f) => lineageEntries(c, lineageOf(c, f.id)).some((l) => l.designs > 0)).map((f) => f.id);
   const amendIds = list.filter((f) => reason === "needs_design" || designReason(c, f) !== null).map((f) => f.id);
   const debate = redesign.length > 0 || list.some((f) => amendIds.includes(f.id) && (f.severity === "high" || f.severity === "critical"));
@@ -1220,6 +1220,7 @@ function startDesign(e: Engine, ids: string[], reason: DesignState["reason"]): v
     related: "some are new ways to break a rule an earlier finding already reported, so the rule's enforcement is not complete",
     needs_design: "the Implementer reported that the contract does not define how to repair them",
     repair_plan: "the Reviewer requested changes; the Implementer executes your repair packages literally",
+    test_repeat: "the same tests or gates failed again after the Implementer's own repair (or the repair limit was reached), so the repair needs your design; the ids below are the Tester's failures and failed gate runs",
   };
   c.deltas.planner = {
     kind: "context_answer",
@@ -1287,6 +1288,10 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
       c.deltas.implementer = { kind: "repair", text: `Repair round ${c.round} (tests/gates failed). Fix every problem below completely, including the same defect anywhere else in the phase diff:`, findings, paths };
       c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer repaired the problems below. Re-verify, keep the tests honest and update them only where they were wrong.`, findings };
       transition(e, "repairing");
+      const keys = [...new Set(findings.flatMap((f) => [f.id, ...(f.gate_id ? [f.gate_id] : [])]))];
+      const before = new Set(c.last_test_keys ?? []);
+      c.last_test_keys = keys;
+      if (findings.some((f) => before.has(f.id) || (f.gate_id && before.has(f.gate_id)))) startDesign(e, findings.map((f) => f.id), "test_repeat", findings);
     }
     if (used >= e.cfg.limits.repair_rounds + c.extra_rounds)
       block(e, "repair_limit", `Repair limit reached (${used} test/gate repair round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
@@ -1374,6 +1379,7 @@ function answerFinalReview(e: Engine, qid: string, option: string): void {
 /** After passing gates: review, or go straight to handover once the review limit is reached. */
 function afterGatesPassed(e: Engine): void {
   const c = cur(e);
+  c.last_test_keys = [];
   if (!reviewsExhausted(e)) {
     transition(e, "reviewing");
     return;
@@ -2033,7 +2039,12 @@ export function resume(e: Engine, note: string | null): string[] {
       const v = verifyPackage(e.root);
       if (!v.ok) throw new LrError("spec_changed", "The package still does not verify", "Reseal an authorized amendment with SEV3, then run looprch init discover --accept-fingerprint");
     }
-    if (code === "repair_limit" && st.current) st.current.extra_rounds++;
+    if (code === "repair_limit" && st.current) {
+      st.current.extra_rounds++;
+      const c = st.current;
+      const open = c.deltas.implementer?.findings ?? [];
+      if (c.stage === "repairing" && c.repair_source === "test" && !c.design && !c.work && open.length) startDesign(e, open.map((f) => f.id), "test_repeat", open);
+    }
     if (code === "expansion_limit" && st.current) st.current.expansion_round = Math.max(0, st.current.expansion_round - 1);
     if (code === "result_invalid" && st.current) st.current.reask_count = 0;
     if ((code === "run_failed" || code === "cli_missing") && st.current) for (const k of Object.keys(st.current.attempts)) st.current.attempts[k] = 0;

@@ -106,7 +106,7 @@ export interface DesignState {
   findings: string[];
   step: "design" | "debate" | "revise";
   debate: boolean;
-  reason: "plan_cause" | "unfixed" | "related" | "needs_design" | "repair_plan";
+  reason: "plan_cause" | "unfixed" | "related" | "needs_design" | "repair_plan" | "test_repeat";
   /** Findings whose design must also amend the contract (the others only need repair packages). */
   amend?: string[];
 }
@@ -185,6 +185,8 @@ export interface Current {
   tester_verifications?: Verification[];
   /** Packages the Implementer executes one run at a time: the plan's work packages, or a review round's repair packages. */
   work?: { kind: "implementation" | "repair"; items: WorkItem[]; done: string[]; base?: Delta | null } | null;
+  /** Gate ids and failure ids of the last test/gate repair, to detect a failure that came back. */
+  last_test_keys?: string[];
   /** Repair packages of the repair design in progress (the latest Planner answer). */
   pending_repair_packages?: WorkItem[] | null;
   /** Ids the Implementer's latest resolution reports as not_fixed since the last review (carried to the review, not into test repairs). */

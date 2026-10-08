@@ -2,6 +2,23 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.6.1 - 2026-10-08
+
+The first CoreBit P-001 run on 0.6.0 (Implementer DeepSeek, Tester Grok 4.7) showed the new
+flow working. DeepSeek executed all 10 work packages, and the Tester caught defects before any
+review: 8, then 2, then 1, then 1. But the last failure kept coming back. The validator still
+accepted executable strings inside nested objects without a schema, while the Implementer patched
+sibling fields three times; the phase stopped at `repair_limit`. Failures caught by tests and
+gates went straight back to the cheap Implementer, without the Planner's design.
+
+### Changed
+
+- When a test or gate failure comes back after the Implementer's own repair (the same failure
+  id or gate), the Planner first writes repair packages for that round, as for review findings
+  (`[REPAIR DESIGN]`, reason `test_repeat`).
+- `looprch resume` after `repair_limit` in a test repair opens a Planner repair design for the
+  open failures. A resume note goes to that Planner run.
+
 ## 0.6.0 - 2026-10-07
 
 Looprch's goal is that an expensive model (the Planner, Plan Debater and Reviewer) makes every
