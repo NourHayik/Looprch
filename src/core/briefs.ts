@@ -238,6 +238,7 @@ export function assembleBrief(input: BriefInput): string {
   else if (input.phaseSource) inputs.push(`${n++}. \`${input.phaseSource}\` — current phase source.`);
   const rules = projectPaths(input.root).userRules;
   if (existsSync(rules)) inputs.push(`${n++}. \`.looprch/user-rules.md\` — project rules every role follows.`);
+  else inputs.push(`${n++}. \`.looprch/user-rules.md\` — does not exist: this project has no additional user rules. This is Looprch's authoritative answer; do not request the file.`);
   for (const i of input.inputs) inputs.push(`${n++}. \`${i.path}\` — ${i.why}`);
   const readOnly = input.readOnly ?? READ_ONLY_ROLES.includes(input.role);
   const writeRule = readOnly

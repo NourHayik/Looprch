@@ -36,12 +36,12 @@ describe("briefs", () => {
     assert.match(b, /`plan_ready`, `needs_expansion`/);
   });
 
-  test("user-rules.md is listed when present", () => {
+  test("user-rules.md is listed when present, and its absence is stated (a spec may require reading it)", () => {
     const root = tmp();
     mkdirSync(join(root, ".looprch"), { recursive: true });
     writeFileSync(join(root, ".looprch/user-rules.md"), "rules");
-    assert.match(assembleBrief(input({ root })), /\.looprch\/user-rules\.md/);
-    assert.doesNotMatch(assembleBrief(input()), /user-rules/);
+    assert.match(assembleBrief(input({ root })), /`\.looprch\/user-rules\.md` — project rules every role follows/);
+    assert.match(assembleBrief(input()), /`\.looprch\/user-rules\.md` — does not exist: this project has no additional user rules/);
   });
 
   test("closed handover pointers and delta findings appear", () => {

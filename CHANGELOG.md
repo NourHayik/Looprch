@@ -2,6 +2,23 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.7.1 - 2026-10-08
+
+### Fixed
+
+- **The validation run on CoreBit2 blocked at its first planning step** (`config_invalid`, with
+  no hint).
+  - **Cause:** the package's `phases/AGENTS.md` and `R-001.04` require reading
+    `.looprch/user-rules.md`. The file does not exist, and briefs said nothing about it. The
+    Planner correctly refused to invent rules and asked for the file as an expansion. Looprch then
+    passed the path to the SEV3 toolkit, which failed.
+  - **Briefs** now always state the file's status. When it is absent, the brief says the project
+    has no additional user rules, as Looprch's authoritative answer.
+  - **Expansion requests** must name a SEV3 document id (or a requirement id a document carries)
+    or a phase id. Anything else is re-asked with the valid ids and guidance, instead of blocking
+    the phase.
+  - **Toolkit failures:** an expansion the toolkit still cannot build blocks with a hint.
+
 ## 0.7.0 - 2026-10-08
 
 Protocol 4. The evaluation of CoreBit P-001 (`research/10_corebit_p001_evaluation.md`) found

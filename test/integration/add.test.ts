@@ -58,7 +58,7 @@ describe("looprch add / remove / list", () => {
     const { s, proj } = setup();
     const r = runCli(["add", proj, "--agents", "cursor", "--yes", "--json"], { env: s.env });
     assert.equal(r.json.link_mode[".agents/skills"], "copy");
-    assert.equal(readFileSync(join(proj, ".agents/skills/lr-init/.looprch-version"), "utf8").trim(), "0.7.0");
+    assert.equal(readFileSync(join(proj, ".agents/skills/lr-init/.looprch-version"), "utf8").trim(), "0.7.1");
     s.cleanup();
   });
 

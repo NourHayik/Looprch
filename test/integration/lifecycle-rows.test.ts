@@ -117,6 +117,20 @@ describe("lifecycle transition rows", () => {
     p.s.cleanup();
   });
 
+  test("T-planning: an expansion request for something that is not a SEV3 source is re-asked, not a block (CoreBit2)", () => {
+    const p = setupProject({ roles: { ...defaultRolesDelegatePlanner() } });
+    p.setScenario([
+      { role: "planner", phase: "P-001", task: "planning", nth: 1, decision: "needs_expansion", final: 'Need rules.\n\n```looprch-result\n{"role":"planner","decision":"needs_expansion","expansion_requests":[{"kind":"document","id":".looprch/user-rules.md","question":"Provide the user rules","reason":"the spec requires them"}]}\n```' },
+    ]);
+    const a = until(p, (x) => x.action === "run_role" && x.role === "plan_debater");
+    assert.equal(a.role, "plan_debater", JSON.stringify(a));
+    const rejected = readFileSync(join(p.root, ".looprch/events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.type === "result.rejected");
+    assert.match(rejected.data.errors.join(";"), /expansion requests must name SEV3 document ids .*not: document \.looprch\/user-rules\.md/);
+    const brief = readFileSync(join(p.root, ".looprch/runs/P-001-planner-1/brief.md"), "utf8");
+    assert.match(brief, /`\.looprch\/user-rules\.md` — does not exist: this project has no additional user rules/);
+    p.s.cleanup();
+  });
+
   test("T-planning: expansion limit blocks", () => {
     const p = setupProject({ roles: defaultRolesDelegatePlanner(), config: { "limits.expansion_rounds": "0" } });
     p.setScenario([{ role: "planner", decision: "needs_expansion", final: '```looprch-result\n{"role":"planner","decision":"needs_expansion","expansion_requests":[{"kind":"document","id":"F-NOTES","question":"q","reason":"r"}]}\n```' }]);

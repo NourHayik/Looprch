@@ -1177,6 +1177,7 @@ function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: 
   if (!c) return null;
   const contract = loadContract(e.root, c.phase);
   const problems: string[] = [];
+  if (r.decision === "needs_expansion") problems.push(...expansionProblems(e, r.expansion_requests ?? []));
   switch (run.task) {
     case "planning":
     case "synthesis":
@@ -1328,6 +1329,23 @@ function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: 
       break;
   }
   return joinProblems(problems);
+}
+
+/**
+ * Expansion requests name SEV3 sources only: a document id (or a requirement id a document
+ * carries) or a phase id of the manifest. Anything else (a project file, a path under .looprch/)
+ * is not a source the toolkit can add; the role is asked again instead of blocking the phase.
+ */
+function expansionProblems(e: Engine, requests: ExpansionRequest[]): string[] {
+  if (!requests.length) return ['decision needs_expansion needs "expansion_requests" naming SEV3 document or phase ids'];
+  const docs = new Set(e.manifest.documents.flatMap((d) => [d.id, ...d.ids]));
+  const phases = new Set(e.manifest.phases.map((p) => p.id));
+  const bad = requests.filter((x) => (x.kind === "document" ? !docs.has(x.id) : !phases.has(x.id))).map((x) => `${x.kind} ${x.id}`);
+  if (!bad.length) return [];
+  const sample = e.manifest.documents.slice(0, 12).map((d) => d.id).join(", ");
+  return [
+    `expansion requests must name SEV3 document ids (from phases/manifest.json, for example ${sample}) or phase ids; not: ${bad.join(", ")}. Project files are read directly from the repository, and .looprch/user-rules.md is listed in your inputs when it exists (an absent file means the project has no additional user rules). If a source the plan needs does not exist, decide the behavior in the plan (or defer it with a fail-closed interim) instead of requesting it.`,
+  ];
 }
 
 /** What a first review must judge in contract_review: obligations, deferrals, decisions, contested debate items, Implementer deviations. */
@@ -2032,7 +2050,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       const paths = executeExpansions(e, role, r.expansion_requests ?? []);
       c.deltas[role] = { kind: "expansion", text: "The extra sources you asked for (exact original text; they change no scope):", paths };
     } catch (err) {
-      block(e, (err as LrError).code === "spec_changed" ? "spec_changed" : "config_invalid", errorMessage(err), (err as LrError).hint ?? "");
+      block(e, (err as LrError).code === "spec_changed" ? "spec_changed" : "config_invalid", errorMessage(err), (err as LrError).hint ?? `The SEV3 toolkit could not build the expansion the ${role} asked for (see .looprch/runs/${run.run_id}/final.md). Run looprch resume to run the ${role} again.`);
     }
     return true;
   };
