@@ -185,6 +185,8 @@ export interface Current {
   tester_verifications?: Verification[];
   /** Packages the Implementer executes one run at a time: the plan's work packages, or a review round's repair packages. */
   work?: { kind: "implementation" | "repair"; items: WorkItem[]; done: string[]; base?: Delta | null } | null;
+  /** Tester-only rounds for unbacked or stale verifications before the next review (own budget, limits.repair_rounds). */
+  evidence_rounds?: number;
   /** Gate ids and failure ids of the last test/gate repair, to detect a failure that came back. */
   last_test_keys?: string[];
   /** Repair packages of the repair design in progress (the latest Planner answer). */

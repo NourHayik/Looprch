@@ -840,6 +840,19 @@ describe("e2e: the phase contract and convergence (0.5.0)", { concurrency: 3 }, 
     p.s.cleanup();
   });
 
+  test("C-25 Tester evidence rounds have their own budget; they do not use up the Implementer's test repairs", () => {
+    const p = setupProject({ config: { "limits.repair_rounds": "1" } });
+    p.setScenario([
+      { role: "tester", phase: "P-001", nth: 1, decision: "fail", failures: [{ id: "T-1", summary: "a defect" }] },
+      { role: "tester", phase: "P-001", nth: 2, bad_tests: true },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    assert.deepEqual(after(roleSeq(r), "tester:testing").slice(0, 5), ["tester:testing", "implementer:repair", "tester:testing", "tester:testing", "reviewer:review"]);
+    assert.ok(events(p).some((e) => e.type === "evidence.unbacked"));
+    p.s.cleanup();
+  });
+
   test("C-15 a phase started on protocol 1 without a contract pauses, then resumes and closes", () => {
     const p = setupProject();
     drive({ root: p.root, env: p.env, onAction: stopAt((a) => a.action === "run_role" && a.role === "implementer") });

@@ -35,6 +35,7 @@ export function buildStatus(root: string) {
           round: c.round,
           cap: cfg.limits.repair_rounds + c.extra_rounds,
           test_repairs: c.test_repairs ?? 0,
+          evidence_rounds: c.evidence_rounds ?? 0,
           review_changes: c.review_changes ?? 0,
           review_cap: reviewRounds(cfg) + (c.extra_reviews ?? 0),
           final_review_pending: !!c.final_review_pending,

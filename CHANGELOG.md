@@ -2,6 +2,18 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.6.2 - 2026-10-08
+
+### Fixed
+
+- In CoreBit P-001, the Planner's test-repeat design worked: DeepSeek executed the repair
+  package, the Tester passed and every gate was green. The phase still stopped at
+  `repair_limit`, because one unbacked Tester claim needed a Tester-only evidence round, and that
+  round shared the budget the Implementer's test repairs had used up. The two loops measure
+  different things. Tester evidence rounds now have their own budget (`limits.repair_rounds`,
+  reset before each review; `status --json` shows `current.evidence_rounds`) and no longer count
+  as test repairs.
+
 ## 0.6.1 - 2026-10-08
 
 The first CoreBit P-001 run on 0.6.0 (Implementer DeepSeek, Tester Grok 4.7) showed the new

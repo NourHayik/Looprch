@@ -1274,8 +1274,9 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   c.designed_this_round = [];
   if (source === "test") {
     c.work = null;
-    const used = c.test_repairs ?? 0;
-    c.test_repairs = used + 1;
+    const used = testerOnly ? (c.evidence_rounds ?? 0) : (c.test_repairs ?? 0);
+    if (testerOnly) c.evidence_rounds = used + 1;
+    else c.test_repairs = used + 1;
     if (testerOnly) {
       delete c.deltas.implementer;
       c.deltas.tester = {
@@ -1294,7 +1295,7 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
       if (findings.some((f) => before.has(f.id) || (f.gate_id && before.has(f.gate_id)))) startDesign(e, findings.map((f) => f.id), "test_repeat", findings);
     }
     if (used >= e.cfg.limits.repair_rounds + c.extra_rounds)
-      block(e, "repair_limit", `Repair limit reached (${used} test/gate repair round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
+      block(e, "repair_limit", `Repair limit reached (${used} ${testerOnly ? "Tester evidence" : "test/gate repair"} round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
     return;
   }
   const finalRepair = reviewsExhausted(e);
@@ -1380,6 +1381,7 @@ function answerFinalReview(e: Engine, qid: string, option: string): void {
 function afterGatesPassed(e: Engine): void {
   const c = cur(e);
   c.last_test_keys = [];
+  c.evidence_rounds = 0;
   if (!reviewsExhausted(e)) {
     transition(e, "reviewing");
     return;
