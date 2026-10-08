@@ -2,6 +2,42 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.7.2 - 2026-10-08
+
+In the CoreBit2 validation run on 0.7.1, 3 of the first 7 expensive runs were re-asks:
+
+- the Planner forgot two blueprint blocks;
+- the Kimi Debater could not page past line 1,045 of a 1,119-line packet, never reached the plan,
+  and returned `needs_expansion` without sources;
+- a synthesis put 26 files into one package.
+
+Every re-ask repeats a whole Planner or Debater run.
+
+### Added
+
+- `looprch check <run_id> [--stdin | --file <path>]` applies the checks Looprch runs when a role
+  finishes, without changing anything: the result block, its shape, the task's decisions, and the
+  phase rules (contract coverage, executability, plan lint, dispositions, verdicts, verifications,
+  review coverage). Every brief ends with a self-check step.
+- **The Planner's report file.** For plan, synthesis, revise and repair-design tasks, the Planner
+  writes its report to `.looprch/runs/<run_id>/report.md` and runs `looprch check`. It fixes the
+  problems with small edits, not a full re-run, then ends with a short message. Looprch reads the
+  report file when the final message has no result block.
+- **Input sizes.** Inputs over 400 lines show their size and line count, with a hint to read by
+  line range to the end. The Plan Debater reads the plan and the contract before the packet.
+
+### Changed (the plan debate, from review-skills' debate-review)
+
+- **Findings:** Plan Debater findings name a trigger and a wrong result. They may carry
+  `confidence` (0 to 1); findings below 0.5 are not debated.
+- **Upheld verdicts:** an `upheld` verdict needs a `note` quoting the step, contract field or
+  packet line that still allows the failure. A bare disagreement is a concession.
+- **Rebuttal findings:** new findings in a rebuttal are a gap sweep: high or critical only, in
+  what the revision changed.
+- **review-skills itself is not used** (D-32). `debate-review` reviews a git diff and posts to
+  GitHub, GitLab or Azure; it reads models from delegate-setup lanes and requires `--read-only`
+  relays. Its three passes never revise the plan.
+
 ## 0.7.1 - 2026-10-08
 
 ### Fixed

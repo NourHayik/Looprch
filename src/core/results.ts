@@ -46,6 +46,8 @@ export interface ResultFinding {
   failure_scenario?: string;
   /** Plan Debater: the change that would close it. */
   proposed_resolution?: string;
+  /** Plan Debater: 0 to 1; findings below 0.5 are dropped. */
+  confidence?: number;
   /** Reviewer, implementation cause: the executable repair. */
   repair?: ReviewerRepair;
 }
@@ -146,6 +148,7 @@ function checkList(errors: string[], obj: Record<string, unknown>, key: string, 
 
 const finding = (reviewer: boolean, debater = false) => (x: unknown) => {
   if (!isObject(x)) return "must be an object";
+  if (debater && x.confidence !== undefined && !(typeof x.confidence === "number" && x.confidence >= 0 && x.confidence <= 1)) return `${String(x.id ?? "?")}: confidence must be a number from 0 to 1`;
   if (debater)
     for (const k of ["evidence", "failure_scenario", "proposed_resolution"])
       if (!isNonEmptyString(x[k])) return `${String(x.id ?? "?")}: ${k} is required (evidence: the packet quote or contract id; failure_scenario: how a literal executor would go wrong; proposed_resolution: the change that closes it)`;
@@ -228,7 +231,11 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       break;
     case "plan_debater":
       checkList(errors, raw, "findings", finding(false, true));
-      checkList(errors, raw, "verdicts", (x) => (isObject(x) && isNonEmptyString(x.id) && oneOf(x.verdict, VERDICTS) ? null : `needs id and verdict (${VERDICTS.join("|")})`));
+      checkList(errors, raw, "verdicts", (x) => {
+        if (!isObject(x) || !isNonEmptyString(x.id) || !oneOf(x.verdict, VERDICTS)) return `needs id and verdict (${VERDICTS.join("|")})`;
+        if (x.verdict === "upheld" && !isNonEmptyString(x.note)) return `${x.id}: an upheld verdict needs "note": the step, contract field or packet line that still lets the failure happen`;
+        return null;
+      });
       checkList(errors, raw, "independent_risks", (x) => (isObject(x) && isNonEmptyString(x.risk) && isStringArray(x.covered_by) ? null : 'needs {"risk", "covered_by": [contract ids, or [] when the plan does not cover it]}'));
       if (raw.decision === "findings" && (!Array.isArray(raw.findings) || raw.findings.length === 0) && !(Array.isArray(raw.verdicts) && raw.verdicts.some((v) => isObject(v) && v.verdict === "upheld")))
         errors.push("decision findings needs a non-empty findings list (or, in a rebuttal, an upheld verdict)");

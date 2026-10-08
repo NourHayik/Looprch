@@ -230,6 +230,10 @@ describe("result blocks", () => {
     assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", verdicts: [{ id: "D-1", verdict: "upheld", note: "still open" }] }).ok, true, "an upheld verdict alone keeps the debate going");
     assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", verdicts: [{ id: "D-1", verdict: "resolved" }] }).ok, false);
     assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "agree", verdicts: [{ id: "D-1", verdict: "maybe" }] }).ok, false);
+    const bareUpheld = validateResult("plan_debater", { role: "plan_debater", decision: "findings", verdicts: [{ id: "D-1", verdict: "upheld" }] });
+    assert.match(!bareUpheld.ok ? bareUpheld.errors.join(";") : "", /D-1: an upheld verdict needs "note"/);
+    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", findings: [{ ...f, confidence: 1.5 }] }).ok, false);
+    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", findings: [{ ...f, confidence: 0.4 }] }).ok, true, "a low-confidence finding is valid; Looprch drops it from the debate");
     assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "no_findings", independent_risks: [{ risk: "r" }] }).ok, false);
   });
   test("readback lists packages; ready has no questions; deviations are shaped", () => {

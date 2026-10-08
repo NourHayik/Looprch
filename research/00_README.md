@@ -65,6 +65,8 @@ taken after reviewing those requirements. Every such change is listed in the dec
 | D-30 | Optional E2E testing uses the open-source TesterArmy `e2e` runner as an extra gate (`LR-E2E`) in the gating stage, after the SEV3 gates pass and never twice on one tree; it is configured with `looprch e2e configure` or `/lr-e2e-test-init`, and enabled only after configure passed. The cloud `testerarmy` CLI is not supported (no localhost access). | User request + spike S-11 (0.7.0) |
 | D-31 | guard-skills is not integrated: prompt-only content that overlaps existing role rules and does not address the observed failures. Two test-quality rules were adopted into the Tester prompt, and the skip/focus check is deterministic. | Research (0.7.0) |
 
+| D-32 | review-skills' `debate-review` is not used for plans: it reviews a git diff (an empty diff is an error), anchors findings to changed lines, posts to a forge, takes models from delegate-setup lanes (against D-15), accepts only `--read-only` relays (excludes Kimi), and its main/debate/rebuttal passes never revise the plan. Its debate bar is adopted in Looprch's own debate: a named trigger and wrong result, an optional confidence floor of 0.5, an `upheld` verdict needs quoted evidence, rebuttal findings are a high/critical gap sweep. Re-asks are prevented by `looprch check` (the acceptance checks without side effects) and the Planner's report file. | User request + CoreBit2 run 2 (0.7.2) |
+
 ## Lessons from earlier builds (evidence, not code to port)
 
 Looprch 5.x (in Corebit at 5.3.2) had a 1,529-line installer, a 1,036-line kernel, SQLite control

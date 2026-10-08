@@ -80,7 +80,7 @@ const CONTRACT_FIELD =
 const AMENDMENT_FIELD =
   '"contract_amendment": {"obligations": [ {…same shape as a contract obligation, plus "resolves":["R-4"]} ], "deferrals": [ {… plus "resolves"} ], "decisions": [ … ], "interfaces": [ … ], "work_packages": [ {…same shape as a work package; during implementation, every new obligation needs one} ], "retire": ["O-7"]}; for a repair design also "repair_packages": [{"id":"RP-1","title":"…","findings":["R-1"],"depends_on":[],"precision":"spec|full_content","files":[{"path":"…","action":"create|modify|delete","content":"…","blueprint":false}],"steps":["…"],"done_when":["…"],"tests":[{"id":"T-R1","obligation":"O-3","kind":"adversarial","given":"…","when":"…","then":"…","file":"tests/…"}]}]';
 const DEBATE_FINDING =
-  '{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…","refs":["O-2"],"evidence":"the packet quote or contract id that shows it","failure_scenario":"how a literal executor would go wrong","proposed_resolution":"the change that closes it"}';
+  '{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…","refs":["O-2"],"evidence":"the packet quote or contract id that shows it","failure_scenario":"the trigger and the wrong result a literal executor would produce","proposed_resolution":"the change that closes it","confidence":0.8}';
 
 function fields(role: Role, task: Task): string {
   switch (role) {
@@ -209,7 +209,24 @@ function deltaText(d: Delta | null, note: string | null): string {
   return lines.join("\n");
 }
 
-function outputContract(role: Role, task: Task): string {
+/** Tasks whose report is large enough that a role writes it to its report file and fixes it in place. */
+const REPORT_FILE_TASKS = new Set<Task>(["planning", "synthesis", "revise", "context_answer"]);
+
+function selfCheck(input: BriefInput): string[] {
+  const check = `looprch check ${input.runId} --root ${input.root}`;
+  if (input.role === "planner" && REPORT_FILE_TASKS.has(input.task))
+    return [
+      "",
+      `Self-check before you end (it saves a rejected run): write your complete report, the markdown and the looprch-result block, to \`.looprch/runs/${input.runId}/report.md\` (the only file you may write), then run \`${check}\`. It applies every check Looprch applies when you finish (contract coverage, executability, the plan lint, blueprints, dispositions). Fix each problem it lists by editing that file, and run it again until it prints ok. Then end with a short final message; Looprch reads the report file.`,
+    ];
+  return [
+    "",
+    `Self-check before you end (it saves a rejected run): pipe your looprch-result block into \`${check} --stdin\` (the block alone is enough) and fix each problem it lists. If you cannot run commands, skip this.`,
+  ];
+}
+
+function outputContract(input: BriefInput): string {
+  const { role, task } = input;
   const decisions = TASK_DECISIONS[task].filter((d) => (DECISIONS[role] as readonly string[]).includes(d));
   return [
     "Write your report in Markdown (it is saved as the stage artifact). Then end your final message with exactly one fenced block:",
@@ -221,7 +238,19 @@ function outputContract(role: Role, task: Task): string {
     `- decision: one of ${decisions.map((d) => `\`${d}\``).join(", ")}`,
     `- fields: ${fields(role, task)}`,
     "- The block must be valid JSON. Nothing may follow it.",
+    ...(task === "adhoc_review" || task === "worker" ? [] : selfCheck(input)),
   ].join("\n");
+}
+
+/** Size of an input file for the brief: bytes and lines, so a role with a paged reader knows where the end is. */
+function sizeNote(root: string, rel: string): string {
+  try {
+    const text = readFileSync(join(root, rel), "utf8");
+    const lines = text.split("\n").length;
+    return lines > 400 ? ` [${text.length} bytes, ${lines} lines: if your file tool returns a part, read on by line range until line ${lines}]` : "";
+  } catch {
+    return "";
+  }
 }
 
 export function assembleBrief(input: BriefInput): string {
@@ -229,17 +258,20 @@ export function assembleBrief(input: BriefInput): string {
   const inputs: string[] = [];
   let n = 1;
   const packageRun = input.role === "implementer" && (input.task === "implementation" || input.task === "repair");
-  if (input.packet)
-    inputs.push(
-      packageRun
-        ? `${n++}. \`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). The package in the Delta is your instruction; open the packet only for the sources the package cites.`
-        : `${n++}. \`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). Read all of it.`,
-    );
-  else if (input.phaseSource) inputs.push(`${n++}. \`${input.phaseSource}\` — current phase source.`);
+  const packetLine = input.packet
+    ? packageRun
+      ? `\`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). The package in the Delta is your instruction; open the packet only for the sources the package cites.`
+      : `\`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). Read all of it.${sizeNote(input.root, input.packet.path)}`
+    : input.phaseSource
+      ? `\`${input.phaseSource}\` — current phase source.`
+      : null;
+  const planFirst = input.role === "plan_debater";
+  if (packetLine && !planFirst) inputs.push(`${n++}. ${packetLine}`);
   const rules = projectPaths(input.root).userRules;
   if (existsSync(rules)) inputs.push(`${n++}. \`.looprch/user-rules.md\` — project rules every role follows.`);
   else inputs.push(`${n++}. \`.looprch/user-rules.md\` — does not exist: this project has no additional user rules. This is Looprch's authoritative answer; do not request the file.`);
-  for (const i of input.inputs) inputs.push(`${n++}. \`${i.path}\` — ${i.why}`);
+  for (const i of input.inputs) inputs.push(`${n++}. \`${i.path}\` — ${i.why}${sizeNote(input.root, i.path)}`);
+  if (packetLine && planFirst) inputs.push(`${n++}. ${packetLine} Read the plan and the contract above first; the packet is what you check them against.`);
   const readOnly = input.readOnly ?? READ_ONLY_ROLES.includes(input.role);
   const writeRule = readOnly
     ? "You are read-only: do not create, edit or delete any file. Looprch checks git status before and after."
@@ -247,7 +279,9 @@ export function assembleBrief(input: BriefInput): string {
       ? "Change application code only; never write or edit tests."
       : input.role === "tester"
         ? "Change test code (and gate evidence) only; never edit application code."
-        : "Do not edit files.";
+        : input.role === "planner" && REPORT_FILE_TASKS.has(input.task)
+          ? `Do not edit project files. The one file you may write is your report, \`.looprch/runs/${input.runId}/report.md\` (see the self-check below).`
+          : "Do not edit files.";
   const vars: Record<string, string> = {
     role_title: input.role.replace("_", " "),
     role: input.role,
@@ -272,7 +306,7 @@ export function assembleBrief(input: BriefInput): string {
     inputs: inputs.join("\n") || "(none)",
     task_text: taskText(input),
     delta: deltaText(input.delta, input.userNote),
-    output_contract: outputContract(input.role, input.task),
+    output_contract: outputContract(input),
   };
   return tpl.replace(/\{\{(\w+)\}\}/g, (_, k: string) => vars[k] ?? "");
 }

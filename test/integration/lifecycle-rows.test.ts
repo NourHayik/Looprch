@@ -131,6 +131,29 @@ describe("lifecycle transition rows", () => {
     p.s.cleanup();
   });
 
+  test("T-check: looprch check applies the acceptance checks without a side effect; a report file replaces a long final message", () => {
+    const p = setupProject({ roles: { ...defaultRolesDelegatePlanner() } });
+    p.setScenario([{ role: "planner", phase: "P-001", task: "planning", nth: 1, report_file: true }]);
+    const a = until(p, (x) => x.action === "run_role" && x.role === "planner");
+    const bad = runCli(["check", a.run_id, "--stdin", "--json"], { cwd: p.root, env: p.env, input: '```looprch-result\n{"role":"planner","decision":"plan_ready","contract":{"obligations":[],"deferrals":[],"decisions":[],"interfaces":[],"work_packages":[]}}\n```' });
+    assert.equal(bad.code, 1);
+    assert.match(bad.json.errors.join(";"), /every mapped requirement of P-001 needs an obligation or a deferral/);
+    const missing = runCli(["check", a.run_id, "--json"], { cwd: p.root, env: p.env });
+    assert.equal(missing.json.error.code, "no_report");
+    assert.equal(readJson(join(p.root, `.looprch/runs/${a.run_id}/run.json`)).status, "issued", "check changes nothing");
+    const brief = readFileSync(join(p.root, a.brief), "utf8");
+    assert.match(brief, new RegExp(`write your complete report, the markdown and the looprch-result block, to \`\\.looprch/runs/${a.run_id}/report\\.md\``));
+    assert.match(brief, new RegExp(`looprch check ${a.run_id} --root `));
+    cli(p, ["dispatch", a.run_id]);
+    const d = until(p, (x) => x.action === "run_role" && x.role === "plan_debater");
+    assert.equal(d.role, "plan_debater", "the report file was accepted although the final message had no result block");
+    const debaterBrief = readFileSync(join(p.root, d.brief), "utf8");
+    assert.match(debaterBrief, /--stdin` \(the block alone is enough\)/);
+    const order = ["plan.md` — the plan to review", "contract.json` — the plan's contract", "plan-debater.md` — exact-source SEV3 packet"].map((s) => debaterBrief.indexOf(s));
+    assert.ok(order.every((x, i) => x > 0 && (i === 0 || x > order[i - 1]!)), "the Debater reads the plan and the contract before the packet");
+    p.s.cleanup();
+  });
+
   test("T-planning: expansion limit blocks", () => {
     const p = setupProject({ roles: defaultRolesDelegatePlanner(), config: { "limits.expansion_rounds": "0" } });
     p.setScenario([{ role: "planner", decision: "needs_expansion", final: '```looprch-result\n{"role":"planner","decision":"needs_expansion","expansion_requests":[{"kind":"document","id":"F-NOTES","question":"q","reason":"r"}]}\n```' }]);

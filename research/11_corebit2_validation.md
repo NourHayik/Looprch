@@ -42,3 +42,29 @@ copy is kept in `/tmp/corebit2-pristine.tar.gz`.
   blocked; the absence of an optional Looprch file should be stated). Fixed in 0.7.1, tested,
   released, installed from GitHub, and CoreBit2 restored from the pristine copy before run 2. Run
   1 is not counted as a validation of 0.7.1.
+
+## Run 2 (0.7.1): planning and debate, stopped by the user in debate round 2
+
+Timeline (08:01 to 08:37, about 36 minutes, all of it before implementation):
+
+| Run | Result | Note |
+|---|---|---|
+| planner-1 (planning) | rejected | the plan lint caught two blueprint files without their full content in plan.md |
+| planner-2 (planning, re-ask) | accepted, 3.7 min | 13 obligations, 6 deferrals, 8 decisions, 10 interfaces, 5 packages, 13 planned tests; tokens 72 k in, 534 k cached, 37 k out |
+| plan_debater-1 (Kimi k3) | rejected | Kimi's reader returned lines 1 to 1,045 of the 1,119-line packet on every call. It never reached plan.md or contract.json and refused to invent findings (`needs_expansion` without sources). |
+| plan_debater-2 (re-ask) | accepted, 7.1 min | 16 findings (4 high, 9 medium, 3 low) and 5 uncovered independent risks: 21 debate items |
+| planner-3 (synthesis) | rejected | WP-4 touched 26 files (limit 25) |
+| planner-4 (synthesis, re-ask) | accepted, 3.8 min | 18 accepted, 3 partial, 0 rejected; contract: 9 decisions, 12 interfaces, 59 changed elements; tokens 167 k in, 2.4 M cached, 87 k out |
+| plan_debater-3 (rebuttal) | stopped | the user stopped the test |
+
+Findings:
+
+- **The debate worked as designed.** The Debater raised evidence-backed items. Every accept had to
+  change the elements it cited, so the synthesis changed 59 elements; in CoreBit P-001 the 15
+  accepts left the obligation count unchanged.
+- **3 of 7 expensive runs were re-asks for deterministic problems.** Fixed in 0.7.2 with
+  `looprch check` and the Planner's report file (D-32), plus input sizes and the plan-first order
+  for the Debater. Kimi's paging failure is an agent tool limitation; the size hint is the
+  mitigation.
+- The run stopped before any code, so no review round exists for 0.7.x. The Round 1 assessment
+  and the convergence criteria remain to be measured by the user's own run.

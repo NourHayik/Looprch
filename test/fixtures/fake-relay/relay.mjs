@@ -309,7 +309,11 @@ switch (role) {
 }
 if (rule.touch) writeFileSync(join(cwd, rule.touch), "touched\n");
 const block = JSON.stringify({ role, decision, ...extra });
-const finalMessage = rule.final ?? (rule.omit_block ? body : `${body}\n\n\`\`\`looprch-result\n${block}\n\`\`\``);
+let finalMessage = rule.final ?? (rule.omit_block ? body : `${body}\n\n\`\`\`looprch-result\n${block}\n\`\`\``);
+if (rule.report_file && meta.run_id) {
+  writeFileSync(join(cwd, ".looprch", "runs", meta.run_id, "report.md"), finalMessage);
+  finalMessage = "Report written to the report file; looprch check printed ok.";
+}
 const statusMap = { unavailable: `${agent}_unavailable` };
 const status = rule.status ? statusMap[rule.status] || rule.status : "completed";
 const exitCode = status === "completed" ? 0 : status === "timeout" ? 124 : status.endsWith("_unavailable") ? 127 : 1;

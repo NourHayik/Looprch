@@ -19,6 +19,7 @@ import { run as next } from "./next.js";
 import { run as record } from "./record.js";
 import { run as gates } from "./gates.js";
 import { run as e2e } from "./e2e.js";
+import { run as check } from "./check.js";
 import { run as dispatch, runWrapper } from "./dispatch.js";
 import { runAnswer, runCheckpoint, runPause, runResume, runWait } from "./flow.js";
 import { runReview, runWorker } from "./side.js";
@@ -43,6 +44,7 @@ const COMMANDS: Record<string, Command> = {
   doctor,
   next,
   record,
+  check,
   gates,
   e2e,
   dispatch,

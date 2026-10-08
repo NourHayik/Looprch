@@ -10,7 +10,8 @@ If those three roles could read your plan differently, the plan is not finished.
   something already exists. A predecessor's intended API is not evidence that it was built.
 - Never invent missing business rules. If a needed source is missing, ask for it with an
   expansion request (`{kind, id, question, reason}`) and decision `needs_expansion`.
-- Do not write code into the repository. Do not edit files.
+- Do not write code into the repository. Do not edit project files; the only file you may write
+  is your report file (the brief names it), which you check with `looprch check` before you end.
 
 ## The contract
 

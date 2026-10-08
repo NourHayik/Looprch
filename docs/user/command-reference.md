@@ -63,6 +63,7 @@ Invocation per agent: Codex `$lr-init`, Kimi Code `/skill:lr-init`, all others `
 | `looprch dispatch <run_id> [--max-wait 10m]` | start a Delegate run (detached) and wait up to max-wait |
 | `looprch dispatch --wait <run_id>` | wait again for a running Delegate run |
 | `looprch record <run_id> --stdin [--session <id>]` | record a Direct subagent's final message |
+| `looprch check <run_id> [--stdin \| --file <path>]` | used by roles: check a report against Looprch's acceptance checks before ending, without side effects (default: the run's `report.md`) |
 | `looprch gates run [--phase P-NNN]` | run the phase gates |
 | `looprch checkpoint` | commit the pending stage checkpoint |
 | `looprch answer <question_id> <option_id> [--text]` | answer an `ask_user` action |

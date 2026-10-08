@@ -1037,8 +1037,39 @@ const TASK_DECISIONS: Record<Task, string[]> = {
   worker: ["answered"],
 };
 
-export function acceptResult(e: Engine, run: RunRecord, finalMessage: string, sessionId: string | null, readOnlyViolation = false): AcceptOutcome {
+/** The report file a role may write instead of putting its whole report into the final message. */
+export function reportPath(e: Engine, runId: string): string {
+  return join(projectPaths(e.root).run(runId), "report.md");
+}
+
+/** The final message, or the run's report file when the message carries no result block. */
+function resultText(e: Engine, runId: string, finalMessage: string): string {
+  if (extractResultBlock(finalMessage).ok) return finalMessage;
+  const p = reportPath(e, runId);
+  return existsSync(p) ? readFileSync(p, "utf8") : finalMessage;
+}
+
+/**
+ * The checks acceptResult applies to a role's report (block, shape, task decision, phase rules),
+ * without any side effect: `looprch check` lets a role fix its report before it ends, instead of a
+ * re-ask that repeats the whole run. Rules about the markdown are skipped for a block-only check.
+ */
+export function checkResult(e: Engine, run: RunRecord, text: string): { ok: boolean; decision: string | null; errors: string[] } {
+  const ex = extractResultBlock(text);
+  if (!ex.ok) return { ok: false, decision: null, errors: [ex.error!] };
+  const v = validateResult(run.role, ex.json, run.run_id);
+  if (!v.ok) return { ok: false, decision: null, errors: v.errors };
+  if (!TASK_DECISIONS[run.task].includes(v.result.decision)) return { ok: false, decision: v.result.decision, errors: [`decision "${v.result.decision}" is not valid for this task; use one of ${TASK_DECISIONS[run.task].join(", ")}`] };
+  const blockOnly = !ex.artifact.trim();
+  const why = run.side ? null : phaseRuleViolation(e, run, v.result, blockOnly ? "## Coverage\n\n" + PLAN_SECTIONS_STUB : ex.artifact, blockOnly);
+  return why ? { ok: false, decision: v.result.decision, errors: why.split("; ") } : { ok: true, decision: v.result.decision, errors: [] };
+}
+
+const PLAN_SECTIONS_STUB = ["Objectives", "Decisions", "Interfaces", "Data", "Security", "Error handling", "Edge cases", "Sequence", "Tests", "Verification", "Definition of Done", "Deferred"].map((h) => `## ${h}`).join("\n");
+
+export function acceptResult(e: Engine, run: RunRecord, finalMessageIn: string, sessionId: string | null, readOnlyViolation = false): AcceptOutcome {
   const st = e.st;
+  const finalMessage = resultText(e, run.run_id, finalMessageIn);
   run.finished_at = nowIso();
   run.session_out = sessionId;
   recordTelemetry(e, run, finalMessage);
@@ -1172,7 +1203,7 @@ function joinProblems(list: string[]): string | null {
  * dispositioned, resolutions and verifications cover their findings and match the diff and the
  * contract, reviews cover the contract and stay consistent with earlier findings.
  */
-function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: string): string | null {
+function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: string, blockOnly = false): string | null {
   const c = e.st.current;
   if (!c) return null;
   const contract = loadContract(e.root, c.phase);
@@ -1184,7 +1215,7 @@ function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: 
     case "revise": {
       if (!r.contract) break;
       problems.push(...contractProblems(r.contract, contractContext(e)));
-      problems.push(...planLint(r.contract, artifact, (p) => existsSync(join(e.root, p))).errors);
+      problems.push(...planLint(r.contract, artifact, (p) => existsSync(join(e.root, p))).errors.filter((x) => !blockOnly || !/is a blueprint, but plan\.md has no/.test(x)));
       if (run.task === "planning") break;
       const open = openEntries(loadLedger(e.root, c.phase)).map((x) => x.id);
       if (open.length) problems.push(...dispositionProblems(r.debate_dispositions, open, r.contract, loadContract(e.root, c.phase)));
@@ -1230,7 +1261,7 @@ function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: 
         const blueprints = blueprintsIn(artifact);
         for (const p of r.repair_packages ?? []) {
           if (c.design.blueprint && (p.precision !== "full_content" || !p.files.every((f) => f.action === "delete" || f.blueprint))) problems.push(`${p.id}: the user chose full content: precision "full_content" and every changed file a blueprint`);
-          for (const f of p.files) if (f.blueprint && !blueprints.has(f.path.replace(/^\.\//, ""))) problems.push(`${p.id}: ${f.path} is a blueprint, but your report has no \`\`\`<lang> blueprint=${f.path} block with its full content`);
+          for (const f of p.files) if (!blockOnly && f.blueprint && !blueprints.has(f.path.replace(/^\.\//, ""))) problems.push(`${p.id}: ${f.path} is a blueprint, but your report has no \`\`\`<lang> blueprint=${f.path} block with its full content`);
         }
         if (c.design.defer) {
           const deferred = new Set((r.contract_amendment?.deferrals ?? []).flatMap((x) => x.resolves ?? []));
@@ -1781,6 +1812,9 @@ function recordImplementer(e: Engine, run: RunRecord): void {
 // ---------------------------------------------------------------------------------------------
 // plan debate (D-26) and executability readback (D-27)
 
+/** Plan Debater findings below this confidence are not debated (the floor of review-skills' debate-review). */
+const MIN_CONFIDENCE = 0.5;
+
 /** Debater passes allowed for this plan: the limit plus one confirmation pass per readback that raised items. */
 function debateLimit(e: Engine, l: DebateLedger): number {
   return debateRounds(e.cfg) + l.bonus;
@@ -2090,7 +2124,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       const known = referableIds(loadContract(e.root, c.phase));
       const uncovered = run.task === "debate" ? (r.independent_risks ?? []).filter((x) => !x.covered_by.some((id) => known.has(id))) : [];
       addEntries(ledger, [
-        ...(r.findings ?? []).map((f) => ({
+        ...(r.findings ?? []).filter((f) => f.confidence === undefined || f.confidence >= MIN_CONFIDENCE).map((f) => ({
           id: f.id,
           source: "debater" as const,
           severity: f.severity ?? "medium",

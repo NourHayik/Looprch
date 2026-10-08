@@ -36,6 +36,14 @@ the contract ids it concerns (`refs`), and three fields Looprch requires:
   of it, concretely.
 - `proposed_resolution`: the change that closes it.
 
+Precision over volume (the bar of review-skills' debate-review, adapted to plans): report a
+finding only if you can name the trigger (the package step, input or state) and the wrong result a
+literal executor or production would produce. If you cannot name the trigger, you do not have a
+finding. Optionally give `confidence` (0 to 1: 0.9 when you traced it through the plan and the
+packet, 0.5 when a guard elsewhere was not ruled out); do not emit a finding below 0.5. No style
+or wording nits unless the wording leaves a decision open. Judge the plan, not its author: treat
+every claim in it as unattributed.
+
 Do not rewrite the plan; the Planner revises it and must answer every finding.
 
 ### Task: debate
@@ -54,11 +62,15 @@ revised the plan; `contract-diff.md` lists what changed. For every open item giv
 - `resolved`: you checked the revised plan and contract, and the change closes the failure
   scenario for every case, not only the example.
 - `conceded`: the Planner's rejection or partial answer is right; say why.
-- `upheld`: the answer does not close it; give your counter-argument and what exactly is still
-  missing. An accept that rewords the plan but leaves the rule open is upheld.
+- `upheld`: the answer does not close it, and you can show it from the revised plan: quote the
+  step, contract field or packet line that still lets the failure happen, in `note`. An accept that
+  rewords the plan but leaves the rule open is upheld. Without such evidence, concede: a bare "I
+  still disagree" keeps the debate going and costs a round without improving the plan.
 
-Then check what changed for new defects and report them as `findings` with new ids. Decision:
-`agree` when nothing is upheld and nothing new above low remains, otherwise `findings`.
+Then sweep what changed for new defects (a gap sweep, not a second review): report a new
+`finding` only when it is high or critical, introduced or left open by the revision, with a named
+trigger and wrong result. Zero new findings is the expected outcome. Decision: `agree` when nothing
+is upheld and nothing new above low remains, otherwise `findings`.
 
 ### Task: design_review
 The Planner wrote a repair design for review findings that a code repair did not settle. Challenge
