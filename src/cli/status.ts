@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { VERSION } from "../core/constants.js";
 import { loadConfig, reviewRounds } from "../core/config.js";
-import { loadContract } from "../core/contract.js";
+import { loadPlan } from "../core/plan.js";
 import { now } from "../core/clock.js";
 import { readEvents, type LrEvent } from "../core/journal.js";
 import { nextDescription } from "../core/lifecycle.js";
@@ -23,6 +23,8 @@ export function buildStatus(root: string) {
   const lastAccepted = readEvents(root, { type: "result.accepted", limit: 1 }).events[0] as LrEvent | undefined;
   const lastRun = lastAccepted?.run_id && existsSync(`${projectPaths(root).run(lastAccepted.run_id)}/run.json`) ? loadRun(root, lastAccepted.run_id) : null;
   const index = c && manifest ? manifest.phases.findIndex((p) => p.id === c.phase) + 1 : null;
+  const plan = c ? loadPlan(root, c.phase) : null;
+  const sessions = c?.sessions?.length ? c.sessions : null;
   return {
     version: VERSION,
     project: { id: manifest?.project.id ?? cfg.project.id, title: manifest?.project.title ?? null },
@@ -36,14 +38,18 @@ export function buildStatus(root: string) {
           round: c.round,
           cap: cfg.limits.repair_rounds + c.extra_rounds,
           test_repairs: c.test_repairs ?? 0,
-          evidence_rounds: c.evidence_rounds ?? 0,
+          evidence_rounds: 0,
           review_changes: c.review_changes ?? 0,
           review_cap: reviewRounds(cfg) + (c.extra_reviews ?? 0),
           final_review_pending: !!c.final_review_pending,
-          contract_revision: loadContract(root, c.phase)?.revision ?? null,
-          design: c.design ?? null,
-          work: c.work ? { kind: c.work.kind, total: c.work.items.length, done: c.work.done, next: c.work.items.find((w) => !c.work!.done.includes(w.id))?.id ?? null } : null,
-          finding_ledger: c.finding_ledger ?? {},
+          contract_revision: plan?.revision ?? null,
+          design: null,
+          work: sessions ? { kind: "implementation", total: sessions.flat().length, done: c.todos_done ?? [], next: sessions.flat().find((id) => !(c.todos_done ?? []).includes(id)) ?? null } : null,
+          finding_ledger: {},
+          session: sessions ? Math.min((c.session_index ?? 0) + 1, sessions.length) : null,
+          sessions: sessions?.length ?? null,
+          todos_done: c.todos_done ?? [],
+          todos_total: plan?.todos.length ?? null,
         }
       : null,
     active: run
@@ -69,6 +75,7 @@ export function humanStatus(s: Omit<Status, "debate" | "usage"> & Partial<Pick<S
   const lines = [`Looprch ${s.version} · project ${s.project.id ?? "?"} · spec ${s.spec.phases_total} phases (fingerprint ${s.spec.package_fingerprint?.slice(0, 4) ?? "—"}…) · ${s.spec.phases_closed} closed`];
   if (s.current) lines.push(`Phase ${s.current.phase} (${s.current.index}/${s.spec.phases_total}) "${s.current.title}"  stage: ${s.current.stage}  repair round ${s.current.round} (test/gate repairs ${s.current.test_repairs}/${s.current.cap})  review changes ${s.current.review_changes}/${s.current.review_cap}`);
   else lines.push(s.project_status === "done" ? "Project complete." : "No phase in progress.");
+  if (s.current?.sessions && s.current.stage === "implementing") lines.push(`Implementer session ${s.current.session} of ${s.current.sessions} · todos done ${s.current.todos_done.length}/${s.current.todos_total ?? "?"}`);
   if (s.active) {
     const mode = s.active.mode_reason === "d05_auto_delegate" ? "direct→delegate" : s.active.effective_mode;
     lines.push(`Active: ${s.active.role} · ${s.active.agent} · ${mode} · session ${s.active.session_id?.slice(0, 8) ?? "new"} · ${s.active.status} for ${Math.round(s.active.elapsed_s / 60)} min`);

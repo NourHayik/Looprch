@@ -25,6 +25,8 @@ delegate-skills relays 0.5.0 in `~/.agents/skills` (a second, differing copy in 
 | S-8 clack multiselect UX | NOT RUN (needs a human at a terminal) | Keep `@clack/prompts`; the non-interactive path (`--agents ... --yes`) is the tested path. |
 | S-9 skills CLI flags | VERIFIED | `DISABLE_TELEMETRY=1 npx -y skills add amElnagdy/delegate-skills -g -y --copy --agent codex --skill <x>-delegate` installs into `~/.agents/skills/<x>-delegate/`, exit 0. |
 | S-10 preflight cost, dispatch from a sandbox | VERIFIED | `verify_package.py` on Corebit (89 phases, 1,074 requirements): 0.87 s; notes-spec: 0.09 s. Preflight stays under the 2 s target including verification. Detached dispatch from the Cursor agent shell works (fake relay, e2e). |
+| S-11 TesterArmy `e2e` runner | VERIFIED | Exit codes, JUnit path and dry run as below; the optional `LR-E2E` gate. |
+| S-12 e2e providers and keys file | VERIFIED | Seven provider presets for `looprch e2e init`; `.env.e2e` loaded by the config; keys checked before saving. |
 
 ## S-2: invocation syntax and host environment markers
 
@@ -121,6 +123,37 @@ from the 0.7.0 build): configure check ok (`e2e 0.18.0`, 1 test); passing run �
 1 testcase; with the failing test enabled → `fail`, exit 1, 2 testcases, 1 failure; `--grep
 nomatch` → `config` (exit 2); a missing config file → `config` before running; timeout 1s →
 `environment` ("timed out after 1s").
+
+## S-12: e2e model providers and the keys file (`looprch e2e init`)
+
+Run on 2026-10-09 in `/tmp/e2e-spike` (Node 24.21.0, `e2e@0.18.0`, `@e2e-dev/web`, `ai@7.0.136`,
+`zod@4`). The provider list and versions come from the runner's own `e2e init` presets
+(`dist/cli/init/gateways.js`, `scaffold.js`): agent steps need `ai@^7.0.0` and `zod@^4.1.8` plus
+the provider package, and `agents.default.model` is a constructed AI SDK instance.
+
+Each row below was written as `e2e.config.ts` with
+`if (existsSync('.env.e2e')) process.loadEnvFile('.env.e2e');` at the top and the model in
+`agents.default`, then run without any key in the environment: `e2e list --reporter json` and a
+locator-only `e2e run`.
+
+| Provider | Package | Model line | Key | list | run |
+|---|---|---|---|---:|---:|
+| gateway | `ai` | `gateway('openai/gpt-6-luna-fast')` | `AI_GATEWAY_API_KEY` | 0 | 0 |
+| openrouter | `@openrouter/ai-sdk-provider@^3.0.0` | `openrouter('openai/gpt-6-luna-fast')` | `OPENROUTER_API_KEY` | 0 | 0 |
+| openai | `@ai-sdk/openai@^4.0.0` | `openai('gpt-6-luna')` | `OPENAI_API_KEY` | 0 | 0 |
+| anthropic | `@ai-sdk/anthropic@^4.0.0` | `anthropic('claude-sonnet-5')` | `ANTHROPIC_API_KEY` | 0 | 0 |
+| google | `@ai-sdk/google@^4.0.0` | `google('gemini-3-flash')` | `GOOGLE_GENERATIVE_AI_API_KEY` | 0 | 0 |
+| deepseek | `@ai-sdk/deepseek@^3.0.0` | `deepseek('deepseek-chat')` | `DEEPSEEK_API_KEY` | 0 | 0 |
+| openai-compatible | `@ai-sdk/openai-compatible@^3.0.0` | `createOpenAICompatible({ name, baseURL: process.env.E2E_BASE_URL, apiKey: process.env.E2E_API_KEY }).chatModel(id)` | `E2E_API_KEY`, `E2E_BASE_URL` | 0 | 0 |
+
+Further findings:
+
+- No provider reads its key when the config loads: without a key, the config still loads and
+  locator-only tests pass. The first agent step fails with `MODEL_PROVIDER_FAILED` (exit 3, an
+  environment failure), so Looprch checks the keys file before it saves the configuration.
+- `process.loadEnvFile('.env.e2e')` works inside `e2e.config.ts`, and a variable already exported
+  in the shell wins over the file. An empty `NAME=` line sets an empty string.
+- Without `.env.e2e` the guarded `existsSync` line skips loading and the run is unchanged.
 
 ## Spikes still to run (manual, with your go-ahead)
 

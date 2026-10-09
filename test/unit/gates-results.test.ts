@@ -114,6 +114,7 @@ describe("gate runner", () => {
 
 describe("result blocks", () => {
   const msg = (json: string) => `# Report\n\nbody\n\n\`\`\`looprch-result\n${json}\n\`\`\`\n`;
+  const errs = (r: ReturnType<typeof validateResult>) => (r.ok ? "" : r.errors.join(";"));
   test("valid reviewer block; artifact is the markdown above", () => {
     const ex = extractResultBlock(msg('{"role":"reviewer","decision":"approve","findings":[]}'));
     assert.equal(ex.ok, true);
@@ -127,125 +128,51 @@ describe("result blocks", () => {
   });
   test("invalid JSON", () => assert.match(extractResultBlock(msg("{nope")).error!, /not valid JSON/));
   test("wrong role", () => assert.equal(validateResult("tester", { role: "reviewer", decision: "pass" }).ok, false));
-  test("changes_requested needs findings with files", () => {
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [] }).ok, false);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x" }] }).ok, false);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"] }] }).ok, false, "cause is required");
-    const repair = { files: [{ path: "a.py", action: "modify", content: "f rejects x" }], steps: ["make f reject x"], done_when: ["python3 -m unittest exits 0"] };
-    const noRepair = validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"], cause: "implementation", checks: ["rejects x"] }] });
-    assert.match(!noRepair.ok ? noRepair.errors.join(";") : "", /R-1: an implementation finding carries "repair"/);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"], cause: "implementation", checks: ["rejects x"], repair }] }).ok, true);
-    const badRepair = validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"], cause: "implementation", checks: ["rejects x"], repair: { ...repair, steps: [] } }] });
-    assert.match(!badRepair.ok ? badRepair.errors.join(";") : "", /steps must be a non-empty list/);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "x", files: ["a.py"], cause: "plan", checks: ["rejects x"] }] }).ok, true, "a plan-cause finding goes to the Planner and needs no repair");
+  test("review findings: id and summary; changes_requested needs at least one", () => {
+    assert.match(errs(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [] })), /non-empty findings/);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", summary: "x" }] }).ok, true, "files, fix and owner are optional");
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", severity: "low", summary: "nit", files: ["a.py"], fix: "y", owner: "tester" }] }).ok, true, "a low-only review is not rejected");
+    assert.match(errs(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", summary: "x", severity: "urgent" }] })), /severity must be one of/);
+    assert.match(errs(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", summary: "x", owner: "planner" }] })), /owner must be one of/);
+    assert.match(errs(validateResult("reviewer", { role: "reviewer", decision: "approve", manual_gate_reports: [".looprch/reports/t.json"] })), /needs gate_id and path/);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "approve", contract_review: [{ id: "O-1", status: "maybe" }], prior: "anything" }).ok, true, "fields of older protocols are ignored");
   });
-  test("changes_requested with only low findings must approve instead", () => {
-    const low = { id: "R-1", severity: "low", summary: "nit", files: ["a.py"], cause: "implementation" };
-    const r = validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [low] });
-    assert.equal(r.ok, false);
-    assert.match(!r.ok ? r.errors.join(";") : "", /use approve/);
-    const repair = { files: [{ path: "a.py", action: "modify", content: "c" }], steps: ["s"], done_when: ["d"] };
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [low, { ...low, id: "R-2", severity: "medium", repair }] }).ok, true);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "approve", findings: [low] }).ok, true);
-  });
-  test("review finding fields and implementer resolutions are validated", () => {
-    const f = { id: "R-1", severity: "high", summary: "x", files: ["a.py"], fix: "y", owner: "tester", origin: "missed", cause: "test", obligations: ["O-1"], related: "R-0", checks: ["rejects x", "rejects y"] };
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [f] }).ok, true);
-    const noChecks = validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, checks: [] }] });
-    assert.match(!noChecks.ok ? noChecks.errors.join(";") : "", /R-1 is high: list the acceptance checks/);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, severity: "medium", checks: undefined }] }).ok, true, "checks are optional below high");
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, owner: "planner" }] }).ok, false);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, origin: "new" }] }).ok, false);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, cause: "luck" }] }).ok, false);
-    const testOwned = validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ ...f, owner: "implementer" }] });
-    assert.match(!testOwned.ok ? testOwned.errors.join(";") : "", /cause test has owner tester/);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "approve", contract_review: [{ id: "O-1", status: "maybe" }] }).ok, false);
-    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "approve", prior: [{ id: "R-1", status: "fixed" }], contract_review: [{ id: "O-1", status: "met" }] }).ok, true);
-    const strings = validateResult("reviewer", { role: "reviewer", decision: "approve", manual_gate_reports: [".looprch/reports/t.json"] });
-    assert.match(!strings.ok ? strings.errors.join(";") : "", /needs gate_id and path/);
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "fixed", note: "done", files: ["a.py"] }] }).ok, true);
-    const noFiles = validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "fixed", note: "done" }] });
-    assert.match(!noFiles.ok ? noFiles.errors.join(";") : "", /a fixed resolution lists the files/);
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "needs_design" }, { id: "R-2", status: "not_fixed" }] }).ok, true);
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "partly" }] }).ok, false);
-  });
-  test("plan results need a contract; synthesis dispositions and amendments are shaped", () => {
-    const test1 = { id: "T-1", obligation: "O-1", kind: "negative", given: "an empty id", when: "f runs", then: "it raises ValueError", file: "tests/test_a.py" };
-    const wp = { id: "WP-1", title: "t", obligations: ["O-1"], precision: "spec", files: [{ path: "a.py", action: "create", content: "f() -> int" }], steps: ["write f"], done_when: ["python3 -c 'import a'"], tests: [test1] };
-    const contract = { obligations: [{ id: "O-1", requirements: ["R-ID"], kind: "behavior", statement: "s", enforcement: "e", verify: "v", gates: [] }], deferrals: [], decisions: [], interfaces: [], work_packages: [wp] };
-    const noWp = validateResult("planner", { role: "planner", decision: "plan_ready", contract: { ...contract, work_packages: undefined } });
-    assert.match(!noWp.ok ? noWp.errors.join(";") : "", /contract\.work_packages must be a list/);
-    const errs = (c: unknown) => {
-      const v = validateResult("planner", { role: "planner", decision: "plan_ready", contract: c });
-      return v.ok ? "" : v.errors.join(";");
-    };
-    assert.match(errs({ ...contract, decisions: undefined }), /contract\.decisions must be a list/);
-    assert.match(errs({ ...contract, interfaces: [{ id: "IF-1", file: "a.py", symbol: "f" }] }), /IF-1: signature is required/);
-    assert.match(errs({ ...contract, work_packages: [{ ...wp, precision: "rough" }] }), /precision must be "spec" or "full_content"/);
-    assert.match(errs({ ...contract, work_packages: [{ ...wp, tests: undefined }] }), /tests must list the tests the Tester writes/);
-    assert.match(errs({ ...contract, work_packages: [{ ...wp, tests: [{ ...test1, kind: "smoke" }] }] }), /T-1: kind must be one of positive, negative, boundary, adversarial/);
-    assert.match(errs({ ...contract, obligations: [{ ...contract.obligations[0], kind: "boundary" }] }), /O-1: kind boundary needs "rule"/);
-    assert.equal(errs({ ...contract, obligations: [{ ...contract.obligations[0], kind: "boundary", rule: "only ids matching ^[a-z]{3}$ are accepted" }] }), "");
-    const bigWp = validateResult("planner", { role: "planner", decision: "plan_ready", contract: { ...contract, work_packages: [{ ...wp, steps: Array.from({ length: 26 }, () => "s") }] } });
-    assert.match(!bigWp.ok ? bigWp.errors.join(";") : "", /WP-1 has 26 steps \(max 25\): split it/);
-    assert.equal(validateResult("planner", { role: "planner", decision: "plan_ready", contract: { ...contract, work_packages: [{ ...wp, files: [{ path: "old.py", action: "delete" }] }] } }).ok, true, "a deleted file needs no content");
-    const vague = validateResult("planner", { role: "planner", decision: "plan_ready", contract: { ...contract, work_packages: [{ ...wp, files: [{ path: "a.py", action: "create", content: "" }] }] } });
-    assert.match(!vague.ok ? vague.errors.join(";") : "", /content must say what the file contains/);
-    const rp = { id: "RP-1", title: "t", findings: ["R-1", "R-2", "R-3", "R-4", "R-5", "R-6"], files: wp.files, steps: ["s"], done_when: ["d"] };
-    const bigRp = validateResult("planner", { role: "planner", decision: "context_answer", repair_packages: [rp] });
-    assert.match(!bigRp.ok ? bigRp.errors.join(";") : "", /RP-1 repairs 6 findings \(max 5\)/);
-    assert.match((validateResult("planner", { role: "planner", decision: "plan_ready" }) as { errors: string[] }).errors.join(";"), /contract is required/);
-    assert.equal(validateResult("planner", { role: "planner", decision: "plan_ready", contract }).ok, true);
-    const badKind = validateResult("planner", { role: "planner", decision: "plan_final", contract: { ...contract, obligations: [{ ...contract.obligations[0], kind: "wish" }] } });
-    assert.match(!badKind.ok ? badKind.errors.join(";") : "", /kind must be one of/);
-    const noVerify = validateResult("planner", { role: "planner", decision: "plan_final", contract: { ...contract, obligations: [{ ...contract.obligations[0], verify: "" }] } });
-    assert.match(!noVerify.ok ? noVerify.errors.join(";") : "", /verify is required/);
-    const deferral = validateResult("planner", { role: "planner", decision: "plan_final", contract: { ...contract, deferrals: [{ id: "X-1", requirements: [], what: "w", to_phase: "P-002" }] } });
-    assert.match(!deferral.ok ? deferral.errors.join(";") : "", /interim is required/);
-    assert.equal(validateResult("planner", { role: "planner", decision: "plan_final", contract, debate_dispositions: [{ id: "D-1", decision: "maybe", reason: "r" }] }).ok, false);
-    assert.equal(validateResult("planner", { role: "planner", decision: "plan_final", contract, debate_dispositions: [{ id: "D-1", decision: "partial", reason: "r", refs: ["WP-1"] }] }).ok, true);
+  test("planner results need a plan with todos; sessions, requirements and deferrals are shaped", () => {
+    const plan = { todos: [{ id: "T-1", title: "Add the ids module", section: "1. Data" }, { id: "T-2", title: "Wire the CLI" }], sessions: [["T-1", "T-2"]], requirements: { "R-ID": ["T-1"] }, deferrals: [{ id: "X-1", what: "auth", to_phase: "P-002" }] };
+    assert.equal(validateResult("planner", { role: "planner", decision: "plan_ready", plan }).ok, true);
+    assert.equal(validateResult("planner", { role: "planner", decision: "plan_ready", plan: { todos: plan.todos } }).ok, true, "sessions are optional");
+    assert.match(errs(validateResult("planner", { role: "planner", decision: "plan_ready" })), /plan is required/);
+    assert.match(errs(validateResult("planner", { role: "planner", decision: "plan_final", plan: { todos: [] } })), /plan\.todos must list the todos/);
+    assert.match(errs(validateResult("planner", { role: "planner", decision: "plan_final", plan: { todos: [{ id: "T-1" }] } })), /each todo needs/);
+    assert.match(errs(validateResult("planner", { role: "planner", decision: "plan_final", plan: { ...plan, sessions: ["T-1"] } })), /plan\.sessions must be a list of todo id lists/);
+    assert.match(errs(validateResult("planner", { role: "planner", decision: "plan_final", plan: { ...plan, deferrals: [{ id: "X-1" }] } })), /each deferral needs/);
+    assert.equal(validateResult("planner", { role: "planner", decision: "plan_final", plan, debate_dispositions: [{ id: "D-1", decision: "accept", note: "added T-3" }, { id: "D-2", decision: "reject" }] }).ok, true);
+    assert.match(errs(validateResult("planner", { role: "planner", decision: "plan_final", plan, debate_dispositions: [{ id: "D-1", decision: "partial" }] })), /decision must be accept or reject/);
     assert.equal(validateResult("planner", { role: "planner", decision: "context_answer" }).ok, true);
-    assert.equal(validateResult("planner", { role: "planner", decision: "context_answer", contract_amendment: { obligations: [{ id: "O-2" }] } }).ok, false);
-    assert.equal(validateResult("planner", { role: "planner", decision: "context_answer", contract_amendment: { retire: ["O-1"] } }).ok, true);
+    assert.equal(validateResult("planner", { role: "planner", decision: "context_answer", new_todos: [{ id: "T-9", title: "Add the index" }] }).ok, true);
+    assert.match(errs(validateResult("planner", { role: "planner", decision: "context_answer", new_todos: [{ id: "T-9" }] })), /new_todos\[0\]/);
   });
-  test("tester verifications are shaped: verified needs testcases", () => {
-    assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "O-1", status: "verified", tests: ["t"], variants: [] }] }).ok, true);
-    assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "O-1", status: "verified", tests: [], variants: [] }] }).ok, false);
-    assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "O-1", status: "inspected", tests: [], variants: [] }] }).ok, true);
-    assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "O-1", status: "ok", tests: [], variants: [] }] }).ok, false);
-    assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "R-1", status: "verified", tests: ["t"], variants: [], checks: [{ n: 1, tests: ["t"] }] }] }).ok, true);
-    assert.equal(validateResult("tester", { role: "tester", decision: "pass", verifications: [{ id: "R-1", status: "verified", tests: ["t"], variants: [], checks: [{ tests: ["t"] }] }] }).ok, false);
+  test("implementer: todos_done and optional resolutions; needs_context needs a question", () => {
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", todos_done: ["T-1"], files_changed: ["a.py"], notes: ["used argparse"] }).ok, true);
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented" }).ok, true, "every field is optional");
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "fixed" }, { id: "R-2", status: "not_fixed", note: "later" }] }).ok, true);
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-1", status: "partly" }] }).ok, false);
+    assert.match(errs(validateResult("implementer", { role: "implementer", decision: "needs_context" })), /needs_context requires context_request/);
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "needs_context", context_request: { question: "Which store?" } }).ok, true);
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "handover_ready" }).ok, true, "Looprch writes the handover file lists from git");
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "ready" }).ok, false, "the readback is gone");
   });
-  test("handover needs file lists", () => {
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "handover_ready" }).ok, false);
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "handover_ready", modified_files: [], new_files: ["a"], deleted_files: [] }).ok, true);
-  });
-  test("needs_context needs a context request", () => assert.equal(validateResult("implementer", { role: "implementer", decision: "needs_context" }).ok, false));
-  test("plan debater findings carry evidence, a failure scenario and a resolution; rebuttal verdicts are shaped", () => {
-    const f = { id: "D-1", severity: "high", summary: "s", evidence: "packet §2", failure_scenario: "the executor guesses", proposed_resolution: "decide it" };
-    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", findings: [f] }).ok, true);
-    const bare = validateResult("plan_debater", { role: "plan_debater", decision: "findings", findings: [{ ...f, failure_scenario: undefined }] });
-    assert.match(!bare.ok ? bare.errors.join(";") : "", /D-1: failure_scenario is required/);
+  test("tester and plan debater shapes", () => {
+    assert.equal(validateResult("tester", { role: "tester", decision: "fail", failures: [{ id: "F-1", summary: "x" }] }).ok, true);
+    assert.equal(validateResult("tester", { role: "tester", decision: "fail", failures: [{ id: "F-1" }] }).ok, false);
+    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", findings: [{ id: "D-1", severity: "high", summary: "no store decided", section: "Decisions", suggestion: "pick SQLite" }] }).ok, true);
+    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", findings: [{ id: "D-1", summary: "s" }] }).ok, true, "no evidence or failure scenario is required");
     assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "agree", verdicts: [{ id: "D-1", verdict: "resolved" }] }).ok, true);
-    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", verdicts: [{ id: "D-1", verdict: "upheld", note: "still open" }] }).ok, true, "an upheld verdict alone keeps the debate going");
-    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", verdicts: [{ id: "D-1", verdict: "resolved" }] }).ok, false);
     assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "agree", verdicts: [{ id: "D-1", verdict: "maybe" }] }).ok, false);
-    const bareUpheld = validateResult("plan_debater", { role: "plan_debater", decision: "findings", verdicts: [{ id: "D-1", verdict: "upheld" }] });
-    assert.match(!bareUpheld.ok ? bareUpheld.errors.join(";") : "", /D-1: an upheld verdict needs "note"/);
-    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", findings: [{ ...f, confidence: 1.5 }] }).ok, false);
-    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "findings", findings: [{ ...f, confidence: 0.4 }] }).ok, true, "a low-confidence finding is valid; Looprch drops it from the debate");
-    assert.equal(validateResult("plan_debater", { role: "plan_debater", decision: "no_findings", independent_risks: [{ risk: "r" }] }).ok, false);
   });
-  test("readback lists packages; ready has no questions; deviations are shaped", () => {
-    const pkg = { id: "WP-1", questions: [], decisions_needed: [], would_create: [{ path: "a.py", symbols: ["f"] }] };
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "ready", packages: [pkg] }).ok, true);
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "ready" }).ok, false);
-    const asks = validateResult("implementer", { role: "implementer", decision: "ready", packages: [{ ...pkg, questions: ["which error?"] }] });
-    assert.match(!asks.ok ? asks.errors.join(";") : "", /use decision questions/);
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "questions", packages: [{ ...pkg, decisions_needed: ["the library"] }] }).ok, true);
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", deviations: [{ file: "b.py", what: "import" }] }).ok, false);
-    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", work_packages: ["WP-1", "WP-2"], deviations: [{ file: "b.py", what: "import", why: "missing" }] }).ok, true);
+  test("expansion requests are validated", () => {
+    assert.equal(validateResult("planner", { role: "planner", decision: "needs_expansion", expansion_requests: [{ kind: "file", id: "x" }] }).ok, false);
+    assert.match(errs(validateResult("planner", { role: "planner", decision: "needs_expansion" })), /needs "expansion_requests"/);
   });
-  test("expansion requests are validated", () => assert.equal(validateResult("planner", { role: "planner", decision: "needs_expansion", expansion_requests: [{ kind: "file", id: "x" }] }).ok, false));
   test("run_id mismatch", () => assert.equal(validateResult("worker", { role: "worker", decision: "answered", run_id: "a" }, "b").ok, false));
 });

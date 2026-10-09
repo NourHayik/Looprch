@@ -18,7 +18,7 @@ All commands accept `--json` (stable output for skills and scripts) and most acc
 | `/lr-review [P-NNN]` | extra read-only review, never changes status |
 | `/lr-finish` | closure phase and final project closure |
 | `/lr-worker <question>` | read-only advisory Worker |
-| `/lr-e2e-test-init` | configure, reconfigure, enable or disable the optional TesterArmy e2e gate |
+| `/lr-e2e-test-init` | set up (three questions, then `looprch e2e init`), change, enable or disable the optional TesterArmy e2e gate |
 
 Invocation per agent: Codex `$lr-init`, Kimi Code `/skill:lr-init`, all others `/lr-init`.
 
@@ -48,7 +48,8 @@ Invocation per agent: Codex `$lr-init`, Kimi Code `/skill:lr-init`, all others `
 | `looprch config set-role <role> --mode --agent --model [--effort] [--timeout] [--context-kb] [--max-parallel]` | configure a role |
 | `looprch config add-fallback <role> --mode --agent --model ...` | add an approved fallback |
 | `looprch config clear-fallbacks <role>` | remove fallbacks |
-| `looprch config set <key> <value>` | `lead_host`, `limits.*` (`repair_rounds`, `review_rounds`, `debate_rounds`, `readback_rounds`, `lineage_attempts`, `run_attempts`, `quota_wait_minutes`, `dispatch_max_wait`, `expansion_rounds`), `approvals.plan/merge`, `git.phase_branches`, `gates.env.<NAME>`, `context_kb.<agent>`, `integrations.commit_generated`, `integrations.e2e.enabled` |
+| `looprch config set <key> <value>` | `lead_host`, `limits.*` (`repair_rounds`, `review_rounds`, `debate_rounds`, `run_attempts`, `quota_wait_minutes`, `dispatch_max_wait`, `expansion_rounds`), `approvals.plan/merge`, `git.phase_branches`, `gates.env.<NAME>`, `context_kb.<agent>`, `integrations.commit_generated`, `integrations.e2e.enabled` |
+| `looprch e2e init [--provider none\|openrouter\|openai\|anthropic\|google\|deepseek\|gateway\|openai-compatible] [--model <id>] [--url <url> \| --start "<cmd>" [--ready-url <url>]] [--base-url <url>] [--phases ...] [--install] [--force] [--enable] [--yes]` | set up e2e in one step: install the packages, write `e2e.config.ts`, the `.env.e2e` keys file (gitignored) and a first test, and save the gate; asks in a terminal when flags are missing |
 | `looprch e2e status` | the optional e2e gate: configured, enabled, setup problems |
 | `looprch e2e configure [--config] [--bin] [--timeout] [--arg=<x>]... [--require-env NAME]... [--env NAME=value]... [--phases all\|P-NNN,...] [--enable]` | check the e2e setup (Node, binary, config, variables, dry-run list) and save it |
 | `looprch e2e enable` / `looprch e2e disable` | turn the gate on (only after configure) or off (keeps the configuration) |

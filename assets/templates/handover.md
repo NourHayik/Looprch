@@ -1,4 +1,8 @@
 
+## Files changed in this phase (recorded by Looprch from git)
+
+{{files}}
+
 ## Contributing implementers
 
 Recorded by Looprch from the run history of this phase (one line per agent and model):
@@ -9,15 +13,11 @@ Recorded by Looprch from the run history of this phase (one line per agent and m
 
 {{gate_runs}}
 
-## Phase contract (recorded by Looprch)
+## Plan (recorded by Looprch)
 
-{{contract}}
+{{plan}}
 
 ## Plan debate (recorded by Looprch)
 
 {{debate}}
-
-## Traceability (recorded by Looprch)
-
-{{traceability}}
 {{unreviewed}}

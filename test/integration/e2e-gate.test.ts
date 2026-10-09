@@ -34,7 +34,7 @@ describe("optional e2e gate (TesterArmy e2e)", { concurrency: 2 }, () => {
     assert.equal(noTests.code, 1);
     assert.match(noTests.json.problems.join(";"), /e2e list selects no test/);
     const missingEnv = cli(p, ["e2e", "configure", "--require-env", "LR_TEST_MODEL_KEY"]);
-    assert.match(missingEnv.json.problems.join(";"), /required environment variable\(s\) not set: LR_TEST_MODEL_KEY/);
+    assert.match(missingEnv.json.problems.join(";"), /not filled in yet: LR_TEST_MODEL_KEY\. Put the value\(s\) in \.env\.e2e/);
     assert.equal(readJson(join(p.root, ".looprch/config.json")).integrations.e2e, undefined, "nothing is saved until the checks pass");
     const ok = cli(p, ["e2e", "configure", "--timeout", "2m", "--phases", "P-001,P-002"]);
     assert.equal(ok.code, 0, JSON.stringify(ok.json));
@@ -125,6 +125,35 @@ describe("optional e2e gate (TesterArmy e2e)", { concurrency: 2 }, () => {
     const gates = readJson(join(q.root, ".looprch/phases/P-001/gates.json"));
     assert.match(gates.runs.find((x: any) => x.gate_id === "LR-E2E").reason, /wrote no junit\.xml/);
     q.s.cleanup();
+  });
+
+  test("e2e init writes the keys file, a first test and the gate; configure --enable passes once the key is filled in", () => {
+    const p = withE2e();
+    assert.notEqual(cli(p, ["e2e", "init"]).code, 0, "without a terminal the provider must be named");
+    const r = cli(p, ["e2e", "init", "--provider", "openrouter", "--url", "http://localhost:4000", "--yes"]);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    assert.equal(r.json.ok, false);
+    assert.deepEqual(r.json.missing_keys, ["OPENROUTER_API_KEY"]);
+    assert.equal(r.json.files["e2e.config.ts"], "kept (pass --force to replace it; a .bak is written)");
+    assert.equal(r.json.files[".env.e2e"], "written");
+    assert.equal(r.json.files["tests/e2e/smoke.e2e.ts"], "written");
+    assert.match(r.json.next.join("\n"), /Open \.env\.e2e and fill in: OPENROUTER_API_KEY \(your OpenRouter API key; get it at https:\/\/openrouter\.ai\/keys\)/);
+    assert.match(readFileSync(join(p.root, ".env.e2e"), "utf8"), /APP_URL=http:\/\/localhost:4000\n[\s\S]*OPENROUTER_API_KEY=\n/);
+    assert.equal(git(p.root, ["check-ignore", ".env.e2e"]), ".env.e2e", "the keys file is never committed");
+    const saved = readJson(join(p.root, ".looprch/config.json")).integrations.e2e;
+    assert.deepEqual(saved.required_env, ["OPENROUTER_API_KEY", "E2E_MODEL"]);
+    assert.equal(saved.configured_at, null);
+    assert.equal(cli(p, ["e2e", "enable"]).json.error.code, "e2e_not_configured");
+    writeFileSync(join(p.root, ".env.e2e"), readFileSync(join(p.root, ".env.e2e"), "utf8").replace("OPENROUTER_API_KEY=\n", "OPENROUTER_API_KEY=sk-or-test\n"));
+    const ok = cli(p, ["e2e", "configure", "--enable"]);
+    assert.equal(ok.code, 0, JSON.stringify(ok.json));
+    assert.equal(ok.json.config.enabled, true);
+    const forced = cli(p, ["e2e", "init", "--provider", "none", "--force", "--enable", "--yes"]);
+    assert.equal(forced.json.ok, true, JSON.stringify(forced.json));
+    assert.equal(forced.json.enabled, true, "no key needed: init configures and enables in one step");
+    assert.equal(readFileSync(join(p.root, "e2e.config.ts.bak"), "utf8"), "export default { targets: [] };\n");
+    assert.doesNotMatch(readFileSync(join(p.root, "e2e.config.ts"), "utf8"), /agents/);
+    p.s.cleanup();
   });
 
   test("disabled or unconfigured: gates.json has no e2e run", () => {

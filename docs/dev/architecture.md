@@ -35,10 +35,10 @@ flowchart LR
 | fsx | `src/core/fsx.ts`, `src/core/lock.ts` |
 | config (+ migrations) | `src/core/config.ts`, `src/core/migrations.ts` |
 | state + journal | `src/core/state.ts`, `src/core/journal.ts`, `src/core/runs.ts` |
-| lifecycle | `src/core/lifecycle.ts`, `src/core/preflight.ts`, `src/core/mode.ts`, `src/core/actions.ts`, `src/core/results.ts`, `src/core/contract.ts` (contract shape, executability checks, plan lint), `src/core/debate.ts` (the plan debate ledger), `src/core/trace.ts` (the traceability matrix) |
+| lifecycle | `src/core/lifecycle.ts`, `src/core/preflight.ts`, `src/core/mode.ts`, `src/core/actions.ts`, `src/core/results.ts`, `src/core/plan.ts` (the plan block: todos, sessions, deferrals), `src/core/debate.ts` (the plan debate ledger) |
 | briefs | `src/core/briefs.ts`, `assets/roles/*.md`, `assets/templates/brief.md` |
 | sev3 | `src/sev3/*` (discovery, trust, fingerprint, packets, todo, toolkit runner, manifest types) |
-| gates | `src/gates/runner.ts` (gate runs, evidence binding, caching by tree), `unittest.ts`, `junit.ts`, `integrity.ts` (skip/focus markers in the phase diff), `e2e.ts` (the optional TesterArmy e2e gate) |
+| gates | `src/gates/runner.ts` (gate runs, caching by tree), `unittest.ts`, `junit.ts`, `e2e.ts` (the optional TesterArmy e2e gate), `e2e-setup.ts` (`looprch e2e init`: provider presets, config and keys-file generation) |
 | delegate | `src/delegate/*` (locate, discover, dispatch, result, sessions, usage: the token usage relays report) |
 | quota | `src/quota/quotalens.ts`, `policy.ts` |
 | git | `src/git/*` (git, baseline, phase, snapshot) |

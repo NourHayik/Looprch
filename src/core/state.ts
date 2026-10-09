@@ -3,7 +3,6 @@ import { PROTOCOL, STATE_SCHEMA, VERSION } from "./constants.js";
 import type { AgentId, Assignment, Mode } from "./config.js";
 import { readJson, writeJsonAtomic } from "./fsx.js";
 import { migrate, type Migration } from "./migrations.js";
-import type { WorkItem } from "./contract.js";
 import { projectPaths } from "./paths.js";
 
 export const STAGES = [
@@ -37,8 +36,6 @@ export const QUESTION_KINDS = [
   "rate_limit_long",
   "final_review",
   "debate_unresolved",
-  "readback_unresolved",
-  "lineage_stuck",
 ] as const;
 export type QuestionKind = (typeof QUESTION_KINDS)[number];
 
@@ -60,11 +57,6 @@ export interface BlockedFlag {
 
 export const FINDING_OWNERS = ["implementer", "tester"] as const;
 export type FindingOwner = (typeof FINDING_OWNERS)[number];
-export const FINDING_ORIGINS = ["unfixed", "regression", "missed"] as const;
-export type FindingOrigin = (typeof FINDING_ORIGINS)[number];
-/** Where a review finding's defect comes from; decides who repairs it first. */
-export const FINDING_CAUSES = ["implementation", "plan", "requirement", "cross_phase", "test"] as const;
-export type FindingCause = (typeof FINDING_CAUSES)[number];
 
 export interface Finding {
   id: string;
@@ -72,87 +64,14 @@ export interface Finding {
   summary: string;
   files?: string[];
   gate_id?: string;
-  /** Review findings: the acceptance condition of the repair (kept from the first report). */
+  /** Review findings: the condition the repair must meet. */
   fix?: string;
   owner?: FindingOwner;
-  /** Re-review findings only. */
-  origin?: FindingOrigin;
-  cause?: FindingCause;
-  /** Contract obligation or deferral ids the finding concerns. */
-  obligations?: string[];
-  /** Id of an earlier finding about the same rule (a new way to break it). */
-  related?: string;
-  /** Review findings: the acceptance checks a repair must pass (kept from the first report). */
-  checks?: string[];
-  /** Implementation-cause review findings: the repair package the Reviewer wrote. */
-  repair?: ReviewerRepair;
-}
-
-/** The executable repair a Reviewer writes for an implementation defect (a repair package without id, title and findings). */
-export type ReviewerRepair = Omit<WorkItem, "id" | "title" | "findings" | "obligations">;
-
-/** One review finding lineage (an id plus the findings `related` to it) across the review rounds of a phase. */
-export interface LedgerEntry {
-  lineage: string;
-  severity: string | null;
-  cause: FindingCause | null;
-  owner: FindingOwner | null;
-  /** The Fix of the first report; re-reports keep it. */
-  fix: string | null;
-  /** The acceptance checks of the first report; re-reports keep them. */
-  checks?: string[];
-  first_round: number;
-  last_round: number;
-  reports: number;
-  /** Planner repair designs (contract amendments) that covered this finding. */
-  designs: number;
-  status: "open" | "fixed";
-}
-
-/** A Planner repair design in progress: design, then (optionally) a Plan Debater challenge, then a revision. */
-export interface DesignState {
-  findings: string[];
-  step: "design" | "debate" | "revise";
-  debate: boolean;
-  reason: "plan_cause" | "unfixed" | "related" | "needs_design" | "repair_plan" | "test_repeat" | "boundary" | "stuck";
-  /** Findings whose design must also amend the contract (the others only need repair packages). */
-  amend?: string[];
-  /** Plan Debater challenges of this design so far. */
-  passes?: number;
-  /** The user chose full-content blueprints for a stuck lineage: every repair package is full_content. */
-  blueprint?: boolean;
-  /** The user chose to defer a stuck lineage: the amendment defers it with a fail-closed interim. */
-  defer?: boolean;
-}
-
-/** An Implementer change outside its package's files, reported in `deviations`. */
-export interface Deviation {
-  id: string;
-  file: string;
-  what: string;
-  why: string;
-  run: string;
-}
-
-export interface Verification {
-  id: string;
-  status: "verified" | "failed" | "inspected";
-  tests: string[];
-  variants: string[];
-  /** Review findings with checks: the testcases that prove each check (n is 1-based). */
-  checks?: { n: number; tests: string[] }[];
-  note?: string;
-}
-
-/** Testcases that passed in a gate batch, for deciding which tests are new. */
-export interface CaseSet {
-  available: boolean;
-  cases: { name: string; classname: string; file: string }[];
 }
 
 /** Instructions carried into the next brief for a role (repair findings, re-ask, user note). */
 export interface Delta {
-  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "design_review" | "revise" | "retry" | "switch" | "synthesis" | "rebuttal" | "readback";
+  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "revise" | "retry" | "switch" | "synthesis" | "rebuttal";
   text: string;
   findings?: Finding[];
   paths?: string[];
@@ -196,52 +115,22 @@ export interface Current {
   repair_reports?: string[];
   /** Findings of an approving review (notes), listed in the handover. */
   review_notes?: Finding[];
-  /** Ids of the Plan Debater's findings; the synthesis must disposition each one. */
-  debate_findings?: string[];
-  /** Review finding lineages of this phase, keyed by finding id. */
-  finding_ledger?: Record<string, LedgerEntry>;
-  /** Planner repair design in progress. */
-  design?: DesignState | null;
-  /** Finding ids that already got a needs_design repair design in the current repair round. */
-  designed_this_round?: string[];
-  /** The Tester's verifications of its last run (checked against the gate evidence). */
-  tester_verifications?: Verification[];
-  /** Packages the Implementer executes one run at a time: the plan's work packages, or a review round's repair packages. */
-  work?: { kind: "implementation" | "repair"; items: WorkItem[]; done: string[]; base?: Delta | null; chain?: string[]; started?: { id: string; tree: string } | null } | null;
-  /** Tester-only rounds for unbacked or stale verifications before the next review (own budget, limits.repair_rounds). */
-  evidence_rounds?: number;
-  /** Gate ids and failure ids of the last test/gate repair, to detect a failure that came back. */
-  last_test_keys?: string[];
-  /** Repair packages of the repair design in progress (the latest Planner answer). */
-  pending_repair_packages?: WorkItem[] | null;
-  /** Ids the Implementer's latest resolution reports as not_fixed since the last review (carried to the review, not into test repairs). */
-  acknowledged_open?: string[];
-  /** Testcases that passed in the latest passing gate batch. */
-  passing_cases?: CaseSet;
-  /** Testcases that passed on the tree the last changes-requesting review looked at. */
-  reviewed_cases?: CaseSet;
-  /** Contract ids a contract amendment retired (their old verifications are no longer checked). */
-  retired_obligations?: string[];
-  /** Obligation status from the latest review that reported it. */
-  contract_review?: { id: string; status: "met" | "not_met" }[];
-  /** Executability readback before plan approval: runs so far and whether the last one was clean. */
-  readback?: { runs: number; clean: boolean; unresolved?: boolean } | null;
-  /** Debate items the user decided for the Plan Debater; the next synthesis must accept them, then the debate ends. */
+  /** Implementer sessions of the approved plan: contiguous todo id groups, one Implementer run each. */
+  sessions?: string[][] | null;
+  /** Index of the session the Implementer works on. */
+  session_index?: number;
+  /** Todos the Implementer reported done. */
+  todos_done?: string[];
+  /** Indexes of follow-up sessions Looprch queued for todos a session left open (they get no follow-up of their own). */
+  followup_sessions?: number[];
+  /** Debate items the user decided for the Plan Debater; the next synthesis applies them, then the debate ends. */
   debate_final?: string[] | null;
-  /** Implementer changes outside their packages (judged by the Reviewer). */
-  deviations?: Deviation[];
-  /** Reviewer repair packages waiting for a Planner repair design of the same round to finish. */
-  pending_reviewer_packages?: WorkItem[] | null;
-  /** The user's answer to lineage_stuck for the current review round. */
-  stuck_choice?: string | null;
-  /** A review requested changes for lineages past limits.lineage_attempts; the user decides first. */
-  stuck_pending?: boolean;
   /** Tree on which the optional e2e gate last passed (it is not run again on the same tree). */
   e2e_passed_tree?: string | null;
   expansion_round: number;
   reask_count: number;
   extra_rounds: number;
-  context_request: { question: string; reason: string; documents: string[]; phases: string[] } | null;
+  context_request: { question: string; reason: string } | null;
   addenda: string[];
   deltas: Partial<Record<string, Delta>>;
   /** Fallback index per role for this phase (0 = primary assignment). */
@@ -360,12 +249,10 @@ export function newCurrent(phase: string, title: string, at: string): Current {
     reviewed_tree: null,
     repair_reports: [],
     review_notes: [],
-    debate_findings: [],
-    finding_ledger: {},
-    design: null,
-    designed_this_round: [],
-    tester_verifications: [],
-    contract_review: [],
+    sessions: null,
+    session_index: 0,
+    todos_done: [],
+    followup_sessions: [],
     expansion_round: 0,
     reask_count: 0,
     extra_rounds: 0,

@@ -6,6 +6,7 @@ import { nowIso, parseDuration } from "../core/clock.js";
 import { VERSION } from "../core/constants.js";
 import { ensureDir, writeFileAtomic } from "../core/fsx.js";
 import { sha256 } from "../install/manifest.js";
+import { E2E_ENV_FILE, readEnvFile } from "./e2e-setup.js";
 import { parseJunit } from "./junit.js";
 import type { GateRun } from "./runner.js";
 
@@ -29,13 +30,18 @@ export function e2eSelected(e2e: E2eConfig | undefined, phaseId: string): e2e is
   return !!e2e && e2e.enabled && e2e.configured_at !== null && (e2e.phases === "all" || e2e.phases.includes(phaseId));
 }
 
+/** The environment of an e2e run: the keys file, then the shell (which wins, as in `process.loadEnvFile`), then gates.env and the gate's own env. */
+export function e2eEnv(root: string, cfg: Config, e2e: E2eConfig): NodeJS.ProcessEnv {
+  return { ...readEnvFile(root), ...process.env, ...cfg.gates.env, ...e2e.env };
+}
+
 /** Problems that keep the configured gate from running at all (checked before every run and by `looprch e2e configure`). */
 export function e2eSetupProblems(root: string, cfg: Config, e2e: E2eConfig): { outcome: "config" | "missing"; reason: string } | null {
-  if (!existsSync(join(root, e2e.bin))) return { outcome: "missing", reason: `${e2e.bin} does not exist: install the e2e package in the project (npm i -D e2e @e2e-dev/web), then run looprch e2e configure` };
-  if (!existsSync(join(root, e2e.config))) return { outcome: "config", reason: `the e2e config ${e2e.config} does not exist` };
-  const env = { ...process.env, ...cfg.gates.env, ...e2e.env };
+  if (!existsSync(join(root, e2e.bin))) return { outcome: "missing", reason: `${e2e.bin} does not exist: install the e2e packages (looprch e2e init --install), then run looprch e2e configure` };
+  if (!existsSync(join(root, e2e.config))) return { outcome: "config", reason: `the e2e config ${e2e.config} does not exist (looprch e2e init writes one)` };
+  const env = e2eEnv(root, cfg, e2e);
   const unset = e2e.required_env.filter((k) => !env[k]);
-  if (unset.length) return { outcome: "config", reason: `required environment variable(s) not set: ${unset.join(", ")} (export them before running Looprch, or set gates.env)` };
+  if (unset.length) return { outcome: "config", reason: `not filled in yet: ${unset.join(", ")}. Put the value(s) in ${E2E_ENV_FILE} (or export them in your shell)` };
   return null;
 }
 
@@ -87,7 +93,7 @@ export function runE2eGate(root: string, cfg: Config, e2e: E2eConfig, gateRunId:
   const timeoutMs = parseDuration(e2e.timeout);
   const res = spawnSync(join(root, e2e.bin), argv.slice(1), {
     cwd: root,
-    env: { ...process.env, ...cfg.gates.env, ...e2e.env },
+    env: e2eEnv(root, cfg, e2e),
     encoding: "utf8",
     timeout: timeoutMs,
     maxBuffer: 64 * 1024 * 1024,

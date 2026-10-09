@@ -1,32 +1,25 @@
 import { join } from "node:path";
 import { readJsonIfExists, writeJsonAtomic } from "./fsx.js";
 import { projectPaths } from "./paths.js";
-import type { Disposition } from "./contract.js";
+import type { Disposition } from "./plan.js";
 
 /**
- * The debate ledger of one phase plan (`debate.json`): every item the Plan Debater, the plan lint
- * or the executability readback raised, how the Planner answered it and how the Debater judged
- * that answer. An item leaves the ledger only through a terminal status; nothing disappears in a
- * synthesis.
+ * The debate ledger of one phase plan (`debate.json`): every finding the Plan Debater raised, how
+ * the Planner answered it and how the Debater judged that answer.
  */
 
-export const ENTRY_SOURCES = ["debater", "independent", "lint", "readback"] as const;
-export type EntrySource = (typeof ENTRY_SOURCES)[number];
 export const VERDICTS = ["resolved", "conceded", "upheld"] as const;
 export type Verdict = (typeof VERDICTS)[number];
 export type EntryStatus = "open" | "resolved" | "conceded" | "contested" | "user_decided";
 
 export interface DebateEntry {
   id: string;
-  source: EntrySource;
+  source: "debater";
   severity: string;
   summary: string;
   section?: string;
-  refs?: string[];
-  evidence?: string;
-  failure_scenario?: string;
-  proposed_resolution?: string;
-  /** Debater pass that raised it (0: before the first pass, from the plan lint). */
+  suggestion?: string;
+  /** Debater pass that raised it. */
   round: number;
   status: EntryStatus;
   disposition?: Disposition & { round: number };
@@ -39,11 +32,11 @@ export interface RoundYield {
   round: number;
   raised: number;
   accepted: number;
-  partial: number;
   rejected: number;
   resolved: number;
   conceded: number;
   upheld: number;
+  /** Plan revisions written in answer to this round. */
   contract_changes: number;
 }
 
@@ -52,10 +45,6 @@ export interface DebateLedger {
   phase: string;
   /** Plan Debater passes so far (debate plus rebuttals). */
   rounds: number;
-  /** Executability readbacks so far. */
-  readbacks: number;
-  /** Extra Debater passes granted to confirm readback items. */
-  bonus: number;
   entries: DebateEntry[];
   yield: RoundYield[];
 }
@@ -65,7 +54,7 @@ export function ledgerPath(root: string, phase: string): string {
 }
 
 export function newLedger(phase: string): DebateLedger {
-  return { schema_version: 1, phase, rounds: 0, readbacks: 0, bonus: 0, entries: [], yield: [] };
+  return { schema_version: 1, phase, rounds: 0, entries: [], yield: [] };
 }
 
 export function loadLedger(root: string, phase: string): DebateLedger {
@@ -85,7 +74,7 @@ export const SERIOUS = new Set(["high", "critical"]);
 function yieldOf(l: DebateLedger, round: number): RoundYield {
   let y = l.yield.find((x) => x.round === round);
   if (!y) {
-    y = { round, raised: 0, accepted: 0, partial: 0, rejected: 0, resolved: 0, conceded: 0, upheld: 0, contract_changes: 0 };
+    y = { round, raised: 0, accepted: 0, rejected: 0, resolved: 0, conceded: 0, upheld: 0, contract_changes: 0 };
     l.yield.push(y);
   }
   return y;
@@ -105,16 +94,15 @@ export function addEntries(l: DebateLedger, list: Omit<DebateEntry, "status" | "
   return out;
 }
 
-/** Record the Planner's answers to the open items (the synthesis already passed its checks). */
-export function applyDispositions(l: DebateLedger, list: Disposition[], contractChanges: number): void {
+/** Record the Planner's answers to the open items and its plan revision. */
+export function applyDispositions(l: DebateLedger, list: Disposition[]): void {
   const y = yieldOf(l, l.rounds);
-  y.contract_changes += contractChanges;
+  y.contract_changes++;
   for (const d of list) {
     const e = l.entries.find((x) => x.id === d.id && x.status === "open");
     if (!e) continue;
     e.disposition = { ...d, round: l.rounds };
     if (d.decision === "accept") y.accepted++;
-    else if (d.decision === "partial") y.partial++;
     else y.rejected++;
   }
 }
@@ -131,7 +119,7 @@ export function applyVerdicts(l: DebateLedger, list: { id: string; verdict: Verd
   }
 }
 
-/** Close items without a Debater verdict (low severity, limits, user decisions). */
+/** Close items without a Debater verdict (agreement, low severity, limits, user decisions). */
 export function closeEntries(entries: DebateEntry[], status: Exclude<EntryStatus, "open">, note: string): void {
   for (const e of entries) {
     e.status = status;
@@ -142,16 +130,16 @@ export function closeEntries(entries: DebateEntry[], status: Exclude<EntryStatus
 /** One line per item for briefs and questions. */
 export function entryLine(e: DebateEntry): string {
   const last = e.verdicts.at(-1);
-  const tags = [e.severity, e.source, e.disposition ? `planner ${e.disposition.decision}` : null, last ? `debater ${last.verdict}` : null].filter(Boolean).join(", ");
+  const tags = [e.severity, e.disposition ? `planner ${e.disposition.decision}` : null, last ? `debater ${last.verdict}` : null].filter(Boolean).join(", ");
   return `${e.id} [${tags}]: ${e.summary}`;
 }
 
-/** Totals for the journal and the handover. */
+/** Totals for the journal, `status --json` and the handover. */
 export function ledgerSummary(l: DebateLedger): Record<string, number> {
   const count = (s: EntryStatus) => l.entries.filter((e) => e.status === s).length;
   return {
     rounds: l.rounds,
-    readbacks: l.readbacks,
+    readbacks: 0,
     items: l.entries.length,
     resolved: count("resolved"),
     conceded: count("conceded"),

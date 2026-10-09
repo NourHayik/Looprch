@@ -16,7 +16,7 @@ not on its allow list (for example `composer`, `php` or `npm test`). The run the
 "Antigravity auto-denied the command permission". To let Antigravity work as an Implementer or
 Tester, Looprch passes `--dangerously-skip-permissions` to every **write** run (Implementer and
 Tester). Antigravity then approves its own tool requests, which means **full access** to your
-machine for that run. Read-only roles (Planner, Plan Debater, Reviewer, Worker) keep
+machine for that run. The read-only side runs (the Worker and `/lr-review`) keep
 `--read-only`, which runs agy in its sandbox. `looprch doctor` lists this as
 `agent:agy:permissions`. Do not assign Antigravity to a write role if you do not accept this.
 

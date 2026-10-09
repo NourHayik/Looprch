@@ -25,7 +25,6 @@ export const EVENT_TYPES = [
   "expansion.executed",
   "context.over_budget",
   "mode.auto_delegate",
-  "readonly.violation",
   "gates.run",
   "gate.result",
   "checkpoint.committed",
@@ -49,18 +48,10 @@ export const EVENT_TYPES = [
   "protocol.mismatch",
   "lock.stale_recovered",
   "warning",
-  "contract.accepted",
-  "contract.amended",
-  "design.escalated",
-  "evidence.checked",
-  "evidence.unbacked",
-  "evidence.integrity",
+  "plan.accepted",
   "work.done",
-  "work.deviations",
   "debate.round",
   "debate.closed",
-  "readback.done",
-  "repair.packaged",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -236,8 +227,6 @@ const QUESTIONS: Record<QuestionKind, string> = {
   rate_limit_long: "An agent has been rate-limited for a long time: keep waiting or pause?",
   final_review: "The final review still requests changes: repair and review once more, repair and hand over, or pause?",
   debate_unresolved: "The plan debate reached its limit with serious disagreements: keep the Planner's plan, side with the Plan Debater, or pause?",
-  readback_unresolved: "The Implementer's model still has questions about the plan after the readbacks: approve anyway or pause?",
-  lineage_stuck: "A finding keeps coming back after repair and redesign: full-content repair, another Implementer, defer, or pause?",
 };
 
 const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined || v === null ? "" : JSON.stringify(v));
@@ -268,12 +257,6 @@ function findingsText(d: Record<string, unknown>): string {
   const shown = list.slice(0, 3).map((f) => `${f.id}${f.severity ? ` (${f.severity})` : ""}: ${clip(str(f.summary), 140)}`);
   if (total > shown.length) shown.push(`${total - shown.length} more`);
   return shown.join("; ") || "see the report";
-}
-
-function originsText(d: Record<string, unknown>): string {
-  const counts: Record<string, number> = {};
-  for (const f of arr<{ origin?: string }>(d.findings)) if (f.origin) counts[f.origin] = (counts[f.origin] ?? 0) + 1;
-  return ["unfixed", "regression", "missed"].filter((o) => counts[o]).map((o) => `${counts[o]} ${o}`).join(", ");
 }
 
 function resolutionsText(d: Record<string, unknown>): string {
@@ -319,16 +302,12 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
         `Reason: ${str(d.kind)}${lastLine(str(d.detail)) ? `: ${clip(lastLine(str(d.detail)), 160)}` : ""}`,
         `Action: ${followUp(e, all.slice(i + 1), /-(worker|reviewer-adhoc)-/.test(e.run_id ?? "") ? "None (side run)." : "Retry with the same agent.")}`,
       );
-    case "run.reask":
-      return d.mismatches ? block("[ISSUE]", "The handover file lists do not match git.", "Action: Asking the Implementer to correct the lists (no file changes).") : null;
     case "expansion.executed": {
       const r = (d.request ?? {}) as Record<string, unknown>;
       return `[EXPANSION] Added ${str(r.kind)} ${str(r.id)} to the ${roleName(e.role)} sources.`;
     }
     case "context.over_budget":
       return `[WARNING] The ${roleName(e.role)} packet is ${str(d.kb)} KB, above the ${str(d.budget)} KB budget of ${e.agent}. Continuing with the full packet.`;
-    case "readonly.violation":
-      return `[ISSUE] The read-only ${roleName(e.role)} run ${e.run_id} changed files: ${arr<string>(d.files).join(", ") || "(reported by the relay)"}.`;
     case "gates.run":
       return gatesLine(e, i, all);
     case "checkpoint.committed":
@@ -354,7 +333,7 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
     case "review.skipped":
       return block("[REVIEW SKIPPED]", `The review limit (${str(d.limit)}) is reached; as you chose, the final repair goes to handover without another review.`, `Open findings recorded in the handover: ${arr<string>(d.findings).join(", ") || "none"}`);
     case "handover.accepted":
-      return "[HANDOVER COMPLETE] Handover accepted; its file lists match git.";
+      return "[HANDOVER COMPLETE] Handover accepted; Looprch added the file lists from git.";
     case "phase.closed":
       return `[PHASE COMPLETE] ${phase} closed and merged (tag ${str(d.tag)}).`;
     case "project.done":
@@ -367,24 +346,12 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
       return "[WARNING] Recovered a stale project lock left by a stopped Looprch process.";
     case "warning":
       return `[WARNING] ${str(d.message)}`;
-    case "contract.accepted":
-      return `[CONTRACT] ${phase} contract: ${plural(num(d.obligations) ?? 0, "obligation")}, ${plural(num(d.deferrals) ?? 0, "deferral")}${num(d.decisions) ? `, ${plural(num(d.decisions)!, "decision")}` : ""}${num(d.packages) ? `, ${plural(num(d.packages)!, "work package")}` : ""}${num(d.tests) ? `, ${plural(num(d.tests)!, "planned test")}` : ""}${num(d.dispositions) ? `, ${plural(num(d.dispositions)!, "debate item")} answered` : ""}: .looprch/phases/${phase}/contract.json`;
-    case "contract.amended":
-      return `[CONTRACT AMENDED] Revision ${str(d.revision)}: ${[...arr<string>(d.obligations), ...arr<string>(d.deferrals)].join(", ") || "no additions"}${arr<string>(d.retired).length ? `; retired ${arr<string>(d.retired).join(", ")}` : ""}${arr<string>(d.design).length ? ` (repair design for ${arr<string>(d.design).join(", ")})` : ""}.`;
-    case "design.escalated":
-      return block(
-        "[REPAIR DESIGN]",
-        `The Planner designs the repair of ${arr<string>(d.findings).join(", ")} before the Implementer runs (${str(d.reason).replace(/_/g, " ")}).`,
-        ...(d.debate ? [`The Plan Debater challenges the design (and checks the revision)${arr<string>(d.redesign).length ? `; earlier designs did not hold for ${arr<string>(d.redesign).join(", ")}` : ""}.`] : []),
-      );
-    case "evidence.unbacked":
-      return block("[EVIDENCE MISMATCH]", `Tester verifications not backed by passing testcases in the gate run: ${arr<string>(d.verifications).join(", ")}.`, "Action: The Tester fixes or withdraws them (test repair round).");
-    case "work.done":
-      return `[PACKAGE DONE] ${str(d.kind) === "repair" ? "Repair" : "Work"} package${arr<string>(d.chain).length > 1 ? `s ${arr<string>(d.chain).join(", ")}` : ` ${str(d.id)}`} (${str(d.done)} of ${str(d.total)}).`;
-    case "work.deviations":
-      return `[DEVIATION] The Implementer changed files outside its package (the Reviewer judges each one): ${arr<string>(d.deviations).join(", ")}.`;
-    case "evidence.integrity":
-      return block("[TEST INTEGRITY]", `The phase adds skip or focus markers to tests in ${arr<string>(d.files).join(", ")}.`, "Action: The Tester removes them (or justifies each one) before the evidence counts.");
+    case "plan.accepted":
+      return `[PLAN] ${phase} plan: ${plural(num(d.todos) ?? 0, "todo")} in ${plural(num(d.sessions) ?? 1, "Implementer session")}${num(d.deferrals) ? `, ${plural(num(d.deferrals)!, "deferral")}` : ""}${num(d.dispositions) ? `, ${plural(num(d.dispositions)!, "debate item")} answered` : ""}: .looprch/phases/${phase}/plan.md`;
+    case "work.done": {
+      const open = arr<string>(d.open);
+      return `[SESSION DONE] Implementer session ${str(d.session)} of ${str(d.sessions)}: ${arr<string>(d.todos).join(", ") || "no todo reported"} done${open.length ? `; still open: ${open.join(", ")}` : ""}.`;
+    }
     case "debate.round": {
       const verdicts = arr<{ verdict: string }>(d.verdicts);
       const count = (v: string) => verdicts.filter((x) => x.verdict === v).length;
@@ -394,14 +361,8 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
       );
     }
     case "debate.closed":
-      return `[DEBATE CLOSED] ${str(d.rounds)} Debater pass(es), ${str(d.items)} item(s): ${str(d.resolved)} resolved, ${str(d.conceded)} conceded, ${str(d.contested)} contested, ${str(d.user_decided)} decided by you; ${str(d.contract_changes)} contract change(s).`;
-    case "readback.done":
-      return num(d.items)
-        ? block(`[READBACK ${str(d.n)} OF ${str(d.of)}]`, `The Implementer's model would have to ask or decide something in ${plural(num(d.items)!, "package")}.`, "Action: The Planner closes each item in the package; the Plan Debater checks it.")
-        : `[READBACK ${str(d.n)} OF ${str(d.of)}] The Implementer's model can execute every package without asking or deciding.`;
-    case "repair.packaged":
-      return `[REPAIR PACKAGES] The Reviewer's repairs run directly (no Planner design needed): ${arr<{ id: string; findings: string[] }>(d.packages).map((p) => `${p.id} (${p.findings.join(", ")})`).join("; ")}.`;
-    case "evidence.checked":
+      return `[DEBATE CLOSED] ${str(d.rounds)} Debater pass(es), ${str(d.items)} item(s): ${str(d.resolved)} resolved, ${str(d.conceded)} conceded, ${str(d.contested)} contested, ${str(d.user_decided)} decided by you.`;
+    case "run.reask":
     case "init.discovered":
     case "init.gates_acknowledged":
     case "config.changed":
@@ -496,30 +457,23 @@ function acceptedLine(e: LrEvent): string | null {
       return decision === "agree"
         ? "[REBUTTAL COMPLETE] The Plan Debater agrees with the revised plan."
         : block("[REBUTTAL COMPLETE]", `Result: the Plan Debater still disputes the plan${total ? ` (${plural(total, "new finding")}${severities(d.severities)})` : ""}.`, ...(total ? [`Summary: ${findingsText(d)}`] : []));
-    case "readback":
-      return decision === "ready" ? "[READBACK COMPLETE] Ready: no questions." : "[READBACK COMPLETE] The Implementer's model listed questions or decisions it would have to make.";
     case "synthesis":
       return `[PLAN UPDATED] The Planner updated the plan after the debate: .looprch/phases/${phase}/plan.md`;
     case "revise":
       return `[PLAN UPDATED] The Planner revised the plan as you asked: .looprch/phases/${phase}/plan.md`;
     case "context_answer":
-      return "[CONTEXT ANSWERED] The Planner wrote an addendum for the Implementer (context answer or repair design).";
-    case "design_review":
-      return decision === "findings"
-        ? block("[DESIGN DEBATE COMPLETE]", `Result: the repair design needs changes (${plural(total, "finding")}${severities(d.severities)}).`, `Summary: ${findingsText(d)}`)
-        : "[DESIGN DEBATE COMPLETE] Result: the repair design holds.";
+      return `[QUESTION ANSWERED] The Planner answered the Implementer's question (an addendum at the end of .looprch/phases/${phase}/plan.md).`;
     case "implementation":
     case "repair":
-      if (decision === "needs_context") return "[CONTEXT NEEDED] The Implementer asked the Planner for missing context.";
+      if (decision === "needs_context") return "[QUESTION] The Implementer is blocked and asks the Planner a question.";
       return `[${task === "implementation" ? "IMPLEMENTATION" : "REPAIR"} COMPLETE] The ${by} finished; ${plural(num(d.touched) ?? 0, "file")} touched.${resolutionsText(d)}`;
     case "testing":
       return decision === "pass" ? `[TESTING COMPLETE] Tester verdict: pass (${e.agent}).` : block("[TESTING COMPLETE]", `Tester verdict: fail (${plural(total, "failure")}).`, `Failures: ${findingsText(d)}`);
     case "review": {
       const round = num(d.review_round) ? ` (review round ${num(d.review_round)} of ${num(d.review_cap) ?? "?"})` : "";
-      const origins = originsText(d);
       if (decision === "approve")
         return total ? block(`[REVIEW COMPLETE] Approved by the ${by}${round}.`, `Notes (not repaired, listed in the handover): ${findingsText(d)}`) : `[REVIEW COMPLETE] Approved by the ${by}${round}.`;
-      return block(`[REVIEW COMPLETE]${round}`, `Result: Changes requested (${plural(total, "finding")}${severities(d.severities)}).`, ...(origins ? [`Origin: ${origins}`] : []), `Findings: ${findingsText(d)}`);
+      return block(`[REVIEW COMPLETE]${round}`, `Result: Changes requested (${plural(total, "finding")}${severities(d.severities)}).`, `Findings: ${findingsText(d)}`);
     }
     case "handover":
       return null;

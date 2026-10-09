@@ -17,11 +17,14 @@ later phases, new chats and other agents reuse it.
    manifest hash. A changed manifest asks again.
 4. **Roles**: for Planner, Plan Debater, Implementer, Tester, Reviewer and Worker you choose the
    agent, Direct or Delegate, the model (from `looprch models <agent>`, never invented), and
-   optional effort, timeout and fallbacks. Recommended: the strongest models for Planner, Plan
-   Debater and Reviewer, a Plan Debater from a different model family than the Planner, and a
-   cheaper Implementer.
-5. **E2E testing (optional)**: answer yes to set up the TesterArmy `e2e` gate now (the steps of
-   [/lr-e2e-test-init](e2e-testing.md)), or skip it; you can run `/lr-e2e-test-init` later.
+   optional effort, timeout and fallbacks. For the Implementer it also asks its context size in
+   KB (`--context-kb`): the Planner uses it to decide how many Implementer sessions a plan needs.
+   Recommended: the strongest models for Planner, Plan Debater and Reviewer, a Plan Debater from a
+   different model family than the Planner, and a cheaper Implementer.
+5. **E2E testing (optional)**: answer yes to set up the TesterArmy `e2e` gate now: three
+   questions, then `looprch e2e init` writes the config, a first test and a `.env.e2e` keys file;
+   you paste your key into that file and the gate is enabled (see
+   [/lr-e2e-test-init](e2e-testing.md)). Or skip it; you can run `/lr-e2e-test-init` later.
 6. **Validation**: `looprch config validate` must pass.
 
 ## Equivalent commands
@@ -32,8 +35,10 @@ looprch init discover
 looprch init ack-gates --manifest-sha256 <sha>
 looprch config set lead_host cursor
 looprch config set-role planner --mode direct --agent cursor --model <model>
-looprch config set-role implementer --mode delegate --agent opencode --model provider/model --effort high --timeout 2h
+looprch config set-role implementer --mode delegate --agent opencode --model provider/model --effort high --timeout 2h --context-kb 4000
 looprch config add-fallback implementer --mode delegate --agent codex --model <model>
+looprch e2e init --provider openrouter --url http://localhost:3000 --install --yes   # optional; then fill .env.e2e
+looprch e2e configure --enable
 looprch config validate
 ```
 

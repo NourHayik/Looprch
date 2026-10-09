@@ -1,13 +1,12 @@
-import { copyFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { copyFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { packageRoot, PROTOCOL, READ_ONLY_ROLES, type Role } from "./constants.js";
 import type { AgentId, Approval, Assignment, Config } from "./config.js";
-import { debateRounds, lineageAttempts, loadConfig, readbackRounds, reviewRounds } from "./config.js";
+import { debateRounds, loadConfig, reviewRounds } from "./config.js";
 import { addEntries, applyDispositions, applyVerdicts, closeEntries, entryLine, ledgerSummary, loadLedger, openEntries, saveLedger, SERIOUS, type DebateEntry, type DebateLedger } from "./debate.js";
-import { writeTraceability } from "./trace.js";
 import { readRelayUsage } from "../delegate/usage.js";
 import type { Action, RunRoleAction } from "./actions.js";
-import { assembleBrief, REPORT_FILE_TASKS, writeBrief, type Task } from "./briefs.js";
+import { assembleBrief, REPORT_FILE_TASKS, writeBrief, type ImplementerInfo, type Task } from "./briefs.js";
 import { now, nowIso, reviewTimeout } from "./clock.js";
 import { LrError, errorMessage } from "./errors.js";
 import { ensureDir, writeFileAtomic } from "./fsx.js";
@@ -17,8 +16,8 @@ import { projectPaths } from "./paths.js";
 import { preflightChecks } from "./preflight.js";
 import { extractResultBlock, validateResult, type ExpansionRequest, type RoleResult } from "./results.js";
 import { loadRun, relayOutDir, saveRun, type RunRecord, type RunStatus } from "./runs.js";
-import { loadState, markPhaseStart, newCurrent, saveState, type AssignmentChange, type Delta, type DesignState, type Finding, type LedgerEntry, type QuestionKind, type Scope, type Stage, type State, type Verification } from "./state.js";
-import { amend, blueprintsIn, CHAIN_LIMITS, contractChanges, contractIds, contractProblems, dispositionProblems, incomingDeferrals, loadContract, newContract, orderWork, plannedTests, planLint, referableIds, repairPackageProblems, saveContract, unresolvedByAmendment, WORK_LIMITS, type Contract, type ContractBody, type WorkItem } from "./contract.js";
+import { loadState, markPhaseStart, newCurrent, QUESTION_KINDS, saveState, type AssignmentChange, type Delta, type Finding, type QuestionKind, type Scope, type Stage, type State } from "./state.js";
+import { incomingDeferrals, loadPlan, newPlan, normalizeSessions, savePlan, unmappedRequirements, type Plan } from "./plan.js";
 import { adapterFor } from "../agents/index.js";
 import { readRelayResult } from "../delegate/result.js";
 import { forgetSession, recordSession, resumableSession, sessionKey } from "../delegate/sessions.js";
@@ -33,9 +32,8 @@ import { commitAll, currentBranch, dirtyFiles, gitOk, hasCommits, head } from ".
 import { commitBaseline, ensureRepo, requireIdentity } from "../git/baseline.js";
 import { closePhase, phaseBranch, startPhaseBranch } from "../git/phase.js";
 import { changedBetween, diffNameStatus, snapshotTree } from "../git/snapshot.js";
-import { loadGates, staleClaims, testcaseIndex, unbackedTests, type GatesOutcome } from "../gates/runner.js";
-import { E2E_GATE_ID, type E2eOutcome } from "../gates/e2e.js";
-import type { IntegrityProblem } from "../gates/integrity.js";
+import { loadGates, type GatesOutcome } from "../gates/runner.js";
+import type { E2eOutcome } from "../gates/e2e.js";
 
 export interface Engine {
   root: string;
@@ -166,7 +164,7 @@ function step(e: Engine): Action | null {
   const st = e.st;
   const c = st.current;
   if (c && st.protocol !== PROTOCOL && !st.flags.paused) {
-    st.flags.paused = { reason: `protocol_changed: this phase started with protocol ${st.protocol}; this Looprch uses protocol ${PROTOCOL}. Run looprch resume to continue with the new protocol.`, at: nowIso() };
+    st.flags.paused = { reason: `protocol_changed: this phase started with protocol ${st.protocol}; this Looprch uses protocol ${PROTOCOL}. Run looprch resume to continue with the new protocol${st.protocol < 5 ? " (the phase restarts at planning; its old plan files move to v07/)" : ""}.`, at: nowIso() };
     ev(e, { type: "protocol.mismatch", data: { phase_protocol: st.protocol, core_protocol: PROTOCOL } });
   }
   if (st.flags.paused?.reason.startsWith("protocol_changed")) return { ...base(e, st.flags.paused.reason), action: "paused", reason: st.flags.paused.reason };
@@ -200,28 +198,22 @@ function step(e: Engine): Action | null {
       return issueRun(e, "planner", "planning");
     case "debating": {
       const ledger = loadLedger(e.root, c.phase);
-      if (ledger.rounds > 0 && ledger.rounds >= debateLimit(e, ledger) && openEntries(ledger).length) return debateLimitReached(e, ledger);
+      if (ledger.rounds > 0 && ledger.rounds >= debateRounds(e.cfg) && openEntries(ledger).length) return debateLimitReached(e, ledger);
       return issueRun(e, "plan_debater", ledger.rounds === 0 ? "debate" : "rebuttal");
     }
     case "synthesizing":
       return issueRun(e, "planner", c.deltas.planner?.kind === "revise" ? "revise" : "synthesis");
     case "plan_approval": {
-      if (c.readback && !c.readback.clean) return c.readback.unresolved ? readbackQuestion(e) : issueRun(e, "implementer", "readback");
       if (approvalApplies(e.cfg.approvals.plan, phase)) {
-        const qid = `approve_plan-${c.phase}-r${c.round}-${readdirSafe(projectPaths(e.root).phase(c.phase)).filter((f) => f.startsWith("plan.r")).length}`;
+        const qid = `approve_plan-${c.phase}-r${c.round}-${readdirSafe(projectPaths(e.root).phase(c.phase)).filter((f) => /^plan\.r\d+\.md$/.test(f)).length}`;
         const ans = st.answers[qid];
         if (!ans) return ask(e, "approve_plan", qid, `Approve the plan for ${c.phase} "${c.title}"? Read .looprch/phases/${c.phase}/plan.md first.`, [{ id: "approve", label: "Approve and implement" }, { id: "revise", label: "Ask the Planner to revise (add --text)" }]);
       }
-      st.pending_checkpoint = { label: "plan approved" };
-      const wps = loadContract(e.root, c.phase)?.work_packages;
-      const ordered = wps?.length ? orderWork(wps) : null;
-      c.work = ordered ? { kind: "implementation", items: ordered, done: [] } : null;
-      transition(e, "implementing");
+      startImplementation(e);
       return null;
     }
     case "implementing":
     case "repairing":
-      if (c.design) return issueRun(e, c.design.step === "debate" ? "plan_debater" : "planner", c.design.step === "debate" ? "design_review" : "context_answer");
       if (c.context_request) return issueRun(e, "planner", "context_answer");
       return issueRun(e, "implementer", c.stage === "implementing" ? "implementation" : "repair");
     case "testing":
@@ -230,7 +222,6 @@ function step(e: Engine): Action | null {
       return { ...base(e, `Run the ${phase.gates.length} declared gate(s) of ${c.phase}`), action: "run_gates", command: ["looprch", "gates", "run", "--phase", c.phase] };
     case "reviewing": {
       if (c.final_review_pending) return finalReviewQuestion(e);
-      if (c.stuck_pending) return lineageQuestion(e);
       const snap = snapshotTree(e.root);
       if (snap !== c.snapshots.gates) {
         ev(e, { type: "warning", data: { message: "Working tree changed after the gates ran; re-running gates" } });
@@ -420,62 +411,55 @@ function assignments(e: Engine, role: Role): Assignment[] {
   return [rc, ...rc.fallbacks];
 }
 
+/** The Implementer the Planner writes the sessions for (the current assignment of this phase). */
+function implementerInfo(e: Engine): ImplementerInfo | null {
+  const rc = e.cfg.roles.implementer;
+  if (!rc) return null;
+  const list = [rc, ...rc.fallbacks];
+  const a = list[Math.min(e.st.current?.assignment_index.implementer ?? 0, list.length - 1)]!;
+  return { agent: a.agent, model: a.model, context_kb: a.context_kb ?? e.cfg.context_kb[a.agent] ?? null };
+}
+
 function runInputs(e: Engine, role: Role, task: Task, phase: PhaseDef): { path: string; why: string }[] {
   const c = cur(e);
   const list: [string, string][] = [];
-  const plan: [string, string] = ["plan.md", "approved implementation plan"];
-  const contract: [string, string] = ["contract.json", "the phase contract: binding obligations (rule, enforcement point, what proves it) and deferrals"];
+  const plan: [string, string] = ["plan.md", "the approved plan (with addenda at its end, if any): concept, decisions and how to do each todo"];
+  const planJson: [string, string] = ["plan.json", "the plan's todos, Implementer sessions, requirement map and deferrals"];
   switch (task) {
     case "planning":
       break;
     case "debate":
-      list.push(["plan.md", "the plan to review (read it after you wrote your independent risks)"], ["contract.json", "the plan's contract (obligations, deferrals, decisions, interfaces, work packages, planned tests) to challenge"], ["debate.json", "the debate ledger: items Looprch's plan lint already raised"]);
+      list.push(["plan.md", "the plan to challenge"], planJson);
       break;
     case "rebuttal":
-      list.push(["plan.md", "the revised plan"], ["contract.json", "the revised contract"], ["contract-diff.md", "what changed in the contract since your last pass"], ["debate.json", "the debate ledger: every item, the Planner's disposition and your earlier verdicts"], ["debate.md", "your last debate report"]);
+      list.push(["plan.md", "the revised plan"], planJson, ["debate.json", "the debate ledger: every item, the Planner's answer and your earlier verdicts"], ["debate.md", "your last debate report"]);
       break;
     case "synthesis":
-      list.push(["plan.md", "your plan"], ["contract.json", "your contract"], ["debate.md", "the latest Plan Debate report"], ["debate.json", "the debate ledger: every open item you must answer"]);
+      list.push(["plan.md", "your plan"], planJson, ["debate.md", "the latest Plan Debate report"], ["debate.json", "the debate ledger: the open items you answer"]);
       break;
     case "revise":
-      list.push(["plan.md", "the current plan"], ["contract.json", "the current contract"], ["debate.json", "the debate ledger"]);
-      break;
-    case "readback":
-      list.push(["plan.md", "the approved plan, with the blueprint files"], ["contract.json", "the contract: work packages, interfaces, decisions, planned tests"]);
+      list.push(["plan.md", "the current plan"], planJson, ["debate.json", "the debate ledger"]);
       break;
     case "context_answer":
-      list.push(["plan.md", "the current plan"], ["contract.json", "the current contract"]);
-      if (c.design) list.push(["review.md", "the review whose findings need a repair design"]);
-      if (c.design?.step === "revise") list.push([`design-debate-${c.addenda.length}.md`, "the Plan Debater's challenge of your repair design"]);
-      break;
-    case "design_review":
-      list.push(["plan.md", "the approved plan"], ["contract.json", "the contract including the proposed amendment"], ["review.md", "the review findings the design answers"]);
+      list.push(["plan.md", "the current plan"], planJson);
       break;
     case "implementation":
-      list.push(plan, contract);
+      list.push(plan);
       break;
     case "repair":
-      list.push(plan, contract, ["test-report.md", "latest test report"], ["gates.json", "machine evidence from Looprch's gate runs"]);
+      list.push(plan, ["test-report.md", "latest test report"], ["gates.json", "machine evidence from Looprch's gate runs"]);
       if (c.repair_source === "review") list.push(["review.md", "review findings to address"]);
       break;
     case "testing":
-      list.push(plan, contract);
+      list.push(plan);
       if (c.round > 0) list.push(["gates.json", "earlier gate runs"]);
-      if (c.repair_source === "review") list.push(["review.md", "review findings to verify"]);
+      if (c.repair_source === "review") list.push(["review.md", "review findings whose repairs you test"]);
       break;
     case "review":
-      list.push(
-        plan,
-        contract,
-        ["test-report.md", "Tester report"],
-        ["gates.json", "machine evidence (bound to the reviewed snapshot)"],
-        ["changed-files.txt", "every file the phase changed (git diff --name-status against the phase base): read each one and list it in files_reviewed"],
-        ["traceability.md", "requirement → obligation → decision → package → planned test → bound testcase → status, generated by Looprch"],
-        ["debate.json", "the plan debate: contested items you must verify"],
-      );
+      list.push(plan, ["test-report.md", "Tester report"], ["gates.json", "machine evidence (bound to the reviewed snapshot)"], ["changed-files.txt", "every file the phase changed (git diff --name-status against the phase base)"]);
       break;
     case "handover":
-      list.push(plan, contract, ["gates.json", "final gate runs"], ["test-report.md", "Tester report"], ["review.md", "Reviewer report"], ["traceability.md", "traceability matrix (completion evidence)"]);
+      list.push(plan, ["gates.json", "final gate runs"], ["test-report.md", "Tester report"], ["review.md", "Reviewer report"]);
       break;
     case "adhoc_review":
     case "worker":
@@ -491,12 +475,10 @@ function runInputs(e: Engine, role: Role, task: Task, phase: PhaseDef): { path: 
     if (incoming.length) {
       const path = phaseFile(e, "incoming-deferrals.json");
       writeFileAtomic(path, `${JSON.stringify(incoming, null, 2)}\n`);
-      out.push({ path: rel(e, path), why: `deferrals that closed phases made to ${c.phase}; the contract must cover each one (list its ref in "covers") or defer it again` });
+      out.push({ path: rel(e, path), why: `work that closed phases deferred to ${c.phase}; plan each item, or defer it again` });
     }
   }
-  if (task === "testing" || task === "review")
-    for (const p of c.repair_reports ?? []) out.push({ path: p, why: "Implementer repair report: how each finding was fixed (resolutions, limitations)" });
-  for (const a of c.addenda) out.push({ path: a, why: "Planner addendum (context answer or repair design); binding for this phase" });
+  if (task === "testing" || task === "review") for (const p of c.repair_reports ?? []) out.push({ path: p, why: "Implementer repair report: how each finding was fixed" });
   if (task === "planning" || task === "implementation" || task === "review") out.push(...closedHandovers(e, phase));
   if (role === "tester" || role === "reviewer") {
     const gates = phase.gates.map((g) => `${g.id}: ${g.command.join(" ")} [${g.kind}${g.negative ? ", negative" : ""}, evidence ${g.evidence.format}]`).join("; ");
@@ -591,33 +573,24 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
   c.run_seq[role] = seq;
   const runId = `${c.phase}-${role}-${seq}`;
   const attempt = (c.attempts[role] ?? 0) + 1;
-  prepareInputs(e, task);
+  if (task === "review") writeChangedFiles(e);
   const inputs = runInputs(e, role, task, phase);
-  const item = role === "implementer" && (task === "implementation" || task === "repair") ? currentWorkItem(c) : null;
   const before = snapshotTree(e.root);
-  if (item && c.work) {
-    c.work.chain = workChain(c).map((w) => w.id);
-    if (c.work.started?.id !== item.id) c.work.started = { id: item.id, tree: before };
-  }
   const own = c.deltas[role] ?? null;
-  const planned = task === "testing" && (!own || own.kind === "reask" || own.kind === "retry") ? plannedTestsDelta(e) : null;
-  const delta = item
-    ? workDelta(e, own, item)
-    : planned
-      ? { ...planned, ...(own ? { kind: own.kind, text: `${own.text}\n\n${planned.text}` } : {}) }
-      : (own ?? (task === "review" ? reviewTargetsDelta(e) : null));
+  const delta = task === "implementation" ? sessionDelta(e, own) : (own ?? (task === "review" ? reviewTargetsDelta(e) : null));
   if (delta?.kind === "switch" && c.phase_base) {
     const diffPath = join(projectPaths(e.root).run(runId), "diff.patch");
     writeFileAtomic(diffPath, gitOk(e.root, ["diff", c.phase_base, "HEAD"]));
     inputs.push({ path: rel(e, diffPath), why: "diff of this phase since its base (work so far)" });
     for (const r of previousFinals(e, role)) inputs.push({ path: r, why: "an earlier final message for this role" });
   }
-  const readOnly = READ_ONLY_ROLES.includes(role) || task === "readback";
+  const readOnly = READ_ONLY_ROLES.includes(role);
   const baseTimeout = chosen.timeout ?? e.cfg.roles[role]?.timeout ?? "60m";
   const ledger = task === "debate" || task === "rebuttal" || task === "synthesis" ? loadLedger(e.root, c.phase) : null;
-  const debateRound = ledger ? { n: task === "synthesis" ? ledger.rounds : ledger.rounds + 1, of: debateRounds(e.cfg) + ledger.bonus } : undefined;
+  const debateRound = ledger ? { n: task === "synthesis" ? ledger.rounds : ledger.rounds + 1, of: debateRounds(e.cfg) } : undefined;
   const reviewN = task === "review" ? (c.review_changes ?? 0) + 1 : 0;
   const timeout = task === "review" ? reviewTimeout(baseTimeout, reviewN) : baseTimeout;
+  const session = task === "implementation" && c.sessions?.length ? { n: (c.session_index ?? 0) + 1, of: c.sessions.length } : null;
   const brief = assembleBrief({
     root: e.root,
     runId,
@@ -635,6 +608,7 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
     resume: !!sessionId,
     gateIds: phase.gates.map((g) => g.id),
     readOnly,
+    ...(role === "planner" || role === "plan_debater" ? { implementer: implementerInfo(e) } : {}),
     ...(debateRound ? { debateRound } : {}),
     ...(task === "review" ? { reviewRound: { n: reviewN, of: reviewCap(e), tree: c.snapshots.gates, prevTree: reviewN > 1 ? (c.reviewed_tree ?? null) : null, timeout } } : {}),
   });
@@ -685,15 +659,10 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
     role,
     agent: chosen.agent,
     run_id: runId,
-    data: { task, mode: effective!, mode_reason: modeReason, model: chosen.model, session: sessionId, packet_bytes: packet?.bytes ?? null, brief_bytes: run.brief_bytes, input_bytes: inputBytes, attempt, timeout, ...(reviewN ? { review_round: reviewN, review_cap: reviewCap(e) } : {}), ...(debateRound ? { debate_round: debateRound.n, debate_cap: debateRound.of } : {}), ...(c.work?.chain && item ? { packages: c.work.chain } : {}) },
+    data: { task, mode: effective!, mode_reason: modeReason, model: chosen.model, session: sessionId, packet_bytes: packet?.bytes ?? null, brief_bytes: run.brief_bytes, input_bytes: inputBytes, attempt, timeout, ...(reviewN ? { review_round: reviewN, review_cap: reviewCap(e) } : {}), ...(debateRound ? { debate_round: debateRound.n, debate_cap: debateRound.of } : {}), ...(session ? { work_session: session.n, work_sessions: session.of } : {}) },
   });
   if (modeReason === "d05_auto_delegate") ev(e, { type: "mode.auto_delegate", role, agent: chosen.agent, run_id: runId, data: { host: e.host } });
   return runRoleAction(e, run);
-}
-
-/** The next package of the work queue, or null when there is none (or no queue). */
-function currentWorkItem(c: NonNullable<State["current"]>): WorkItem | null {
-  return c.work?.items.find((w) => !c.work!.done.includes(w.id)) ?? null;
 }
 
 function fileSize(abs: string): number {
@@ -704,143 +673,48 @@ function fileSize(abs: string): number {
   }
 }
 
-/**
- * The current package plus the small packages right after it that depend only on done or chained
- * packages, within CHAIN_LIMITS: one Implementer run executes them in order. Repair packages and
- * full-content packages run alone.
- */
-function workChain(c: NonNullable<State["current"]>): WorkItem[] {
-  const work = c.work;
-  const first = currentWorkItem(c);
-  if (!work || !first) return [];
-  const chain = [first];
-  if (work.kind !== "implementation" || first.precision === "full_content") return chain;
-  const pending = work.items.filter((w) => !work.done.includes(w.id));
-  let steps = first.steps.length;
-  let files = first.files.length;
-  for (const w of pending.slice(1)) {
-    if (chain.length >= CHAIN_LIMITS.packages || w.precision === "full_content") break;
-    const ok = (w.depends_on ?? []).every((d) => work.done.includes(d) || chain.some((x) => x.id === d));
-    if (!ok || steps + w.steps.length > CHAIN_LIMITS.steps || files + w.files.length > CHAIN_LIMITS.files) break;
-    chain.push(w);
-    steps += w.steps.length;
-    files += w.files.length;
-  }
-  return chain;
-}
-
-/** One package rendered as literal instructions, with the decisions, interfaces, blueprints and tests it cites. */
-function packageLines(e: Engine, contract: Contract | null, item: WorkItem, n: number, total: number, what: string): string[] {
+/** The Implementer's delta for one session: the todos to do, in order, on top of any earlier instruction. */
+function sessionDelta(e: Engine, own: Delta | null): Delta {
   const c = cur(e);
-  const decisions = (contract?.decisions ?? []).filter((d) => item.decisions?.includes(d.id));
-  const interfaces = (contract?.interfaces ?? []).filter((i) => item.interfaces?.includes(i.id));
-  const obligations = (contract?.obligations ?? []).filter((o) => item.obligations?.includes(o.id));
-  const blueprintDir = `.looprch/phases/${c.phase}/blueprints`;
-  return [
-    `## ${what} ${item.id} (${n} of ${total}): ${item.title}`,
-    "",
-    ...(item.precision === "full_content" ? ["Precision: full_content. The blueprint files below are complete: copy each one byte for byte, then do only the wiring the steps name."] : []),
-    ...(obligations.length ? ["Obligations (what the code must guarantee):", ...obligations.map((o) => `- ${o.id} [${o.kind}]: ${o.statement}${o.rule ? ` Rule: ${o.rule}` : ""} Enforced at: ${o.enforcement}`)] : []),
-    ...(item.findings?.length ? [`Findings: ${item.findings.join(", ")}`] : []),
-    ...(decisions.length ? ["Decisions (already taken; follow them):", ...decisions.map((d) => `- ${d.id}: ${d.decision}`)] : []),
-    ...(interfaces.length ? ["Interfaces (exact):", ...interfaces.map((i) => `- ${i.id} \`${i.file}\` ${i.symbol}: \`${i.signature}\`${i.errors.length ? `; errors: ${i.errors.join("; ")}` : ""}${i.invariants.length ? `; invariants: ${i.invariants.join("; ")}` : ""}`)] : []),
-    ...(item.sources?.length ? [`Sources (open only these in the packet): ${item.sources.join(", ")}`] : []),
-    "Files:",
-    ...item.files.map((f) => `- ${f.action} \`${f.path}\`: ${f.blueprint ? `copy the blueprint \`${blueprintDir}/${f.path}\` exactly. ` : ""}${f.content}`),
-    "Steps:",
-    ...item.steps.map((s, i) => `${i + 1}. ${s}`),
-    "Done when (check each yourself before you report implemented):",
-    ...item.done_when.map((d) => `- ${d}`),
-    ...(item.tests?.length ? ["Tests the Tester will write against your code (do not write them; make them pass):", ...item.tests.map((t) => `- ${t.id} [${t.kind}, ${t.obligation}]: given ${t.given}; when ${t.when}; then ${t.then}`)] : []),
-  ];
+  const sessions = c.sessions ?? [];
+  const idx = c.session_index ?? 0;
+  const ids = sessions[idx] ?? [];
+  const todos = new Map((loadPlan(e.root, c.phase)?.todos ?? []).map((t) => [t.id, t]));
+  const done = c.todos_done ?? [];
+  const lines = ids.length
+    ? [
+        `Session ${idx + 1} of ${sessions.length}. Do these todos in order, the way plan.md describes each one${done.length ? ` (done in earlier sessions: ${done.join(", ")})` : ""}:`,
+        ...ids.map((id) => {
+          const t = todos.get(id);
+          return `- ${id}: ${t?.title ?? "(see plan.md)"}${t?.section ? ` [${t.section}]` : ""}`;
+        }),
+        "",
+        `Report the ids you finished in "todos_done".${sessions.length > 1 ? " The other sessions run separately." : ""}`,
+      ]
+    : ["Implement the whole plan in plan.md."];
+  const text = lines.join("\n");
+  return { ...(own ?? {}), kind: own?.kind ?? "notes", text: own?.text ? `${own.text}\n\n${text}` : text };
 }
 
-/** The Implementer's delta for one package (or a chain): the packages rendered as literal instructions, plus the round's findings they repair. */
-function workDelta(e: Engine, base: Delta | null, item: WorkItem): Delta {
-  const c = cur(e);
-  const work = c.work!;
-  const contract = loadContract(e.root, c.phase);
-  const chain = work.chain?.length ? work.items.filter((w) => work.chain!.includes(w.id)) : [item];
-  const what = work.kind === "implementation" ? "Work package" : "Repair package";
-  const ids = chain.map((w) => w.id);
-  const report = chain.length > 1 ? `"work_packages": ${JSON.stringify(ids)}` : `"work_package": "${item.id}"`;
-  const lines = [
-    `Implement exactly ${chain.length > 1 ? `these ${chain.length} packages, in order,` : "this package"} and nothing else; the other packages run separately${work.done.length ? ` (done: ${work.done.join(", ")})` : ""}. Follow the steps in order and literally. If a step is ambiguous, contradicts the code or the contract, or needs a decision the package does not make, do not guess: return needs_context (or needs_design for a finding) and say which step. Change only the files listed; any other file you must change goes into "deviations" with the reason. Report ${report} in the result block.`,
-    "",
-    ...chain.flatMap((w) => [...packageLines(e, contract, w, work.items.findIndex((x) => x.id === w.id) + 1, work.items.length, what), ""]),
-  ];
-  const own = new Set(chain.flatMap((w) => w.findings ?? []));
-  const repairs = chain.some((w) => w.findings?.length);
-  const findings = repairs ? (base?.findings ?? []).filter((f) => own.has(f.id)) : base?.findings;
-  const text = base?.text ? `${base.text}\n\n${lines.join("\n")}` : lines.join("\n");
-  return { ...(base ?? {}), kind: base?.kind ?? "repair", text: repairs ? text.replace(/Report `resolutions` for: [^\n]*/, `Report \`resolutions\` for: ${[...own].join(", ")}.`) : text, ...(findings ? { findings } : {}) };
-}
-
-/** The Tester's first run: the tests the Planner requires, each proven by its own testcase. */
-function plannedTestsDelta(e: Engine): Delta | null {
-  const tests = plannedTests(loadContract(e.root, cur(e).phase));
-  if (!tests.length) return null;
-  return {
-    kind: "repair",
-    text: [
-      "The plan requires these tests. Write each one (you may add more), make it run in the declared gates, and report a verification for every planned test id with the testcase that proves it, in addition to every obligation and deferral:",
-      ...tests.map((t) => `- ${t.id} [${t.kind}, ${t.obligation}, ${t.wp}] in \`${t.file}\`: given ${t.given}; when ${t.when}; then ${t.then}`),
-    ].join("\n"),
-  };
-}
-
-/** A first review also judges the contested debate items and the Implementer's deviations. */
+/** A first review also checks the plan debate items the Planner and the Plan Debater did not agree on. */
 function reviewTargetsDelta(e: Engine): Delta | null {
   const c = cur(e);
   const contested = loadLedger(e.root, c.phase).entries.filter((x) => x.status === "contested");
-  const deviations = c.deviations ?? [];
-  if (!contested.length && !deviations.length) return null;
+  if (!contested.length || (c.review_changes ?? 0) > 0) return null;
   return {
     kind: "rereview",
-    text: [
-      ...(contested.length ? ["Contested plan debate items: the Planner and the Plan Debater did not agree. Judge each one in contract_review (met: the implementation is right as built; not_met: add a finding with cause plan or implementation):", ...contested.map((x) => `- ${entryLine(x)}`)] : []),
-      ...(deviations.length ? ["", "Implementer deviations (files changed outside their package). Judge each one in contract_review (met: justified and correct; not_met: add a finding):", ...deviations.map((d) => `- ${d.id} \`${d.file}\` (${d.run}): ${d.what}. Why: ${d.why}`)] : []),
-    ].join("\n"),
+    text: ["Plan debate items the Planner and the Plan Debater did not agree on. Check how the implementation handles each one, and report a finding where it is wrong:", ...contested.map((x) => `- ${entryLine(x)}`)].join("\n"),
   };
 }
 
-/** Inputs Looprch generates for a run: the contract diff for a rebuttal, the changed files and the traceability matrix for a review. */
-function prepareInputs(e: Engine, task: Task): void {
+/** changed-files.txt for a review: what the phase changed against its base. */
+function writeChangedFiles(e: Engine): void {
   const c = cur(e);
-  if (task === "rebuttal") {
-    const prev = readJsonSafe<ContractBody>(phaseFile(e, "contract.debated.json"));
-    const now = loadContract(e.root, c.phase);
-    if (now) {
-      const ch = contractChanges(prev, now);
-      const lines = ["# Contract changes since your last pass", "", `Revision ${now.revision}.`, "", `- added: ${ch.added.join(", ") || "none"}`, `- changed: ${ch.changed.join(", ") || "none"}`, `- removed: ${ch.removed.join(", ") || "none"}`];
-      writeFileAtomic(phaseFile(e, "contract-diff.md"), `${lines.join("\n")}\n`);
-    }
-  }
-  if (task === "review" && c.phase_base) {
-    const tree = c.snapshots.gates ?? snapshotTree(e.root);
-    const d = diffNameStatus(e.root, c.phase_base, tree);
-    const lines = [...d.added.map((p) => `A\t${p}`), ...d.modified.map((p) => `M\t${p}`), ...d.deleted.map((p) => `D\t${p}`), ...d.renamed.map((r) => `R\t${r.from}\t${r.to}`)];
-    writeFileAtomic(phaseFile(e, "changed-files.txt"), `${lines.join("\n")}\n`);
-  }
-  if (task === "review" || task === "handover") writeTraceability(e.root, c.phase, phaseDef(e, c.phase), loadContract(e.root, c.phase), c);
-}
-
-function readJsonSafe<T>(path: string): T | null {
-  try {
-    return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Files a review must read: what the phase changed (first review) or what changed since the last review. */
-function reviewScope(e: Engine): string[] {
-  const c = cur(e);
-  const tree = c.snapshots.gates;
-  if (!tree || !c.phase_base) return [];
-  const from = (c.review_changes ?? 0) > 0 && c.reviewed_tree ? c.reviewed_tree : c.phase_base;
-  const d = diffNameStatus(e.root, from, tree);
-  return [...d.added, ...d.modified, ...d.renamed.map((r) => r.to)];
+  if (!c.phase_base) return;
+  const tree = c.snapshots.gates ?? snapshotTree(e.root);
+  const d = diffNameStatus(e.root, c.phase_base, tree);
+  const lines = [...d.added.map((p) => `A\t${p}`), ...d.modified.map((p) => `M\t${p}`), ...d.deleted.map((p) => `D\t${p}`), ...d.renamed.map((r) => `R\t${r.from}\t${r.to}`)];
+  writeFileAtomic(phaseFile(e, "changed-files.txt"), `${lines.join("\n")}\n`);
 }
 
 function previousFinals(e: Engine, role: Role): string[] {
@@ -1026,8 +900,6 @@ const TASK_DECISIONS: Record<Task, string[]> = {
   context_answer: ["context_answer"],
   debate: ["findings", "no_findings", "needs_expansion"],
   rebuttal: ["agree", "findings"],
-  design_review: ["findings", "no_findings"],
-  readback: ["ready", "questions"],
   implementation: ["implemented", "needs_context"],
   repair: ["implemented", "needs_context"],
   handover: ["handover_ready"],
@@ -1055,24 +927,23 @@ function resultText(e: Engine, runId: string, finalMessage: string): string {
   return finalMessage;
 }
 
-/**
- * The checks acceptResult applies to a role's report (block, shape, task decision, phase rules),
- * without any side effect: `looprch check` lets a role fix its report before it ends, instead of a
- * re-ask that repeats the whole run. A `partial` check of a block-only text skips the rules about
- * the markdown; the run's report file is always checked in full, as the run's end reads it.
- */
-export function checkResult(e: Engine, run: RunRecord, text: string, partial = false): { ok: boolean; decision: string | null; errors: string[] } {
+/** Can Looprch read this answer? The block, its shape, the task's decision and SEV3 expansion ids; nothing else. */
+function readResult(e: Engine, run: RunRecord, text: string): { result: RoleResult | null; artifact: string; errors: string[] } {
   const ex = extractResultBlock(text);
-  if (!ex.ok) return { ok: false, decision: null, errors: [ex.error!] };
+  if (!ex.ok) return { result: null, artifact: ex.artifact, errors: [ex.error!] };
   const v = validateResult(run.role, ex.json, run.run_id);
-  if (!v.ok) return { ok: false, decision: null, errors: v.errors };
-  if (!TASK_DECISIONS[run.task].includes(v.result.decision)) return { ok: false, decision: v.result.decision, errors: [`decision "${v.result.decision}" is not valid for this task; use one of ${TASK_DECISIONS[run.task].join(", ")}`] };
-  const blockOnly = partial && !ex.artifact.trim();
-  const why = run.side ? null : phaseRuleViolation(e, run, v.result, blockOnly ? "## Coverage\n\n" + PLAN_SECTIONS_STUB : ex.artifact, blockOnly);
-  return why ? { ok: false, decision: v.result.decision, errors: why.split("; ") } : { ok: true, decision: v.result.decision, errors: [] };
+  if (!v.ok) return { result: null, artifact: ex.artifact, errors: v.errors };
+  if (!TASK_DECISIONS[run.task].includes(v.result.decision)) return { result: null, artifact: ex.artifact, errors: [`decision "${v.result.decision}" is not valid for this task; use one of ${TASK_DECISIONS[run.task].join(", ")}`] };
+  const expansion = v.result.decision === "needs_expansion" && !run.side ? expansionProblems(e, v.result.expansion_requests ?? []) : [];
+  if (expansion.length) return { result: null, artifact: ex.artifact, errors: expansion };
+  return { result: v.result, artifact: ex.artifact, errors: [] };
 }
 
-const PLAN_SECTIONS_STUB = ["Objectives", "Decisions", "Interfaces", "Data", "Security", "Error handling", "Edge cases", "Sequence", "Tests", "Verification", "Definition of Done", "Deferred"].map((h) => `## ${h}`).join("\n");
+/** The checks acceptResult applies to a role's report, without any side effect (`looprch check`). */
+export function checkResult(e: Engine, run: RunRecord, text: string): { ok: boolean; decision: string | null; errors: string[] } {
+  const r = readResult(e, run, text);
+  return { ok: !!r.result, decision: r.result?.decision ?? null, errors: r.errors };
+}
 
 export function acceptResult(e: Engine, run: RunRecord, finalMessageIn: string, sessionId: string | null, readOnlyViolation = false): AcceptOutcome {
   const st = e.st;
@@ -1097,29 +968,13 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessageIn: string, 
     st.runs_index[run.run_id] = { role: run.role, status, attempt: run.attempt, side: run.side };
     if (!run.side && st.current?.active_run === run.run_id) st.current.active_run = null;
   };
-  if (run.read_only && (readOnlyViolation || run.touched_files.length)) {
+  if (run.side && run.read_only && (readOnlyViolation || run.touched_files.length)) {
     finish("rejected");
-    ev(e, { type: "readonly.violation", role: run.role, agent: run.agent, run_id: run.run_id, data: { files: run.touched_files, relay_flag: readOnlyViolation } });
-    if (!run.side) block(e, "readonly_violation", `The read-only ${run.role} run changed files: ${run.touched_files.join(", ") || "(reported by the relay)"}`, "Looprch never reverts files. Review and undo the changes yourself, then run looprch resume.", { files: run.touched_files });
-    return { status: "rejected", decision: null, artifact: null, errors: ["read-only violation"] };
+    const errors = [`the advisory run changed files: ${run.touched_files.join(", ") || "(reported by the relay)"}; its answer is discarded (Looprch never reverts files)`];
+    ev(e, { type: "result.rejected", role: run.role, agent: run.agent, run_id: run.run_id, data: { errors } });
+    return { status: "rejected", decision: null, artifact: null, errors };
   }
-  const ex = extractResultBlock(finalMessage);
-  let errors: string[] = [];
-  let result: RoleResult | null = null;
-  if (!ex.ok) errors = [ex.error!];
-  else {
-    const v = validateResult(run.role, ex.json, run.run_id);
-    if (!v.ok) errors = v.errors;
-    else if (!TASK_DECISIONS[run.task].includes(v.result.decision)) errors = [`decision "${v.result.decision}" is not valid for this task; use one of ${TASK_DECISIONS[run.task].join(", ")}`];
-    else result = v.result;
-  }
-  if (result && !run.side) {
-    const why = phaseRuleViolation(e, run, result, ex.artifact);
-    if (why) {
-      errors = [why];
-      result = null;
-    }
-  }
+  const { result, artifact, errors } = readResult(e, run, finalMessage);
   if (!result) {
     finish("rejected");
     ev(e, { type: "result.rejected", role: run.role, agent: run.agent, run_id: run.run_id, data: { errors } });
@@ -1129,13 +984,13 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessageIn: string, 
       c.reask_count++;
       const again =
         run.role === "planner" && REPORT_FILE_TASKS.has(run.task)
-          ? "Write your complete report again, the markdown and exactly one valid looprch-result block at the end, to your report file (named in the self-check below), and run looprch check until it prints ok. Looprch validates that file, not your final message."
+          ? "Write your complete report again, the markdown and exactly one valid looprch-result block at the end, to your report file (named in the self-check below), and run looprch check until it prints ok."
           : "Reply again with your complete report and exactly one valid looprch-result block at the end.";
-      c.deltas[run.role] = { ...(c.deltas[run.role] ?? {}), kind: "reask", text: `Your previous report was rejected: ${errors.join("; ")}. ${again}${c.deltas[run.role]?.text ? `\n\nEarlier instructions still apply:\n${c.deltas[run.role]!.text}` : ""}` };
+      c.deltas[run.role] = { ...(c.deltas[run.role] ?? {}), kind: "reask", text: `Looprch could not read your previous result: ${errors.join("; ")}. ${again}${c.deltas[run.role]?.text ? `\n\nEarlier instructions still apply:\n${c.deltas[run.role]!.text}` : ""}` };
       ev(e, { type: "run.reask", role: run.role, agent: run.agent, run_id: run.run_id, data: { errors } });
       return { status: "reask", decision: null, artifact: null, errors };
     }
-    block(e, "result_invalid", `${run.role} did not return a valid result block twice: ${errors.join("; ")}`, `See .looprch/runs/${run.run_id}/final.md, then run looprch resume to try again`);
+    block(e, "result_invalid", `${run.role} did not return a readable result block twice: ${errors.join("; ")}`, `See .looprch/runs/${run.run_id}/final.md, then run looprch resume to try again`);
     return { status: "rejected", decision: null, artifact: null, errors };
   }
   run.decision = result.decision;
@@ -1154,275 +1009,36 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessageIn: string, 
       ...(run.usage ? { usage: run.usage } : {}),
       findings_total: reported.length,
       severities: severityCounts(reported),
-      findings: reported.map((f) => ({
-        id: f.id,
-        ...(f.severity ? { severity: f.severity } : {}),
-        ...(f.owner ? { owner: f.owner } : {}),
-        ...(f.origin ? { origin: f.origin } : {}),
-        ...("cause" in f && f.cause ? { cause: f.cause } : {}),
-        ...("related" in f && f.related ? { related: f.related } : {}),
-        ...("obligations" in f && f.obligations?.length ? { obligations: f.obligations } : {}),
-        summary: f.summary.slice(0, 300),
-      })),
+      findings: reported.map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), ...("owner" in f && f.owner ? { owner: f.owner } : {}), summary: f.summary.slice(0, 300) })),
       ...(run.task === "review" && !run.side ? { review_round: (st.current?.review_changes ?? 0) + 1, review_cap: reviewCap(e) } : {}),
-      ...(result.resolutions ? { resolutions: result.resolutions.map((r) => ({ id: r.id, status: r.status, ...(r.files ? { files: r.files.length } : {}) })) } : {}),
-      ...(result.verifications ? { verifications: result.verifications.map((v) => ({ id: v.id, status: v.status, tests: v.tests.length, variants: v.variants.length })) } : {}),
-      ...(result.prior ? { prior: result.prior.map((p) => ({ id: p.id, status: p.status })) } : {}),
-      ...(result.contract_review ? { contract_unmet: result.contract_review.filter((x) => x.status === "not_met").map((x) => x.id) } : {}),
+      ...(result.resolutions ? { resolutions: result.resolutions.map((r) => ({ id: r.id, status: r.status })) } : {}),
       ...(result.debate_dispositions ? { dispositions: result.debate_dispositions.map((d) => ({ id: d.id, decision: d.decision })) } : {}),
+      ...(result.todos_done ? { todos_done: result.todos_done } : {}),
     },
   });
-  if (run.side) return { status: "accepted", decision: result.decision, artifact: writeSideOutput(e, run, ex.artifact, result), errors: [] };
+  if (run.side) return { status: "accepted", decision: result.decision, artifact: writeSideOutput(e, run, artifact, result), errors: [] };
   const c = cur(e);
   c.reask_count = 0;
   c.attempts[run.role] = 0;
   const priorDelta = c.deltas[run.role];
   delete c.deltas[run.role];
-  const artifact = applyResult(e, run, result, ex.artifact, priorDelta ?? null);
-  return { status: "accepted", decision: result.decision, artifact, errors: [] };
-}
-
-function contractContext(e: Engine) {
-  const c = cur(e);
-  return { phase: phaseDef(e, c.phase), manifest: e.manifest, incoming: incomingDeferrals(e.root, e.manifest, e.st, c.phase) };
-}
-
-function obligationOf(contract: Contract | null, id: string) {
-  return contract?.obligations.find((o) => o.id === id) ?? null;
-}
-
-const TEST_GATE_KINDS = new Set(["test", "integration"]);
-/** gate_id of the problems Looprch raises when a Tester claim is not backed by the gate evidence. */
-const EVIDENCE_GATE = "evidence-binding";
-
-/** An obligation the Tester may mark `inspected`: procedural, or proven only by non-test gates. */
-function inspectable(e: Engine, contract: Contract | null, id: string): boolean {
-  if (contract?.deferrals.some((d) => d.id === id)) return true;
-  const o = obligationOf(contract, id);
-  if (!o) return false;
-  if (o.kind === "procedure") return true;
-  const gates = phaseDef(e, cur(e).phase).gates;
-  return o.gates.every((g) => !TEST_GATE_KINDS.has(gates.find((x) => x.id === g)?.kind ?? "test"));
-}
-
-function joinProblems(list: string[]): string | null {
-  return list.length ? list.join("; ") : null;
-}
-
-/**
- * Checks that need the phase state: the contract covers the phase, debate findings are
- * dispositioned, resolutions and verifications cover their findings and match the diff and the
- * contract, reviews cover the contract and stay consistent with earlier findings.
- */
-function phaseRuleViolation(e: Engine, run: RunRecord, r: RoleResult, artifact: string, blockOnly = false): string | null {
-  const c = e.st.current;
-  if (!c) return null;
-  const contract = loadContract(e.root, c.phase);
-  const problems: string[] = [];
-  if (r.decision === "needs_expansion") problems.push(...expansionProblems(e, r.expansion_requests ?? []));
-  switch (run.task) {
-    case "planning":
-    case "synthesis":
-    case "revise": {
-      if (!r.contract) break;
-      problems.push(...contractProblems(r.contract, contractContext(e)));
-      problems.push(...planLint(r.contract, artifact, (p) => existsSync(join(e.root, p))).errors.filter((x) => !blockOnly || !/is a blueprint, but the report has no/.test(x)));
-      if (run.task === "planning") break;
-      const open = openEntries(loadLedger(e.root, c.phase)).map((x) => x.id);
-      if (open.length) problems.push(...dispositionProblems(r.debate_dispositions, open, r.contract, loadContract(e.root, c.phase)));
-      const rejected = (c.debate_final ?? []).filter((id) => r.debate_dispositions?.find((d) => d.id === id)?.decision === "reject");
-      if (rejected.length) problems.push(`the user decided ${rejected.join(", ")} for the Plan Debater: accept them (decision accept with the changed refs)`);
-      break;
-    }
-    case "debate":
-      if (r.decision !== "needs_expansion" && !r.independent_risks?.length)
-        problems.push('the first debate pass lists "independent_risks": the risky decisions and boundaries you derived from the packet before reading the plan, each with the contract ids that cover it ([] when none does)');
-      break;
-    case "rebuttal": {
-      const open = openEntries(loadLedger(e.root, c.phase)).map((x) => x.id);
-      const judged = new Set((r.verdicts ?? []).map((v) => v.id));
-      const missing = open.filter((id) => !judged.has(id));
-      if (missing.length) problems.push(`verdicts must judge the Planner's answer to every open item ({"id","verdict":"resolved|conceded|upheld","note"}); missing: ${missing.join(", ")}`);
-      const unknown = [...judged].filter((id) => !open.includes(id));
-      if (unknown.length) problems.push(`verdicts name items that are not open: ${unknown.join(", ")} (raise new defects as findings with new ids)`);
-      if (r.decision === "agree" && (r.verdicts ?? []).some((v) => v.verdict === "upheld")) problems.push("decision agree with an upheld verdict: use decision findings");
-      if (r.decision === "agree" && (r.findings ?? []).some((f) => f.severity !== "low")) problems.push("decision agree with a new finding above low: use decision findings");
-      const known = new Set(loadLedger(e.root, c.phase).entries.map((x) => x.id));
-      const reused = (r.findings ?? []).filter((f) => known.has(f.id)).map((f) => f.id);
-      if (reused.length) problems.push(`new findings need new ids; already in the ledger: ${reused.join(", ")}`);
-      break;
-    }
-    case "readback": {
-      const got = new Set((r.packages ?? []).map((p) => p.id));
-      const missing = (contract?.work_packages ?? []).map((w) => w.id).filter((id) => !got.has(id));
-      if (missing.length) problems.push(`packages must list every work package of the contract; missing: ${missing.join(", ")}`);
-      break;
-    }
-    case "context_answer": {
-      const building = c.work?.kind === "implementation" && !c.design;
-      if (contract && r.contract_amendment)
-        problems.push(...contractProblems(amend(contract, r.contract_amendment), contractContext(e), { amended: !building }).map((p) => `after the amendment: ${p}${building ? " (during implementation, a new obligation needs a work package in contract_amendment.work_packages)" : ""}`));
-      if (c.design) {
-        problems.push(...repairPackageProblems(r.repair_packages, c.design.findings));
-        const mustAmend = c.design.amend ?? c.design.findings;
-        if (mustAmend.length && !r.contract_amendment)
-          problems.push(`the design must amend the contract for ${mustAmend.join(", ")}: return "contract_amendment" with the obligations (or deferrals) that define each repair, each listing the finding ids it answers in "resolves"`);
-        const open = unresolvedByAmendment(r.contract_amendment, mustAmend);
-        if (r.contract_amendment && open.length) problems.push(`every finding the design amends the contract for needs an amended obligation or deferral that lists it in "resolves"; missing: ${open.join(", ")}`);
-        const blueprints = blueprintsIn(artifact);
-        for (const p of r.repair_packages ?? []) {
-          if (c.design.blueprint && (p.precision !== "full_content" || !p.files.every((f) => f.action === "delete" || f.blueprint))) problems.push(`${p.id}: the user chose full content: precision "full_content" and every changed file a blueprint`);
-          for (const f of p.files) if (!blockOnly && f.blueprint && !blueprints.has(f.path.replace(/^\.\//, ""))) problems.push(`${p.id}: ${f.path} is a blueprint, but your report has no \`\`\`<lang> blueprint=${f.path} block with its full content`);
-        }
-        if (c.design.defer) {
-          const deferred = new Set((r.contract_amendment?.deferrals ?? []).flatMap((x) => x.resolves ?? []));
-          const missing = c.design.findings.filter((id) => !deferred.has(id));
-          if (missing.length) problems.push(`the user chose to defer: the amendment needs a deferral (to_phase, interim, "resolves") for ${missing.join(", ")}`);
-        }
-      }
-      break;
-    }
-    case "implementation":
-    case "repair": {
-      const item = currentWorkItem(c);
-      if (item && r.decision === "implemented") {
-        const chain = c.work?.chain?.length ? c.work.chain : [item.id];
-        const reported = r.work_packages ?? (r.work_package ? [r.work_package] : []);
-        if (!sameSet(reported, chain)) problems.push(chain.length > 1 ? `report "work_packages": ${JSON.stringify(chain)} (the packages this run implemented)` : `report "work_package": "${item.id}" (the package this run implemented)`);
-        const norm = (p: string) => (p.startsWith(`${e.root}/`) ? p.slice(e.root.length + 1) : p).replace(/^\.\//, "");
-        const listed = new Set((c.work?.items ?? []).filter((w) => chain.includes(w.id)).flatMap((w) => w.files.map((f) => norm(f.path))));
-        const declared = new Set((r.deviations ?? []).map((d) => norm(d.file)));
-        const since = c.work?.started?.id === item.id ? c.work.started.tree : run.git_before;
-        const touched = since ? changedBetween(e.root, since, run.git_after ?? snapshotTree(e.root)) : run.touched_files;
-        const extra = touched.filter((p) => !listed.has(p) && !declared.has(p));
-        if (extra.length) problems.push(`you changed files your package does not list: ${extra.slice(0, 20).join(", ")}. Undo those changes, or report each one in "deviations" ({"file","what","why"}); the Reviewer judges every deviation`);
-      }
-      if (run.task !== "repair" || r.decision !== "implemented" || c.repair_source !== "review") break;
-      const got = new Map((r.resolutions ?? []).map((x) => [x.id, x]));
-      const assigned = item?.findings ?? (c.deltas.implementer?.findings ?? []).map((f) => f.id);
-      const missing = assigned.filter((id) => !got.has(id));
-      if (missing.length) problems.push(`resolutions must list every finding assigned to you ({"id","status":"fixed|not_fixed|needs_design","note","files"}); missing: ${missing.join(", ")}`);
-      if (c.reviewed_tree) {
-        const changed = new Set(changedBetween(e.root, c.reviewed_tree, snapshotTree(e.root)));
-        const norm = (p: string) => (p.startsWith(`${e.root}/`) ? p.slice(e.root.length + 1) : p).replace(/^\.\//, "");
-        const unchanged = (r.resolutions ?? []).filter((x) => x.status === "fixed" && !(x.files ?? []).some((f) => changed.has(norm(f)))).map((x) => x.id);
-        if (unchanged.length) problems.push(`these resolutions say fixed, but none of their files changed since the review: ${unchanged.join(", ")}. List the files your repair changed, or report not_fixed`);
-      }
-      break;
-    }
-    case "testing": {
-      const verifs = r.verifications ?? [];
-      const byId = new Map(verifs.map((v) => [v.id, v]));
-      const failed = verifs.filter((v) => v.status === "failed").map((v) => v.id);
-      if (r.decision === "pass" && failed.length) problems.push(`decision pass with failed verifications (${failed.join(", ")}): return fail and list them in failures`);
-      if (contract) {
-        const known = new Set((c.tester_verifications ?? []).map((v) => v.id));
-        const retired = new Set(c.retired_obligations ?? []);
-        const uncovered = [...contractIds(contract), ...plannedTests(contract).filter((t) => !retired.has(t.obligation)).map((t) => t.id)].filter((id) => !byId.has(id) && !known.has(id));
-        if (uncovered.length) problems.push(`verifications must cover every contract obligation, deferral and planned test ({"id","status":"verified|failed|inspected","tests":[testcase names],"variants":[]}); missing: ${uncovered.slice(0, 30).join(", ")}${uncovered.length > 30 ? ` and ${uncovered.length - 30} more` : ""}`);
-        for (const t of plannedTests(contract)) {
-          const v = byId.get(t.id);
-          if (v?.status === "inspected") problems.push(`${t.id} is a planned test: verify it with a testcase, not by inspection`);
-        }
-      }
-      const assigned = (c.deltas.tester?.findings ?? []).filter((f) => c.repair_source === "review" || f.gate_id === EVIDENCE_GATE);
-      const unverified = assigned.map((f) => f.id).filter((id) => !byId.has(id));
-      if (unverified.length) problems.push(`verifications must list every review finding in the Delta; missing: ${unverified.join(", ")}`);
-      for (const f of assigned) {
-        const v = byId.get(f.id);
-        if (!v) continue;
-        const serious = f.severity === "high" || f.severity === "critical";
-        if (v.status === "verified" && serious && !v.variants.length) problems.push(`${f.id} is ${f.severity}: list the variants you tested beyond the Reviewer's example in "variants"`);
-        if (v.status === "inspected" && serious) problems.push(`${f.id} is ${f.severity}: verify it with a test (status verified with tests), not by inspection`);
-      }
-      for (const v of verifs) {
-        if (v.status !== "inspected" || assigned.some((f) => f.id === v.id)) continue;
-        if (contract && contractIds(contract).includes(v.id) && !inspectable(e, contract, v.id)) problems.push(`${v.id} is checked by a test gate: verify it with a test, not by inspection`);
-      }
-      break;
-    }
-    case "review": {
-      const n = (c.review_changes ?? 0) + 1;
-      if (!/^#{1,3}\s*Coverage\b/m.test(artifact)) problems.push("the review report must start with a ## Coverage section");
-      const findings = r.findings ?? [];
-      const reviewTargets = reviewTargetIds(e, contract);
-      const ids = new Set([...referableIds(contract), ...reviewTargets]);
-      for (const f of findings) {
-        const bad = (f.obligations ?? []).filter((o) => !ids.has(o));
-        if (contract && bad.length) problems.push(`${f.id}: obligations ${bad.join(", ")} are not in contract.json`);
-      }
-      const read = new Set((r.files_reviewed ?? []).map((p) => p.replace(/^\.\//, "")));
-      const unread = reviewScope(e).filter((p) => !read.has(p));
-      if (unread.length) problems.push(`files_reviewed must list every file the ${n === 1 ? "phase" : "repair"} changed (changed-files.txt); you did not list: ${unread.slice(0, 30).join(", ")}${unread.length > 30 ? ` and ${unread.length - 30} more` : ""}`);
-      if (contract && n === 1) {
-        const reviewed = new Map((r.contract_review ?? []).map((x) => [x.id, x.status]));
-        const missing = reviewTargets.filter((id) => !reviewed.has(id));
-        if (missing.length) problems.push(`contract_review must give met or not_met for every obligation, deferral and decision in contract.json, every contested debate item and every Implementer deviation (see the Delta); missing: ${missing.slice(0, 30).join(", ")}${missing.length > 30 ? ` and ${missing.length - 30} more` : ""}`);
-        const cited = new Set(findings.flatMap((f) => f.obligations ?? []));
-        const orphan = [...reviewed].filter(([id, s]) => s === "not_met" && !cited.has(id)).map(([id]) => id);
-        if (orphan.length) problems.push(`every not_met obligation needs a finding that lists it in "obligations": ${orphan.join(", ")}`);
-      }
-      problems.push(...rereviewProblems(c, r));
-      if (r.decision === "changes_requested" && n >= reviewCap(e) && !findings.some((f) => f.severity === "high" || f.severity === "critical"))
-        problems.push("this is the final review: changes_requested needs a high or critical finding; approve and keep the medium and low findings in findings");
-      break;
-    }
-    default:
-      break;
-  }
-  return joinProblems(problems);
+  const path = applyResult(e, run, result, artifact, priorDelta ?? null);
+  return { status: "accepted", decision: result.decision, artifact: path, errors: [] };
 }
 
 /**
  * Expansion requests name SEV3 sources only: a document id (or a requirement id a document
- * carries) or a phase id of the manifest. Anything else (a project file, a path under .looprch/)
- * is not a source the toolkit can add; the role is asked again instead of blocking the phase.
+ * carries) or a phase id of the manifest; the toolkit cannot build anything else.
  */
 function expansionProblems(e: Engine, requests: ExpansionRequest[]): string[] {
-  if (!requests.length) return ['decision needs_expansion needs "expansion_requests" naming SEV3 document or phase ids'];
   const docs = new Set(e.manifest.documents.flatMap((d) => [d.id, ...d.ids]));
   const phases = new Set(e.manifest.phases.map((p) => p.id));
   const bad = requests.filter((x) => (x.kind === "document" ? !docs.has(x.id) : !phases.has(x.id))).map((x) => `${x.kind} ${x.id}`);
   if (!bad.length) return [];
   const sample = e.manifest.documents.slice(0, 12).map((d) => d.id).join(", ");
   return [
-    `expansion requests must name SEV3 document ids (from phases/manifest.json, for example ${sample}) or phase ids; not: ${bad.join(", ")}. Project files are read directly from the repository, and .looprch/user-rules.md is listed in your inputs when it exists (an absent file means the project has no additional user rules). If a source the plan needs does not exist, decide the behavior in the plan (or defer it with a fail-closed interim) instead of requesting it.`,
+    `expansion requests must name SEV3 document ids (from phases/manifest.json, for example ${sample}) or phase ids; not: ${bad.join(", ")}. Project files are read directly from the repository. If a source the plan needs does not exist, decide the behavior in the plan (or defer it) instead of requesting it.`,
   ];
-}
-
-/** What a first review must judge in contract_review: obligations, deferrals, decisions, contested debate items, Implementer deviations. */
-function reviewTargetIds(e: Engine, contract: Contract | null): string[] {
-  const c = cur(e);
-  const contested = loadLedger(e.root, c.phase).entries.filter((x) => x.status === "contested").map((x) => x.id);
-  return [...contractIds(contract), ...(contract?.decisions ?? []).map((d) => d.id), ...contested, ...(c.deviations ?? []).map((d) => d.id)];
-}
-
-/** A re-review states fixed/unfixed for every earlier finding; ids and origins must agree with that. */
-function rereviewProblems(c: NonNullable<State["current"]>, r: RoleResult): string[] {
-  const ledger = c.finding_ledger ?? {};
-  const findings = r.findings ?? [];
-  const problems: string[] = [];
-  for (const f of findings) if (f.related && !ledger[f.related]) problems.push(`${f.id}: related ${f.related} is not an earlier finding of this phase`);
-  const delta = (c.review_changes ?? 0) > 0 ? c.review_findings : [];
-  if (!delta.length) {
-    const reused = findings.filter((f) => ledger[f.id]).map((f) => f.id);
-    if (reused.length) problems.push(`ids ${reused.join(", ")} were used by an earlier review; give new findings new ids (with "related" when they concern the same rule)`);
-    return problems;
-  }
-  const prior = new Map((r.prior ?? []).map((p) => [p.id, p.status]));
-  const missing = delta.map((f) => f.id).filter((id) => !prior.has(id));
-  if (missing.length) problems.push(`a re-review lists every earlier finding in "prior" ({"id","status":"fixed|unfixed"}); missing: ${missing.join(", ")}`);
-  const open = new Set(delta.map((f) => f.id));
-  for (const f of findings) {
-    if (open.has(f.id)) {
-      if (f.origin !== "unfixed") problems.push(`${f.id} is an earlier finding: report it only as origin unfixed (a new way to break the rule gets a new id with "related": "${f.id}")`);
-      else if (prior.get(f.id) !== "unfixed") problems.push(`${f.id} has origin unfixed, so prior must say unfixed for it`);
-    } else if (ledger[f.id]) problems.push(`${f.id} was used by an earlier review; use a new id with "related": "${f.id}" and origin regression or missed`);
-    else if (f.origin === "unfixed") problems.push(`${f.id} has origin unfixed but is not an earlier finding; use regression or missed`);
-    else if (!f.origin) problems.push(`${f.id}: a re-review sets origin regression or missed on new findings`);
-  }
-  for (const [id, s] of prior) if (s === "unfixed" && !findings.some((f) => f.id === id)) problems.push(`prior says ${id} is unfixed: report it in findings with origin unfixed`);
-  return problems;
 }
 
 function writeSideOutput(e: Engine, run: RunRecord, artifact: string, result: RoleResult): string {
@@ -1460,304 +1076,40 @@ function findingSummary(list: Finding[]): string {
   return list.map((f) => f.summary).join("; ");
 }
 
-const DESIGN_CAUSES = new Set(["plan", "requirement", "cross_phase"]);
-
-function lineageOf(c: NonNullable<State["current"]>, id: string): string {
-  return c.finding_ledger?.[id]?.lineage ?? id;
-}
-
-function lineageEntries(c: NonNullable<State["current"]>, lineage: string): LedgerEntry[] {
-  return Object.values(c.finding_ledger ?? {}).filter((l) => l.lineage === lineage);
-}
-
-/** Record review findings in the phase ledger: lineages, rounds, reports; an unfixed finding keeps its first Fix. */
-function updateLedger(e: Engine, findings: Finding[], prior: { id: string; status: string }[]): void {
-  const c = cur(e);
-  const ledger = (c.finding_ledger ??= {});
-  const round = (c.review_changes ?? 0) + 1;
-  for (const p of prior) if (ledger[p.id]) ledger[p.id]!.status = p.status === "fixed" ? "fixed" : "open";
-  for (const f of findings) {
-    const prev = ledger[f.id];
-    if (prev) {
-      prev.reports++;
-      prev.last_round = round;
-      prev.status = "open";
-      prev.severity = f.severity ?? prev.severity;
-      if (f.origin === "unfixed") {
-        if (prev.fix) f.fix = prev.fix;
-        if (prev.checks?.length) f.checks = prev.checks;
-        else if (f.checks?.length) prev.checks = f.checks;
-      }
-      continue;
-    }
-    const lineage = f.related && ledger[f.related] ? ledger[f.related]!.lineage : f.id;
-    ledger[f.id] = { lineage, severity: f.severity ?? null, cause: f.cause ?? null, owner: f.owner ?? null, fix: f.fix ?? null, ...(f.checks?.length ? { checks: f.checks } : {}), first_round: round, last_round: round, reports: 1, designs: 0, status: "open" };
-  }
-}
-
-const BOUNDARY_KINDS = new Set(["boundary", "invariant"]);
-
-/**
- * Why an Implementer finding needs a Planner repair design before the Implementer runs, or null
- * (then the Reviewer's own repair package runs). A high or critical finding on a boundary or
- * invariant obligation always gets a design: in CoreBit P-001 such findings were classified as
- * implementation defects, and the patches handled the example instead of closing the rule.
- */
-function designReason(e: Engine, f: Finding): DesignState["reason"] | null {
-  const c = cur(e);
-  if (f.cause && DESIGN_CAUSES.has(f.cause)) return "plan_cause";
-  if (f.origin === "unfixed") return "unfixed";
-  if (f.related && lineageEntries(c, lineageOf(c, f.id)).length > 1) return "related";
-  if ((f.severity === "high" || f.severity === "critical") && f.obligations?.length) {
-    const contract = loadContract(e.root, c.phase);
-    if (f.obligations.some((id) => BOUNDARY_KINDS.has(obligationOf(contract, id)?.kind ?? ""))) return "boundary";
-  }
-  return null;
-}
-
-/** Review reports of a finding's lineage so far (the first report counts). */
-function lineageReports(c: NonNullable<State["current"]>, id: string): number {
-  return lineageEntries(c, lineageOf(c, id)).reduce((s, x) => s + x.reports, 0);
-}
-
-/** Implementer findings whose lineage was reported more often than limits.lineage_attempts allows. */
-function stuckFindings(e: Engine, findings: Finding[]): Finding[] {
-  const c = cur(e);
-  return findings.filter((f) => f.owner !== "tester" && lineageReports(c, f.id) > lineageAttempts(e.cfg));
-}
-
-/** Group Reviewer repairs into packages (at most WORK_LIMITS.findings findings and steps), findings that share files together. */
-function reviewerPackages(e: Engine, findings: Finding[]): WorkItem[] {
-  const c = cur(e);
-  const groups: Finding[][] = [];
-  const steps = (g: Finding[]) => g.reduce((s, f) => s + (f.repair?.steps.length ?? 0), 0);
-  for (const f of findings) {
-    const files = new Set((f.repair?.files ?? []).map((x) => x.path));
-    const fit = (g: Finding[]) => g.length < WORK_LIMITS.findings && steps(g) + (f.repair?.steps.length ?? 0) <= WORK_LIMITS.steps;
-    const g = groups.find((x) => fit(x) && x.some((y) => (y.repair?.files ?? []).some((p) => files.has(p.path)))) ?? groups.find(fit);
-    if (g) g.push(f);
-    else groups.push([f]);
-  }
-  return groups.map((g, i): WorkItem => {
-    const files = new Map<string, WorkItem["files"][number]>();
-    for (const f of g)
-      for (const x of f.repair?.files ?? []) {
-        const prev = files.get(x.path);
-        files.set(x.path, prev ? { ...prev, content: `${prev.content}; ${x.content}`, blueprint: prev.blueprint || x.blueprint } : { ...x });
-      }
-    return {
-      id: `RV-${c.review_changes ?? 0}.${i + 1}`,
-      title: `Repair ${g.map((f) => f.id).join(", ")}`,
-      findings: g.map((f) => f.id),
-      precision: g.some((f) => f.repair?.precision === "full_content") ? "full_content" : "spec",
-      files: [...files.values()].slice(0, WORK_LIMITS.files),
-      steps: g.flatMap((f) => (f.repair?.steps ?? []).map((s) => `[${f.id}] ${s}`)),
-      done_when: g.flatMap((f) => (f.repair?.done_when ?? []).map((s) => `[${f.id}] ${s}`)),
-      tests: g.flatMap((f) => f.repair?.tests ?? []),
-    };
-  });
-}
-
-function lineageQuestion(e: Engine): Action {
-  const c = cur(e);
-  const stuck = stuckFindings(e, c.review_findings);
-  const lines = stuck.map((f) => `${f.id} (${lineageReports(c, f.id)} reports, ${lineageEntries(c, lineageOf(c, f.id)).reduce((s, x) => s + x.designs, 0)} repair design(s)): ${f.summary}`);
-  const fallback = assignments(e, "implementer")[(c.assignment_index.implementer ?? 0) + 1];
-  return ask(
-    e,
-    "lineage_stuck",
-    `lineage_stuck-${c.phase}-${c.review_changes ?? 0}`,
-    `${stuck.length} finding(s) of ${c.phase} came back again after a repair and a Planner redesign: ${lines.join(" | ")}. Another identical repair would not converge. How should Looprch continue?`,
-    [
-      { id: "full_content", label: "The Planner writes the complete code of the repair (blueprints); the Implementer only applies and wires it" },
-      ...(fallback ? [{ id: "fallback", label: `Redesign, and run the repair with the Implementer fallback ${fallback.agent}/${fallback.model}` }] : []),
-      { id: "defer", label: "Defer the rule to a later phase with a fail-closed interim (the Planner amends the contract)" },
-      { id: "pause", label: "Pause" },
-    ],
-  );
-}
-
-function answerLineageStuck(e: Engine, qid: string, option: string): void {
-  const c = cur(e);
-  if (option === "pause") {
-    delete e.st.answers[qid];
-    e.st.flags.paused = { reason: "paused at a finding that keeps coming back; run looprch resume to decide", at: nowIso() };
-    return;
-  }
-  if (option === "fallback") {
-    const list = assignments(e, "implementer");
-    const idx = c.assignment_index.implementer ?? 0;
-    if (list[idx + 1]) {
-      recordAssignment(e, "implementer", list[idx]!, list[idx + 1]!, "user_choice", null);
-      c.assignment_index.implementer = idx + 1;
-    }
-  }
-  c.stuck_choice = option;
-  c.stuck_pending = false;
-  repairOrBlock(e, "review", c.review_findings, [rel(e, phaseFile(e, "review.md"))], findingSummary(c.review_findings));
-}
-
-/**
- * Open a Planner repair design. The Planner (the expensive model) turns the findings into repair
- * packages the Implementer executes literally, and amends the contract for findings whose correct
- * behavior the contract does not define (design causes, repeated findings, needs_design). The
- * Plan Debater challenges the design once when it amends the contract for a high or critical
- * finding, or replaces a design that did not hold.
- */
-export function startDesign(e: Engine, ids: string[], reason: DesignState["reason"], known: Finding[] = [], opts: { blueprint?: boolean; defer?: boolean } = {}): void {
-  const c = cur(e);
-  const list = ids.map((id) => c.review_findings.find((f) => f.id === id) ?? known.find((f) => f.id === id) ?? { id, summary: id });
-  const redesign = list.filter((f) => lineageEntries(c, lineageOf(c, f.id)).some((l) => l.designs > 0)).map((f) => f.id);
-  const amendIds = list.filter((f) => reason === "needs_design" || reason === "stuck" || designReason(e, f) !== null).map((f) => f.id);
-  const debate = redesign.length > 0 || list.some((f) => amendIds.includes(f.id) && (f.severity === "high" || f.severity === "critical"));
-  c.design = { findings: ids, step: "design", debate, reason, amend: amendIds, passes: 0, ...(opts.blueprint ? { blueprint: true } : {}), ...(opts.defer ? { defer: true } : {}) };
-  c.pending_repair_packages = null;
-  const why: Record<DesignState["reason"], string> = {
-    plan_cause: "some were traced by the Reviewer to the plan or contract (a missing or wrong design decision, a missed requirement, or a cross-phase dependency)",
-    unfixed: "some came back after an earlier repair reported them fixed: the Fix condition is still unmet",
-    related: "some are new ways to break a rule an earlier finding already reported, so the rule's enforcement is not complete",
-    needs_design: "the Implementer reported that the contract does not define how to repair them",
-    repair_plan: "the Reviewer requested changes; the Implementer executes your repair packages literally",
-    test_repeat: "the same tests or gates failed again after the Implementer's own repair (or the repair limit was reached), so the repair needs your design; the ids below are the Tester's failures and failed gate runs",
-    boundary: "some break a boundary or invariant obligation (high or critical): the enforcement rule must be closed by design, not patched for the cited example",
-    stuck: "these lineages came back after a repair and a redesign; the user chose how to end them",
-  };
-  c.deltas.planner = {
-    kind: "context_answer",
-    text: [
-      `Repair design for ${ids.join(", ")}: ${why[reason]}. Do not write code.`,
-      `Read the review, the findings' Fix and Check lines, the contract and the current code. Return "repair_packages": small, ordered packages (at most ${WORK_LIMITS.findings} findings and ${WORK_LIMITS.steps} steps each) that a cheaper model can execute literally: the exact files, what each one contains afterwards (classes, functions with signatures, keys, columns), ordered steps that leave no design decision open, and done_when checks the Implementer can run itself. Every finding above is listed in "findings" of a package. Repair the rule at its enforcement point for every Check, not the cited example.`,
-      ...(amendIds.length
-        ? [`For ${amendIds.join(", ")}, also amend the contract (contract_amendment): add or replace the obligation that defines the correct behavior, with the rule, the requirement behind it, the single enforcement point whose completeness can be checked (an allowlist, one validated path, a structural constraint or a type, never a list of known bad cases), what the Tester must prove, and the gates. Where the full rule needs something a later phase delivers, add a deferral with to_phase and the fail-closed interim behavior. Each amended obligation or deferral lists the finding ids it answers in "resolves".`]
-        : []),
-      ...(redesign.length ? [`${redesign.join(", ")} already had a repair design that did not hold: do not repeat it; change the enforcement design, make the steps more concrete, or narrow the rule.`] : []),
-      ...(opts.blueprint ? ['The user chose full content: every repair package has precision "full_content", and every file it changes is a blueprint ("blueprint": true) whose complete content you write in your report as a ```<lang> blueprint=<path> block. The Implementer copies the blueprints and only wires them.'] : []),
-      ...(opts.defer ? [`The user chose to defer: the amendment defers ${ids.join(", ")} to a later phase (a deferral with to_phase, the fail-closed interim behavior in this phase, and "resolves"), and the repair packages build only the interim.`] : []),
-      ...(list.some((f) => f.repair) ? ["The Reviewer proposed a repair for some findings (in the review); use it where it closes the rule, and replace it where it only handles the example."] : []),
-    ].join("\n"),
-    findings: list,
-  };
-  ev(e, { type: "design.escalated", data: { findings: ids, reason, debate, redesign, amend: amendIds } });
-}
-
-/** End a repair design: queue its repair packages for the Implementer (replacing the current package after needs_design). */
-function finishDesign(e: Engine): void {
-  const c = cur(e);
-  const d = c.design;
-  if (!d) return;
-  if (d.reason === "needs_design") c.designed_this_round = [...new Set([...(c.designed_this_round ?? []), ...d.findings])];
-  for (const id of d.amend ?? d.findings) {
-    const l = c.finding_ledger?.[id];
-    if (l) l.designs++;
-  }
-  const pkgs = orderWork([...(c.pending_repair_packages ?? []), ...(c.pending_reviewer_packages ?? [])]) ?? [];
-  c.pending_repair_packages = null;
-  c.pending_reviewer_packages = null;
-  c.design = null;
-  if (!pkgs.length) return;
-  const active = c.work?.kind === "repair" ? currentWorkItem(c) : null;
-  if (c.work && active) {
-    const taken = new Set(c.work.items.map((w) => w.id));
-    const fresh = pkgs.map((p) => (taken.has(p.id) ? { ...p, id: `${p.id}.${c.work!.done.length + 1}` } : p));
-    const i = c.work.items.findIndex((w) => w.id === active.id);
-    c.work.items.splice(i, 1, ...fresh);
-    c.work.base = c.deltas.implementer ?? c.work.base ?? null;
-  } else c.work = { kind: "repair", items: pkgs, done: [], base: c.deltas.implementer ?? null };
-}
-
 /**
  * Enter the repair stage with the findings. Review repairs are bounded by the review limit;
  * test/gate repairs by limits.repair_rounds. At that limit it blocks in the repair stage, so
  * `looprch resume` (one extra round) continues with the repair, never with another review.
- * `testerOnly` (claims not backed by gate evidence) sends the round to the Tester alone.
  */
-function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[], paths: string[], summary: string, testerOnly = false): void {
+function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[], paths: string[], summary: string): void {
   const c = cur(e);
   c.round++;
   c.repair_source = source;
-  c.designed_this_round = [];
   if (source === "test") {
-    c.work = null;
-    const used = testerOnly ? (c.evidence_rounds ?? 0) : (c.test_repairs ?? 0);
-    if (testerOnly) c.evidence_rounds = used + 1;
-    else c.test_repairs = used + 1;
-    if (testerOnly) {
-      delete c.deltas.implementer;
-      const integrity = findings.every((f) => f.gate_id === "test-integrity");
-      c.deltas.tester = {
-        kind: "repair",
-        text: integrity
-          ? `Round ${c.round}: the phase diff adds skip or focus markers to tests (below). Remove each one so every test runs in the gates, or keep it only with a trailing comment \`looprch-allow-skip: <reason>\` that the Reviewer will judge. Then report your verifications again.`
-          : `Round ${c.round}: Looprch checked your verifications against the testcases in its own gate run and could not back the claims below. A verified claim names testcases (as they appear in the JUnit report, or path::name) that exist and pass. Add or fix those tests, or report the verification as failed. Return verifications for: ${findings.map((f) => f.id).join(", ")}.`,
-        findings,
-      };
-      transition(e, "testing");
-    } else {
-      c.deltas.implementer = { kind: "repair", text: `Repair round ${c.round} (tests/gates failed). Fix every problem below completely, including the same defect anywhere else in the phase diff:`, findings, paths };
-      c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer repaired the problems below. Re-verify, keep the tests honest and update them only where they were wrong.`, findings };
-      transition(e, "repairing");
-      const keys = [...new Set(findings.flatMap((f) => [f.id, ...(f.gate_id ? [f.gate_id] : [])]))];
-      const before = new Set(c.last_test_keys ?? []);
-      c.last_test_keys = keys;
-      if (findings.some((f) => before.has(f.id) || (f.gate_id && before.has(f.gate_id)))) startDesign(e, findings.map((f) => f.id), "test_repeat", findings);
-    }
+    const used = c.test_repairs ?? 0;
+    c.test_repairs = used + 1;
+    c.deltas.implementer = { kind: "repair", text: `Repair round ${c.round} (tests or gates failed). Fix every problem below at its root cause, including the same defect anywhere else in the phase:`, findings, paths };
+    c.deltas.tester = { kind: "repair", text: `Round ${c.round}: the Implementer repaired the problems below. Run the tests again; change a test only where the test itself was wrong.`, findings };
+    transition(e, "repairing");
     if (used >= e.cfg.limits.repair_rounds + c.extra_rounds)
-      block(e, "repair_limit", `Repair limit reached (${used} ${testerOnly ? "Tester evidence" : "test/gate repair"} round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
+      block(e, "repair_limit", `Repair limit reached (${used} test/gate repair round(s)) with open problems: ${summary}`, 'Decide: run looprch resume --note "<instruction>" for one more round, or raise limits.repair_rounds with looprch config set', { findings });
     return;
   }
   const finalRepair = reviewsExhausted(e);
   const mine = findings.filter((f) => f.owner !== "tester");
   const theirs = findings.filter((f) => f.owner === "tester");
-  const head = finalRepair
-    ? `Final repair round ${c.round} (review requested changes). There is no further review, so fix every finding below completely`
-    : `Repair round ${c.round} (review requested changes). Fix every finding below completely`;
-  const reopened = findings.filter((f) => f.origin === "unfixed").map((f) => f.id);
-  const reopenedMine = mine.filter((f) => f.origin === "unfixed").map((f) => f.id);
-  const reopenedText = reopenedMine.length
-    ? [`Still open after an earlier repair reported them fixed: ${reopenedMine.join(", ")}. The Fix condition is unchanged; the Planner's repair design (contract amendment) says how the rule is enforced. Fix the rule at that enforcement point for every input, not the cited example.`]
-    : [];
-  const text = [
-    `${head}: meet its Fix condition and the contract obligations it names, fix the root cause and the same defect anywhere else in the phase diff, and check that the fix works with the evidence the declared gates produce. Report \`resolutions\` for: ${mine.map((f) => f.id).join(", ")}.`,
-    ...reopenedText,
-    "When the contract does not define how a finding must be repaired (you would have to invent a design decision), report it as needs_design instead of guessing.",
-    ...(theirs.length ? [`The Tester fixes these test-owned findings after you; do not change tests for them: ${theirs.map((f) => `${f.id} (${f.summary})`).join("; ")}`] : []),
-  ].join("\n");
-  if (mine.length) c.deltas.implementer = { kind: "repair", text, findings: mine, paths };
-  else delete c.deltas.implementer;
-  c.work = null;
-  const choice = c.stuck_choice ?? null;
-  c.stuck_choice = null;
-  const stuck = new Set(choice === "full_content" || choice === "defer" ? stuckFindings(e, mine).map((f) => f.id) : []);
-  const designed = mine.filter((f) => stuck.has(f.id) || designReason(e, f) !== null || !f.repair);
-  const direct = mine.filter((f) => !designed.includes(f));
-  const packages = reviewerPackages(e, direct);
-  if (designed.length) {
-    c.pending_reviewer_packages = packages.length ? packages : null;
-    const reasons = new Set(designed.map((f) => (stuck.has(f.id) ? "stuck" : designReason(e, f))).filter((x): x is DesignState["reason"] => !!x));
-    const order: DesignState["reason"][] = ["stuck", "plan_cause", "boundary", "unfixed", "related"];
-    startDesign(e, designed.map((f) => f.id), order.find((x) => reasons.has(x)) ?? "repair_plan", [], { blueprint: choice === "full_content", defer: choice === "defer" });
-  } else if (packages.length) {
-    c.work = { kind: "repair", items: packages, done: [], base: c.deltas.implementer ?? null };
-    ev(e, { type: "repair.packaged", data: { source: "reviewer", packages: packages.map((p) => ({ id: p.id, findings: p.findings })) } });
-  }
-  c.deltas.tester = {
-    kind: "repair",
-    text: [
-      `Round ${c.round}: review findings. Fix the findings owned by the Tester (you own the test code). For every other finding, try to falsify the repair: derive the rule from its Fix line and the contract obligations it names, and test that rule, not the Implementer's claim. Test the cited example, at least one input class that neither the Reviewer nor the Implementer named (another entry point, configuration, boundary, trust case or dependency path), and the enforcement point itself (that no second path bypasses it). Tests must fail without the fix and run in the declared gates.`,
-      reopened.length ? `${reopened.join(", ")} came back after an earlier repair and verification: check them hardest.` : "",
-      `Prove every Check line with a new testcase of its own; a testcase that already passed when the Reviewer found the defect does not count. Return \`verifications\` for every finding id below (status verified with the testcase names and, per check, \`checks\` [{"n", "tests"}], and the variants you tried; failed when it is not fixed, and list it in failures).`,
-    ].filter(Boolean).join(" "),
-    findings,
-    paths,
-  };
-  if (finalRepair) delete c.deltas.reviewer;
-  else
-    c.deltas.reviewer = {
-      kind: "rereview",
-      text: 'Your previous review requested the changes below. Follow the re-review rules: give "prior" fixed or unfixed for each one against its unchanged Fix condition, check the repair diff for regressions, and report what the earlier review missed. A new way to break the same rule is a new finding with "related".',
-      findings,
+  const head = finalRepair ? `Final repair round ${c.round} (the review requested changes; no further review follows)` : `Repair round ${c.round} (the review requested changes)`;
+  if (mine.length)
+    c.deltas.implementer = {
+      kind: "repair",
+      text: [`${head}. Fix every finding below at its root cause, wherever the same defect occurs, so that its Fix condition holds.`, ...(theirs.length ? [`The Tester fixes these test findings after you: ${theirs.map((f) => `${f.id} (${f.summary})`).join("; ")}`] : [])].join("\n"),
+      findings: mine,
       paths,
     };
+  else delete c.deltas.implementer;
+  c.deltas.tester = { kind: "repair", text: `Round ${c.round}: review findings. Fix the findings owned by the Tester, and add tests that prove the other repairs (each one must fail without the fix).`, findings, paths };
+  if (finalRepair) delete c.deltas.reviewer;
+  else c.deltas.reviewer = { kind: "rereview", text: "Your previous review requested the changes below. Check each one against the current code, report the ones that still hold (keep their ids) and anything new, and check the repair diff for regressions.", findings, paths };
   transition(e, mine.length ? "repairing" : "testing");
 }
 
@@ -1765,18 +1117,11 @@ function finalReviewQuestion(e: Engine): Action {
   const c = cur(e);
   const qid = `final_review-${c.phase}-${c.review_changes ?? 0}`;
   const serious = c.review_findings.filter((f) => f.severity === "high" || f.severity === "critical").length;
-  const origins = (["unfixed", "regression", "missed"] as const).map((o) => [o, c.review_findings.filter((f) => f.origin === o).length] as const).filter(([, n]) => n > 0);
-  const originText = origins.length ? ` (${origins.map(([o, n]) => `${n} ${o}`).join(", ")})` : "";
-  const lineages = [...new Set(c.review_findings.map((f) => lineageOf(c, f.id)))].map((l) => {
-    const entries = lineageEntries(c, l);
-    return { l, reports: entries.reduce((s, x) => s + x.reports, 0), designs: entries.reduce((s, x) => s + x.designs, 0) };
-  });
-  const repeated = lineages.filter((x) => x.reports > 1).map((x) => `${x.l} reported ${x.reports}x, ${x.designs} repair design(s)`);
   return ask(
     e,
     "final_review",
     qid,
-    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s)${originText}, ${serious} high or critical (see .looprch/phases/${c.phase}/review.md).${repeated.length ? ` Repeated: ${repeated.join("; ")}.` : ""} Normally the first review finds everything, so this needs your decision. How should Looprch continue?`,
+    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s), ${serious} high or critical (see .looprch/phases/${c.phase}/review.md). How should Looprch continue?`,
     [
       { id: "repair_and_review", label: "Repair, then run one more review" },
       { id: "repair_and_handover", label: "Repair, then hand over without another review (findings listed in handover.md)" },
@@ -1800,8 +1145,6 @@ function answerFinalReview(e: Engine, qid: string, option: string): void {
 /** After passing gates: review, or go straight to handover once the review limit is reached. */
 function afterGatesPassed(e: Engine): void {
   const c = cur(e);
-  c.last_test_keys = [];
-  c.evidence_rounds = 0;
   if (!reviewsExhausted(e)) {
     transition(e, "reviewing");
     return;
@@ -1821,41 +1164,30 @@ function recordImplementer(e: Engine, run: RunRecord): void {
 }
 
 // ---------------------------------------------------------------------------------------------
-// plan debate (D-26) and executability readback (D-27)
-
-/** Plan Debater findings below this confidence are not debated (the floor of review-skills' debate-review). */
-const MIN_CONFIDENCE = 0.5;
-
-/** Debater passes allowed for this plan: the limit plus one confirmation pass per readback that raised items. */
-function debateLimit(e: Engine, l: DebateLedger): number {
-  return debateRounds(e.cfg) + l.bonus;
-}
+// plan debate
 
 function entryFinding(x: DebateEntry, withDisposition: boolean): Finding {
   const d = x.disposition;
   const parts = [x.summary];
-  if (x.failure_scenario) parts.push(`Failure scenario: ${x.failure_scenario}`);
-  if (x.evidence) parts.push(`Evidence: ${x.evidence}`);
-  if (withDisposition && d) parts.push(`Planner (round ${d.round}): ${d.decision}${d.refs?.length ? ` (refs ${d.refs.join(", ")})` : ""}: ${d.reason}${d.evidence ? ` Evidence: ${d.evidence}` : ""}`);
+  if (x.section) parts.push(`(section: ${x.section})`);
+  if (withDisposition && d) parts.push(`Planner (round ${d.round}): ${d.decision}${d.note ? `: ${d.note}` : ""}`);
   const last = x.verdicts.at(-1);
   if (last) parts.push(`Debater (round ${last.round}): ${last.verdict}${last.note ? `: ${last.note}` : ""}`);
-  return { id: x.id, severity: x.severity, summary: `${parts.join(" ")} [${x.source}]`, ...(x.proposed_resolution ? { fix: x.proposed_resolution } : {}), ...(x.refs?.length ? { obligations: x.refs } : {}) };
+  return { id: x.id, severity: x.severity, summary: parts.join(" "), ...(x.suggestion ? { fix: x.suggestion } : {}) };
 }
 
 /** The Planner answers every open debate item in a full revision of the plan. */
 function toSynthesis(e: Engine, l: DebateLedger, note = ""): void {
   const c = cur(e);
-  const open = openEntries(l);
   c.deltas.planner = {
     kind: "synthesis",
     text: [
-      `Debate round ${l.rounds} of ${debateLimit(e, l)}: answer every open item below in "debate_dispositions", then write the full plan and the complete contract again.`,
-      "- accept: change the contract so the failure scenario cannot happen, and name the changed elements in refs. Looprch rejects an accept whose refs did not change.",
-      "- partial: change what you agree with (refs), and say in reason what you keep and why.",
-      "- reject: only with evidence (the packet section, contract id or code that shows the item does not hold). The Plan Debater judges every answer in the next round and can uphold it.",
+      `Debate round ${l.rounds} of ${debateRounds(e.cfg)}: answer every open item below in "debate_dispositions", then write the full revised plan and the complete plan block.`,
+      "- accept: change the plan so the problem cannot happen, and say in note what you changed.",
+      "- reject: say in note why the finding does not hold. Rejecting is right when the finding is wrong; the Plan Debater judges every answer in the next round.",
       ...(note ? [note] : []),
     ].join("\n"),
-    findings: open.map((x) => entryFinding(x, false)),
+    findings: openEntries(l).map((x) => entryFinding(x, false)),
   };
   transition(e, "synthesizing");
 }
@@ -1866,43 +1198,27 @@ function toRebuttal(e: Engine, l: DebateLedger): void {
   c.deltas.plan_debater = {
     kind: "rebuttal",
     text: [
-      `Debate round ${l.rounds + 1} of ${debateLimit(e, l)}. The Planner answered the items below and revised the plan (contract-diff.md lists what changed). For every item give one verdict:`,
-      "- resolved: you checked the revised plan and contract, and the change closes the failure scenario for every case, not only the example.",
-      "- conceded: the Planner's rejection or partial answer is right; say why.",
-      "- upheld: the answer does not close it; give your counter-argument and what exactly is still missing. An accept that changes the words but not the rule is upheld.",
-      'Then report new defects in the revised plan as findings with new ids. Decision "agree" only when nothing is upheld and nothing new above low remains.',
+      `Debate round ${l.rounds + 1} of ${debateRounds(e.cfg)}. The Planner answered the items below and revised the plan. For every item give one verdict:`,
+      "- resolved: the revised plan closes it.",
+      "- conceded: the Planner's rejection is right.",
+      "- upheld: the answer does not close it; say in note what is still missing.",
+      'Report new defects only when they are high or critical. Decision "agree" when nothing is upheld and nothing new above low remains.',
     ].join("\n"),
     findings: openEntries(l).map((x) => entryFinding(x, true)),
   };
   transition(e, "debating");
 }
 
-/** After a Planner plan result: record the dispositions, add lint items, and decide whether the debate continues. */
-function afterPlan(e: Engine, task: Task, r: RoleResult, prev: Contract | null): void {
+/** After a Planner plan result: record the answers and decide whether the debate continues. */
+function afterPlan(e: Engine, task: Task, r: RoleResult): void {
   const c = cur(e);
   const ledger = loadLedger(e.root, c.phase);
-  const contract = loadContract(e.root, c.phase);
-  if (task !== "planning" && r.debate_dispositions?.length && contract) {
-    const ch = contractChanges(prev, contract);
-    applyDispositions(ledger, r.debate_dispositions, ch.added.length + ch.changed.length);
-  }
-  if (contract) {
-    const plan = existsSync(phaseFile(e, "plan.md")) ? readFileSync(phaseFile(e, "plan.md"), "utf8") : "";
-    const seen = new Set(ledger.entries.filter((x) => x.source === "lint").map((x) => x.summary));
-    const lint = planLint(contract, plan, (p) => existsSync(join(e.root, p)));
-    const items = lint.ambiguities
-      .map((a) => ({ a, summary: `${a.package} leaves decisions to the executor (${a.phrases.map((p) => `"${p}"`).join(", ")}): ${a.where.join("; ")}` }))
-      .filter((x) => !seen.has(x.summary));
-    addEntries(
-      ledger,
-      items.map((x, i) => ({ id: `L-${ledger.entries.filter((y) => y.source === "lint").length + i + 1}`, source: "lint" as const, severity: "medium", summary: x.summary, refs: [x.a.package], proposed_resolution: "Replace each vague phrase with the exact behavior, value or choice.", round: ledger.rounds })),
-    );
-  }
+  if (task === "synthesis" || r.debate_dispositions?.length) applyDispositions(ledger, r.debate_dispositions ?? []);
   if (c.debate_final?.length) {
     const decided = new Set(c.debate_final);
     const open = openEntries(ledger);
     closeEntries(open.filter((x) => decided.has(x.id)), "user_decided", "the user sided with the Plan Debater; the Planner applied it");
-    closeEntries(open.filter((x) => !decided.has(x.id)), "contested", "debate limit reached; the Reviewer verifies it");
+    closeEntries(open.filter((x) => !decided.has(x.id)), "contested", "debate limit reached; the Reviewer checks it");
     c.debate_final = null;
     saveLedger(e.root, ledger);
     afterDebate(e);
@@ -1912,12 +1228,8 @@ function afterPlan(e: Engine, task: Task, r: RoleResult, prev: Contract | null):
   const open = openEntries(ledger);
   if (task === "planning") {
     delete c.deltas.plan_debater;
-    if (open.length)
-      c.deltas.plan_debater = {
-        kind: "rebuttal",
-        text: `Debate round 1 of ${debateLimit(e, ledger)}. Looprch's plan lint already raised the items below (wording that leaves a decision to the executor); the Planner answers them with your findings. Do not repeat them as findings.`,
-        findings: open.map((x) => entryFinding(x, false)),
-      };
+    const unmapped = unmappedRequirements(loadPlan(e.root, c.phase), phaseDef(e, c.phase));
+    if (unmapped.length) c.deltas.plan_debater = { kind: "notes", text: `Requirements of ${c.phase} that the plan's requirement map does not mention: ${unmapped.join(", ")}. Check whether the plan delivers them.` };
     transition(e, "debating");
     return;
   }
@@ -1935,37 +1247,22 @@ function afterPlan(e: Engine, task: Task, r: RoleResult, prev: Contract | null):
   toRebuttal(e, ledger);
 }
 
-/** The debate ended: run the executability readback (when configured), then plan approval. */
+/** The debate ended: plan approval next. */
 function afterDebate(e: Engine): void {
   const c = cur(e);
-  const ledger = loadLedger(e.root, c.phase);
   delete c.deltas.plan_debater;
   if (c.deltas.planner?.kind === "synthesis") delete c.deltas.planner;
-  c.debate_findings = [];
-  ev(e, { type: "debate.closed", data: ledgerSummary(ledger) });
-  const wps = loadContract(e.root, c.phase)?.work_packages ?? [];
-  c.readback = readbackRounds(e.cfg) > 0 && wps.length ? { runs: ledger.readbacks, clean: false } : null;
-  if (c.readback) c.deltas.implementer = { kind: "readback", text: readbackText(ledger.readbacks + 1, readbackRounds(e.cfg)) };
+  ev(e, { type: "debate.closed", data: ledgerSummary(loadLedger(e.root, c.phase)) });
   transition(e, "plan_approval");
 }
 
-function readbackText(n: number, of: number): string {
-  return [
-    `Executability readback ${n} of ${of}. You will implement these work packages later, one run at a time, exactly as written and without design authority. Read plan.md and contract.json now and, for every work package, report:`,
-    "- questions: anything you would not know how to do from the package alone.",
-    "- decisions_needed: anything you would have to choose yourself (a class or file layout, a signature, a library or version, an algorithm, a data format, an error code or message, what to do on a failure).",
-    "- would_create: the files and symbols you would create or change.",
-    'Be strict: a decision you would make "obviously" is still a decision. Decision "ready" only when every package has no questions and no decisions_needed.',
-  ].join("\n");
-}
-
-/** At the debate limit: serious open items go to the user; the others are contested and verified by the Reviewer. */
+/** At the debate limit: serious open items go to the user; the others are contested and checked by the Reviewer. */
 function debateLimitReached(e: Engine, l: DebateLedger): Action | null {
   const c = cur(e);
   const open = openEntries(l);
   const serious = open.filter((x) => SERIOUS.has(x.severity));
   if (!serious.length) {
-    closeEntries(open, "contested", "debate limit reached; the Reviewer verifies it in the first review");
+    closeEntries(open, "contested", "debate limit reached; the Reviewer checks it in the first review");
     saveLedger(e.root, l);
     afterDebate(e);
     return null;
@@ -1978,7 +1275,7 @@ function debateLimitReached(e: Engine, l: DebateLedger): Action | null {
     `The plan debate for ${c.phase} reached its limit (${l.rounds} Debater passes) with ${serious.length} high or critical item(s) the Planner and the Plan Debater still disagree on: ${serious.map((x) => entryLine(x)).join(" | ")}. Read .looprch/phases/${c.phase}/debate.json and debate.md. Who is right?`,
     [
       { id: "planner", label: "Keep the Planner's plan (the items are recorded as decided by you)" },
-      { id: "debater", label: "Side with the Plan Debater: the Planner applies its resolution in one more revision" },
+      { id: "debater", label: "Side with the Plan Debater: the Planner applies its suggestion in one more revision" },
       { id: "pause", label: "Pause" },
     ],
     { items: serious.map((x) => x.id) },
@@ -1996,91 +1293,85 @@ function answerDebateUnresolved(e: Engine, qid: string, option: string, items: s
   const open = openEntries(l);
   if (option === "planner") {
     closeEntries(open.filter((x) => items.includes(x.id)), "user_decided", "the user kept the Planner's position");
-    closeEntries(open.filter((x) => !items.includes(x.id)), "contested", "debate limit reached; the Reviewer verifies it");
+    closeEntries(open.filter((x) => !items.includes(x.id)), "contested", "debate limit reached; the Reviewer checks it");
     saveLedger(e.root, l);
     afterDebate(e);
     return;
   }
   c.debate_final = items;
-  toSynthesis(e, l, `The user decided ${items.join(", ")} for the Plan Debater: accept each one and apply its proposed resolution (decision accept, with the changed refs). This is the last revision of the debate.`);
+  toSynthesis(e, l, `The user decided ${items.join(", ")} for the Plan Debater: accept each one and apply its suggestion. This is the last revision of the debate.`);
 }
 
-/** The readback result: questions and self-made decisions become debate items the Planner must close. */
-function acceptReadback(e: Engine, r: RoleResult, artifact: string): string {
+// ---------------------------------------------------------------------------------------------
+// implementation sessions
+
+/** Plan approved: the Implementer works through the Planner's sessions, one run each. */
+function startImplementation(e: Engine): void {
   const c = cur(e);
-  const path = writeArtifact(e, "readback.md", artifact || "Ready.");
-  const l = loadLedger(e.root, c.phase);
-  l.readbacks++;
-  const wps = new Map((loadContract(e.root, c.phase)?.work_packages ?? []).map((w) => [w.id, w]));
-  const items: Omit<DebateEntry, "status" | "verdicts">[] = [];
-  for (const p of r.packages ?? []) {
-    const listed = new Set((wps.get(p.id)?.files ?? []).map((f) => f.path.replace(/^\.\//, "")));
-    const extra = p.would_create.map((w) => w.path.replace(/^\.\//, "")).filter((x) => !listed.has(x));
-    const parts = [
-      ...p.questions.map((q) => `asks: ${q}`),
-      ...p.decisions_needed.map((d) => `would decide: ${d}`),
-      ...(extra.length ? [`would change files the package does not list: ${extra.join(", ")}`] : []),
-    ];
-    if (parts.length) items.push({ id: `K-${l.readbacks}.${items.length + 1}`, source: "readback", severity: "medium", summary: `${p.id}: the Implementer's model ${parts.join("; ")}`, refs: [p.id], proposed_resolution: "Decide it in the package (exact files, names, signatures, values or behavior) so the executor has nothing to choose.", round: l.rounds });
+  const plan = loadPlan(e.root, c.phase);
+  const n = plan ? normalizeSessions(plan) : { sessions: [], notes: [] };
+  for (const note of n.notes) ev(e, { type: "warning", data: { message: `Plan sessions: ${note}` } });
+  c.sessions = n.sessions.length ? n.sessions : null;
+  c.session_index = 0;
+  c.todos_done = [];
+  c.followup_sessions = [];
+  e.st.pending_checkpoint = { label: "plan approved" };
+  transition(e, "implementing");
+}
+
+/** A session ended: record its todos, queue open ones once as a follow-up session, then the next session or testing. */
+function finishSession(e: Engine, run: RunRecord, r: RoleResult): void {
+  const c = cur(e);
+  const sessions = c.sessions ?? [];
+  const idx = c.session_index ?? 0;
+  const ids = sessions[idx] ?? [];
+  const reported = r.todos_done;
+  const done = reported ? ids.filter((id) => reported.includes(id)) : ids;
+  c.todos_done = [...new Set([...(c.todos_done ?? []), ...done])];
+  const open = ids.filter((id) => !c.todos_done!.includes(id));
+  const followups = c.followup_sessions ?? [];
+  if (open.length && !followups.includes(idx)) {
+    sessions.splice(idx + 1, 0, open);
+    c.followup_sessions = [...followups.map((i) => (i > idx ? i + 1 : i)), idx + 1];
+    ev(e, { type: "warning", data: { message: `Session ${idx + 1} left ${open.join(", ")} open; Looprch queues them once as a follow-up session` } });
+  } else if (open.length) ev(e, { type: "warning", data: { message: `The follow-up session still left ${open.join(", ")} open; the Tester and the Reviewer will see what is missing` } });
+  ev(e, { type: "work.done", role: "implementer", run_id: run.run_id, data: { session: idx + 1, sessions: sessions.length, todos: done, open } });
+  c.session_index = idx + 1;
+  e.st.pending_checkpoint = { label: sessions.length > 1 ? `implementation session ${idx + 1}` : "implementation" };
+  if (c.session_index < sessions.length) return;
+  transition(e, "testing");
+}
+
+/** The Planner's answer to the Implementer: appended to plan.md; new todos join the current session. */
+function acceptContextAnswer(e: Engine, r: RoleResult, artifact: string): string {
+  const c = cur(e);
+  const n = c.addenda.length + 1;
+  const planMd = phaseFile(e, "plan.md");
+  const old = existsSync(planMd) ? readFileSync(planMd, "utf8").trim() : "";
+  const question = c.context_request?.question ?? "";
+  const path = writeArtifact(e, "plan.md", `${old}\n\n## Addendum ${n}: answer to the Implementer\n\n**Question:** ${question}\n\n${artifact.trim()}`);
+  c.addenda.push(`Addendum ${n}`);
+  const added: string[] = [];
+  const plan = loadPlan(e.root, c.phase);
+  if (r.new_todos?.length && plan) {
+    const taken = new Set(plan.todos.map((t) => t.id));
+    const fresh = r.new_todos.filter((t) => !taken.has(t.id));
+    if (fresh.length) {
+      savePlan(e.root, { ...plan, revision: plan.revision + 1, todos: [...plan.todos, ...fresh] });
+      added.push(...fresh.map((t) => t.id));
+      if (c.stage === "implementing" && c.sessions?.length) c.sessions[c.session_index ?? 0]!.push(...added);
+    }
   }
-  ev(e, { type: "readback.done", role: "implementer", data: { n: l.readbacks, of: readbackRounds(e.cfg), items: items.length, packages: (r.packages ?? []).length } });
-  delete c.deltas.implementer;
-  if (!items.length) {
-    saveLedger(e.root, l);
-    c.readback = { runs: l.readbacks, clean: true };
-    return path;
-  }
-  addEntries(l, items);
-  if (l.readbacks >= readbackRounds(e.cfg)) {
-    saveLedger(e.root, l);
-    c.readback = { runs: l.readbacks, clean: false, unresolved: true };
-    return path;
-  }
-  l.bonus++;
-  saveLedger(e.root, l);
-  c.readback = { runs: l.readbacks, clean: false };
-  toSynthesis(e, l, "These items come from the executability readback: the Implementer's model read your packages and named what it would have to ask or decide. Close each one in the package itself.");
+  const prior = c.deltas.implementer;
+  const answered = `The Planner answered your question in plan.md (Addendum ${n}, at the end).${added.length ? ` It added ${added.join(", ")}; do ${added.length > 1 ? "them" : "it"} in this run too.` : ""} Continue.`;
+  const rest = prior?.text?.startsWith("The Planner answered") ? prior.text.split("\n\n").slice(1).join("\n\n") : prior?.text;
+  c.deltas.implementer = { ...(prior ?? {}), kind: prior?.kind ?? "context_answer", text: rest ? `${answered}\n\n${rest}` : answered };
+  c.context_request = null;
   return path;
 }
 
-function readbackQuestion(e: Engine): Action {
-  const c = cur(e);
-  const l = loadLedger(e.root, c.phase);
-  const open = openEntries(l).filter((x) => x.source === "readback");
-  return ask(
-    e,
-    "readback_unresolved",
-    `readback_unresolved-${c.phase}-${l.readbacks}`,
-    `After ${l.readbacks} executability readback(s), the Implementer's model still names ${open.length} package(s) it could not execute without asking or deciding: ${open.map((x) => x.summary).join(" | ")}. Approve the plan anyway, or pause?`,
-    [
-      { id: "approve", label: "Approve: the Implementer asks the Planner during implementation (needs_context) where it must" },
-      { id: "pause", label: "Pause" },
-    ],
-  );
-}
-
-function answerReadback(e: Engine, qid: string, option: string): void {
-  const c = cur(e);
-  if (option === "pause") {
-    delete e.st.answers[qid];
-    e.st.flags.paused = { reason: "paused at the readback decision; run looprch resume to decide", at: nowIso() };
-    return;
-  }
-  const l = loadLedger(e.root, c.phase);
-  closeEntries(openEntries(l), "contested", "the user approved the plan with open readback items");
-  saveLedger(e.root, l);
-  c.readback = { runs: l.readbacks, clean: true };
-}
-
-/** Write the plan's blueprint blocks to .looprch/phases/P-NNN/blueprints/<path>. */
-function writeBlueprints(e: Engine, planMd: string): void {
-  for (const [path, content] of blueprintsIn(planMd)) {
-    if (path.startsWith("/") || path.split("/").includes("..")) continue;
-    const abs = join(projectPaths(e.root).phase(cur(e).phase), "blueprints", path);
-    ensureDir(dirname(abs));
-    writeFileAtomic(abs, content.endsWith("\n") ? content : `${content}\n`);
-  }
-}
+// ---------------------------------------------------------------------------------------------
+// applying accepted results
 
 function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string, priorDelta: Delta | null): string | null {
   const c = cur(e);
@@ -2099,178 +1390,60 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
     }
     return true;
   };
-  if (r.expansion_requests?.length && r.decision !== "needs_expansion" && (run.role === "tester" || run.role === "reviewer")) {
-    try {
-      executeExpansions(e, run.role, r.expansion_requests);
-    } catch {
-      // recorded best-effort only; the verdict stands
-    }
-  }
   switch (run.task) {
     case "planning":
     case "synthesis":
     case "revise": {
       if (expansion("planner")) return null;
       const path = writeArtifact(e, "plan.md", artifact);
-      const prev = loadContract(e.root, c.phase);
-      if (r.contract) {
-        const saved = newContract(c.phase, r.contract, (prev?.revision ?? 0) + 1);
-        saveContract(e.root, c.phase, saved);
-        const ch = contractChanges(prev, saved);
-        ev(e, { type: "contract.accepted", role: "planner", run_id: run.run_id, data: { task: run.task, obligations: r.contract.obligations.length, deferrals: r.contract.deferrals.length, decisions: r.contract.decisions?.length ?? 0, interfaces: r.contract.interfaces?.length ?? 0, packages: r.contract.work_packages?.length ?? 0, tests: plannedTests(r.contract).length, dispositions: r.debate_dispositions?.length ?? 0, changes: ch.added.length + ch.changed.length + ch.removed.length } });
+      if (r.plan) {
+        const prev = loadPlan(e.root, c.phase);
+        const saved = newPlan(c.phase, r.plan, (prev?.revision ?? 0) + 1);
+        savePlan(e.root, saved);
+        ev(e, { type: "plan.accepted", role: "planner", run_id: run.run_id, data: { task: run.task, todos: saved.todos.length, sessions: normalizeSessions(saved).sessions.length, deferrals: saved.deferrals?.length ?? 0, dispositions: r.debate_dispositions?.length ?? 0, plan_bytes: Buffer.byteLength(artifact) } });
       }
-      writeBlueprints(e, artifact);
-      afterPlan(e, run.task, r, prev);
+      afterPlan(e, run.task, r);
       return path;
     }
     case "debate":
     case "rebuttal": {
       if (expansion("plan_debater")) return null;
       const path = writeArtifact(e, "debate.md", artifact || "No findings.");
-      const debated = loadContract(e.root, c.phase);
-      if (debated) writeFileAtomic(phaseFile(e, "contract.debated.json"), `${JSON.stringify(debated, null, 2)}\n`);
       const ledger = loadLedger(e.root, c.phase);
       ledger.rounds++;
       if (run.task === "rebuttal") applyVerdicts(ledger, r.verdicts ?? []);
-      const known = referableIds(loadContract(e.root, c.phase));
-      const uncovered = run.task === "debate" ? (r.independent_risks ?? []).filter((x) => !x.covered_by.some((id) => known.has(id))) : [];
-      addEntries(ledger, [
-        ...(r.findings ?? []).filter((f) => f.confidence === undefined || f.confidence >= MIN_CONFIDENCE).map((f) => ({
-          id: f.id,
-          source: "debater" as const,
-          severity: f.severity ?? "medium",
-          summary: f.summary,
-          round: ledger.rounds,
-          ...(f.section ? { section: f.section } : {}),
-          ...(f.refs?.length ? { refs: f.refs } : {}),
-          ...(f.evidence ? { evidence: f.evidence } : {}),
-          ...(f.failure_scenario ? { failure_scenario: f.failure_scenario } : {}),
-          ...(f.proposed_resolution ? { proposed_resolution: f.proposed_resolution } : {}),
-        })),
-        ...uncovered.map((x, i) => ({ id: `I-${i + 1}`, source: "independent" as const, severity: "medium", summary: `A risk the Debater derived from the packet that no contract element covers: ${x.risk}`, round: ledger.rounds })),
-      ]);
+      addEntries(
+        ledger,
+        (r.findings ?? []).map((f) => ({ id: f.id, source: "debater" as const, severity: f.severity ?? "medium", summary: f.summary, round: ledger.rounds, ...(f.section ? { section: f.section } : {}), ...(f.suggestion ? { suggestion: f.suggestion } : {}) })),
+      );
+      if (r.decision === "agree") closeEntries(openEntries(ledger), "resolved", "the Plan Debater agreed with the revised plan");
       saveLedger(e.root, ledger);
-      c.debate_findings = openEntries(ledger).map((x) => x.id);
-      ev(e, { type: "debate.round", role: "plan_debater", run_id: run.run_id, data: { round: ledger.rounds, cap: debateLimit(e, ledger), decision: r.decision, raised: (r.findings ?? []).length + uncovered.length, verdicts: (r.verdicts ?? []).map((v) => ({ id: v.id, verdict: v.verdict })), open: c.debate_findings.length } });
       const open = openEntries(ledger);
+      ev(e, { type: "debate.round", role: "plan_debater", run_id: run.run_id, data: { round: ledger.rounds, cap: debateRounds(e.cfg), decision: r.decision, raised: (r.findings ?? []).length, verdicts: (r.verdicts ?? []).map((v) => ({ id: v.id, verdict: v.verdict })), open: open.length } });
       if (!open.length) afterDebate(e);
-      else if (ledger.rounds < debateLimit(e, ledger)) toSynthesis(e, ledger);
+      else if (ledger.rounds < debateRounds(e.cfg)) toSynthesis(e, ledger);
       return path;
     }
-    case "readback":
-      return acceptReadback(e, r, artifact);
-    case "design_review": {
-      const path = writeArtifact(e, `design-debate-${c.addenda.length}.md`, artifact || "No findings.");
-      const d = c.design;
-      if (!d) return path;
-      d.passes = (d.passes ?? 0) + 1;
-      if (r.decision === "findings") {
-        d.step = "revise";
-        c.deltas.planner = {
-          kind: "context_answer",
-          text: `The Plan Debater challenged your repair design (read it in your inputs). Revise the design: answer each challenge, and return the complete "repair_packages" again (every finding of the design in a package) and, for ${(d.amend ?? []).join(", ") || "no finding"}, the complete contract_amendment (each repair obligation lists the finding ids it answers in "resolves"). Do not write code.`,
-          findings: (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary })),
-          paths: [path],
-        };
-      } else finishDesign(e);
-      return path;
-    }
-    case "context_answer": {
-      const n = c.addenda.length + 1;
-      const path = writeArtifact(e, `plan-addendum-${n}.md`, artifact);
-      c.addenda.push(path);
-      writeBlueprints(e, artifact);
-      if (r.contract_amendment) {
-        const base = loadContract(e.root, c.phase) ?? newContract(c.phase, { obligations: [], deferrals: [] }, 0);
-        const next = amend(base, r.contract_amendment);
-        saveContract(e.root, c.phase, next);
-        const kept = new Set(contractIds(next));
-        c.retired_obligations = [...new Set([...(c.retired_obligations ?? []), ...(r.contract_amendment.retire ?? [])])].filter((id) => !kept.has(id));
-        if (c.work?.kind === "implementation" && !c.design && r.contract_amendment.work_packages?.length) {
-          const work = c.work;
-          const upd = new Map(r.contract_amendment.work_packages.map((w) => [w.id, w]));
-          const pending = [...work.items.filter((w) => !work.done.includes(w.id)).map((w) => upd.get(w.id) ?? w), ...r.contract_amendment.work_packages.filter((w) => !work.items.some((x) => x.id === w.id))];
-          work.items = [...work.items.filter((w) => work.done.includes(w.id)), ...(orderWork(pending) ?? pending)];
-        }
-        ev(e, { type: "contract.amended", role: "planner", run_id: run.run_id, data: { revision: next.revision, obligations: (r.contract_amendment.obligations ?? []).map((o) => o.id), deferrals: (r.contract_amendment.deferrals ?? []).map((x) => x.id), retired: r.contract_amendment.retire ?? [], design: c.design?.findings ?? null } });
-      }
-      const prior = c.deltas.implementer;
-      const design = c.design;
-      if (design) c.pending_repair_packages = r.repair_packages ?? null;
-      const answered = design
-        ? `The Planner wrote a repair design (${path.split("/").pop()}) for: ${design.findings.join(", ")}${r.contract_amendment ? ", and amended contract.json" : ""}. Its repair packages run one at a time; the package for this run is below. The design and any amended obligations are binding: implement them exactly as defined; do not patch around them.`
-        : `The Planner answered your context request (${c.context_request?.question ?? ""}). Continue.`;
-      const rest = prior?.text?.startsWith("The Planner wrote a repair design") ? prior.text.split("\n\n").slice(1).join("\n\n") : prior?.text;
-      c.deltas.implementer = { ...prior, kind: "context_answer", text: rest ? `${answered}\n\n${rest}` : answered, paths: [...(prior?.paths ?? []), path] };
-      if (design) {
-        const cap = Math.min(2, debateRounds(e.cfg));
-        if (design.debate && (design.step === "design" || (design.step === "revise" && (design.passes ?? 0) < cap))) {
-          const again = design.step === "revise";
-          design.step = "debate";
-          const file = path.split("/").pop();
-          c.deltas.plan_debater = {
-            kind: "design_review",
-            text: again
-              ? `The Planner revised the repair design (${file}) after your challenge (pass ${(design.passes ?? 0) + 1} of ${cap}). For each challenge you raised, check the revised design and amendment: is it closed for every input, or only reworded? Report what is still open as findings; decision no_findings when the design now holds.`
-              : `Challenge the Planner's repair design (${file}) and its contract amendment (pass 1 of ${cap}), for: ${design.findings.join(", ")}. For each: is the rule decidable and complete at its single enforcement point (no list of known bad cases), testable, feasible in this phase (or deferred with a fail-closed interim), and consistent with the contract and the packet? Could a cheaper model execute each repair package literally, or would it still have to invent a decision (name the step)?`,
-            findings: design.findings.map((id) => c.review_findings.find((f) => f.id === id)).filter((f): f is Finding => !!f),
-            paths: [path],
-          };
-        } else finishDesign(e);
-      } else c.context_request = null;
-      return path;
-    }
+    case "context_answer":
+      return acceptContextAnswer(e, r, artifact);
     case "implementation":
     case "repair": {
       if (r.decision === "needs_context") {
-        c.context_request = { question: r.context_request!.question, reason: r.context_request!.reason, documents: r.context_request!.documents ?? [], phases: r.context_request!.phases ?? [] };
-        c.deltas.planner = { kind: "context_answer", text: `Implementer question: ${c.context_request.question}\nReason: ${c.context_request.reason}` };
+        c.context_request = { question: r.context_request!.question, reason: r.context_request!.reason ?? "" };
+        c.deltas.planner = {
+          kind: "context_answer",
+          text: `The Implementer is blocked and asks: ${c.context_request.question}\nWhy: ${c.context_request.reason || "(no reason given)"}\n\nAnswer so the Implementer can continue: the decision, and exactly what to do. If the answer needs new work, add it as "new_todos".`,
+        };
         if (priorDelta) c.deltas.implementer = priorDelta;
         return null;
       }
       recordImplementer(e, run);
-      if (run.task === "repair") c.repair_reports = [...(c.repair_reports ?? []), rel(e, join(projectPaths(e.root).run(run.run_id), "final.md"))];
-      if (r.resolutions?.length) {
-        const open = new Set(c.acknowledged_open ?? []);
-        for (const x of r.resolutions) {
-          if (x.status === "fixed") open.delete(x.id);
-          else open.add(x.id);
-        }
-        c.acknowledged_open = [...open];
+      if (run.task === "implementation") {
+        finishSession(e, run, r);
+        return null;
       }
-      if (run.task === "repair" && c.repair_source === "review") {
-        const done = new Set(c.designed_this_round ?? []);
-        const scope = new Set(currentWorkItem(c)?.findings ?? (priorDelta?.findings ?? []).map((f) => f.id));
-        const mine = (r.resolutions ?? []).filter((x) => scope.has(x.id));
-        const ask = mine.filter((x) => x.status === "needs_design" && !done.has(x.id)).map((x) => x.id);
-        if (ask.length) {
-          const pending = mine.filter((x) => x.status === "not_fixed" && !done.has(x.id)).map((x) => x.id);
-          startDesign(e, [...ask, ...pending], "needs_design");
-          if (priorDelta) c.deltas.implementer = priorDelta;
-          return null;
-        }
-      }
-      const label = run.task === "implementation" ? "implementation" : `repair ${c.round}`;
-      if (r.deviations?.length) {
-        const list = (c.deviations ??= []);
-        for (const d of r.deviations) list.push({ id: `DV-${list.length + 1}`, file: d.file, what: d.what, why: d.why, run: run.run_id });
-        ev(e, { type: "work.deviations", role: "implementer", run_id: run.run_id, data: { deviations: r.deviations.map((d) => d.file) } });
-      }
-      const item = currentWorkItem(c);
-      if (item) {
-        const chain = c.work!.chain?.length ? c.work!.chain : [item.id];
-        for (const id of chain) if (!c.work!.done.includes(id)) c.work!.done.push(id);
-        c.work!.chain = [];
-        c.work!.started = null;
-        ev(e, { type: "work.done", role: "implementer", run_id: run.run_id, data: { kind: c.work!.kind, id: item.id, ...(chain.length > 1 ? { chain } : {}), done: c.work!.done.length, total: c.work!.items.length } });
-        if (currentWorkItem(c)) {
-          e.st.pending_checkpoint = { label: `${label} ${chain.join("+")}` };
-          if (c.work!.base) c.deltas.implementer = c.work!.base;
-          return null;
-        }
-        c.work = null;
-        e.st.pending_checkpoint = { label: `${label} ${chain.join("+")}` };
-      } else e.st.pending_checkpoint = { label };
+      c.repair_reports = [...(c.repair_reports ?? []), rel(e, join(projectPaths(e.root).run(run.run_id), "final.md"))];
+      e.st.pending_checkpoint = { label: `repair ${c.round}` };
       transition(e, "testing");
       return null;
     }
@@ -2278,12 +1451,6 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       const path = writeArtifact(e, "test-report.md", artifact);
       c.tester_verdict = r.decision === "pass" ? "pass" : "fail";
       c.tester_failures = (r.failures ?? []).map((f) => ({ id: f.id, summary: f.summary, gate_id: f.gate_id, files: f.files }));
-      const verifs: Verification[] = (r.verifications ?? []).map((v) => ({ id: v.id, status: v.status, tests: v.tests, variants: v.variants, ...(v.checks?.length ? { checks: v.checks } : {}), ...(v.note ? { note: v.note } : {}) }));
-      for (const v of verifs)
-        if (v.status === "failed" && !c.tester_failures.some((f) => f.id === v.id)) c.tester_failures.push({ id: v.id, summary: `verification failed${v.note ? `: ${v.note}` : ""}` });
-      const merged = new Map((c.tester_verifications ?? []).map((v) => [v.id, v]));
-      for (const v of verifs) merged.set(v.id, v);
-      c.tester_verifications = [...merged.values()];
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
       transition(e, "gating");
       return path;
@@ -2291,28 +1458,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
     case "review": {
       const path = writeArtifact(e, "review.md", artifact);
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
-      const findings: Finding[] = (r.findings ?? []).map((f) => ({
-        id: f.id,
-        severity: f.severity,
-        summary: f.summary,
-        files: f.files,
-        ...(f.fix ? { fix: f.fix } : {}),
-        ...(f.cause === "test" ? { owner: "tester" as const } : f.owner ? { owner: f.owner } : {}),
-        ...(f.origin ? { origin: f.origin } : {}),
-        ...(f.cause ? { cause: f.cause } : {}),
-        ...(f.obligations?.length ? { obligations: f.obligations } : {}),
-        ...(f.related ? { related: f.related } : {}),
-        ...(f.checks?.length ? { checks: f.checks } : {}),
-        ...(f.repair ? { repair: f.repair } : {}),
-      }));
-      updateLedger(e, findings, r.prior ?? []);
-      const merged = new Map((c.contract_review ?? []).map((x) => [x.id, x.status]));
-      const stillOpen = new Set(findings.flatMap((f) => f.obligations ?? []));
-      const fixed = new Set((r.prior ?? []).filter((p) => p.status === "fixed").map((p) => p.id));
-      for (const f of c.review_findings) if (fixed.has(f.id)) for (const o of f.obligations ?? []) if (!stillOpen.has(o) && merged.get(o) === "not_met") merged.set(o, "met");
-      for (const o of stillOpen) if (merged.has(o)) merged.set(o, "not_met");
-      for (const x of r.contract_review ?? []) merged.set(x.id, x.status);
-      c.contract_review = [...merged].map(([id, status]) => ({ id, status }));
+      const findings: Finding[] = (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary, ...(f.files?.length ? { files: f.files } : {}), ...(f.fix ? { fix: f.fix } : {}), ...(f.owner ? { owner: f.owner } : {}) }));
       c.repair_reports = [];
       if (r.decision === "approve") {
         c.snapshots.review = c.snapshots.gates;
@@ -2323,20 +1469,16 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       } else {
         c.review_findings = findings;
         c.review_changes = (c.review_changes ?? 0) + 1;
-        c.acknowledged_open = [];
         c.test_repairs = 0;
         c.extra_rounds = 0;
-        c.last_test_keys = [];
         c.reviewed_tree = c.snapshots.gates;
-        c.reviewed_cases = c.passing_cases ?? { available: false, cases: [] };
         if (reviewsExhausted(e)) c.final_review_pending = true;
-        else if (stuckFindings(e, findings).length) c.stuck_pending = true;
         else repairOrBlock(e, "review", findings, [path], findingSummary(findings));
       }
       return path;
     }
     case "handover":
-      return acceptHandover(e, run, r, artifact);
+      return acceptHandover(e, run, artifact);
     case "adhoc_review":
     case "worker":
       return null;
@@ -2345,6 +1487,13 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       throw new LrError("internal", `unhandled task ${String(never)}`);
     }
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// handover
+
+function findingLines(findings: Finding[]): string[] {
+  return findings.map((f) => `- ${f.id}${f.severity ? ` [${f.severity}]` : ""}: ${f.summary}${f.files?.length ? ` (${f.files.join(", ")})` : ""}`);
 }
 
 function unreviewedSection(e: Engine, findings: Finding[]): string {
@@ -2360,42 +1509,38 @@ function unreviewedSection(e: Engine, findings: Finding[]): string {
   ].join("\n");
 }
 
-function findingLines(findings: Finding[]): string[] {
-  return findings.map((f) => `- ${f.id}${f.severity ? ` [${f.severity}]` : ""}: ${f.summary}${f.files?.length ? ` (${f.files.join(", ")})` : ""}`);
+function notesSection(findings: Finding[]): string {
+  if (!findings.length) return "";
+  return ["", "## Open review notes (approved, not repaired)", "", "The approving review listed these findings without requesting changes:", "", ...findingLines(findings), ""].join("\n");
 }
 
-function contractSection(contract: Contract | null, review: { id: string; status: string }[]): string {
-  if (!contract) return "- (this phase has no contract.json)";
-  const status = new Map(review.map((x) => [x.id, x.status]));
-  const lines = [`Contract revision ${contract.revision}: ${contract.obligations.length} obligation(s), ${contract.deferrals.length} deferral(s). Status from the latest review that reported it.`, ""];
-  for (const o of contract.obligations) lines.push(`- ${o.id} [${status.get(o.id) ?? "not reviewed"}] (${o.requirements.join(", ") || "no requirement id"}): ${o.statement}`);
+function filesSection(d: ReturnType<typeof diffNameStatus>): string {
+  const list = (title: string, items: string[]) => [`### ${title}`, "", ...(items.length ? items.map((p) => `- ${p}`) : ["- none"]), ""];
+  return [...list("Modified files", d.modified), ...list("New files", d.added), ...list("Deleted files", d.deleted), ...list("Renamed files", d.renamed.map((r) => `${r.from} -> ${r.to}`))].join("\n").trim();
+}
+
+function planSection(plan: Plan | null, done: string[]): string {
+  if (!plan) return "- (this phase has no plan.json)";
+  const finished = new Set(done);
+  const lines = [`Plan revision ${plan.revision}: ${plan.todos.length} todo(s), ${finished.size} reported done by the Implementer.`, ""];
+  for (const t of plan.todos) lines.push(`- ${t.id} [${finished.has(t.id) ? "done" : "not reported"}]: ${t.title}`);
   lines.push("", "### Deferrals to later phases", "");
-  if (!contract.deferrals.length) lines.push("- none");
-  for (const d of contract.deferrals) lines.push(`- ${d.id} -> ${d.to_phase} [${status.get(d.id) ?? "not reviewed"}] (${d.requirements.join(", ")}): ${d.what}. Until then: ${d.interim}`);
+  const deferrals = plan.deferrals ?? [];
+  if (!deferrals.length) lines.push("- none");
+  for (const d of deferrals) lines.push(`- ${d.id} -> ${d.to_phase}: ${d.what}${d.interim ? `. Until then: ${d.interim}` : ""}`);
   return lines.join("\n");
 }
 
 function debateSection(l: DebateLedger): string {
   if (!l.entries.length && !l.rounds) return "- no debate recorded";
   const s = ledgerSummary(l);
-  const lines = [`${s.rounds} Plan Debater pass(es), ${s.readbacks} executability readback(s), ${s.items} item(s): ${s.resolved} resolved, ${s.conceded} conceded, ${s.contested} contested, ${s.user_decided} decided by the user. Contract elements changed by the debate: ${s.contract_changes}.`];
+  const lines = [`${s.rounds} Plan Debater pass(es), ${s.items} item(s): ${s.resolved} resolved, ${s.conceded} conceded, ${s.contested} contested, ${s.user_decided} decided by the user.`];
   const unsettled = l.entries.filter((x) => x.status === "contested" || x.status === "user_decided");
   if (unsettled.length) lines.push("", ...unsettled.map((x) => `- ${entryLine(x)} (${x.status}${x.closed_note ? `: ${x.closed_note}` : ""})`));
   return lines.join("\n");
 }
 
-function notesSection(findings: Finding[]): string {
-  if (!findings.length) return "";
-  return ["", "## Open review notes (approved, not repaired)", "", "The approving review listed these findings without requesting changes:", "", ...findingLines(findings), ""].join("\n");
-}
-
-function sameSet(a: string[], b: string[]): boolean {
-  const x = [...new Set(a)].sort();
-  const y = [...new Set(b)].sort();
-  return x.length === y.length && x.every((v, i) => v === y[i]);
-}
-
-function acceptHandover(e: Engine, run: RunRecord, r: RoleResult, artifact: string): string | null {
+function acceptHandover(e: Engine, run: RunRecord, artifact: string): string | null {
   const c = cur(e);
   const snap = snapshotTree(e.root);
   if (snap !== c.snapshots.gates) {
@@ -2405,37 +1550,24 @@ function acceptHandover(e: Engine, run: RunRecord, r: RoleResult, artifact: stri
     return null;
   }
   const actual = diffNameStatus(e.root, c.phase_base!, snap);
-  const claimedRenames = (r.renamed ?? []).map((x) => `${x.from}->${x.to}`);
-  const actualRenames = actual.renamed.map((x) => `${x.from}->${x.to}`);
-  const mismatches: string[] = [];
-  if (!sameSet(r.modified_files ?? [], actual.modified)) mismatches.push(`modified: claimed [${(r.modified_files ?? []).join(", ")}], actual [${actual.modified.join(", ")}]`);
-  if (!sameSet(r.new_files ?? [], actual.added)) mismatches.push(`new: claimed [${(r.new_files ?? []).join(", ")}], actual [${actual.added.join(", ")}]`);
-  if (!sameSet(r.deleted_files ?? [], actual.deleted)) mismatches.push(`deleted: claimed [${(r.deleted_files ?? []).join(", ")}], actual [${actual.deleted.join(", ")}]`);
-  if (!sameSet(claimedRenames, actualRenames)) mismatches.push(`renamed: claimed [${claimedRenames.join(", ")}], actual [${actualRenames.join(", ")}]`);
-  if (mismatches.length) {
-    if (c.reask_count < 1) {
-      c.reask_count++;
-      c.deltas.implementer = { kind: "reask", text: `Your handover file lists do not match git (diff since ${c.phase_base}). Fix the lists; do not change files.\n${mismatches.map((m) => `- ${m}`).join("\n")}` };
-      ev(e, { type: "run.reask", role: "implementer", run_id: run.run_id, data: { mismatches } });
-      return null;
-    }
-    block(e, "handover_mismatch", `The handover file lists still do not match git: ${mismatches.join("; ")}`, "Correct the handover yourself or run looprch resume to ask again", { mismatches });
-    return null;
-  }
-  c.reask_count = 0;
   const p = e.st.phases[c.phase]!;
   const gates = loadGates(e.root, c.phase);
   const tpl = readFileSync(join(packageRoot(), "assets", "templates", "handover.md"), "utf8");
   const extra = tpl
+    .replace("{{files}}", filesSection(actual))
     .replace("{{contributors}}", p.implementers.map((i) => `- ${i.agent} / ${i.model}: runs ${i.runs.join(", ")}`).join("\n") || "- (none recorded)")
-    .replace("{{gate_runs}}", Object.values(gates.latest).map((id) => {
-      const g = gates.runs.find((x) => x.gate_run_id === id)!;
-      return `- ${g.gate_id}: ${g.gate_run_id}, ${g.ok ? "passed" : "failed"}, tests ${g.evidence.tests}, evidence sha256 ${g.evidence.sha256 ?? "-"}, tree ${g.snapshot_tree}`;
-    }).join("\n"))
+    .replace(
+      "{{gate_runs}}",
+      Object.values(gates.latest)
+        .map((id) => {
+          const g = gates.runs.find((x) => x.gate_run_id === id)!;
+          return `- ${g.gate_id}: ${g.gate_run_id}, ${g.ok ? "passed" : "failed"}, tests ${g.evidence.tests}, evidence sha256 ${g.evidence.sha256 ?? "-"}, tree ${g.snapshot_tree}`;
+        })
+        .join("\n"),
+    )
     .replace("{{unreviewed}}", `${c.snapshots.review ? "" : unreviewedSection(e, c.review_findings)}${notesSection(c.review_notes ?? [])}`)
-    .replace("{{contract}}", contractSection(loadContract(e.root, c.phase), c.contract_review ?? []))
-    .replace("{{debate}}", debateSection(loadLedger(e.root, c.phase)))
-    .replace("{{traceability}}", readFileSync(writeTraceability(e.root, c.phase, phaseDef(e, c.phase), loadContract(e.root, c.phase), c), "utf8").replace(/^# Traceability: [^\n]*\n\n/, ""));
+    .replace("{{plan}}", planSection(loadPlan(e.root, c.phase), c.todos_done ?? []))
+    .replace("{{debate}}", debateSection(loadLedger(e.root, c.phase)));
   const path = writeArtifact(e, "handover.md", `${artifact.trim()}\n${extra}`);
   c.snapshots.handover = snap;
   ev(e, { type: "handover.accepted", run_id: run.run_id, data: { files: actual } });
@@ -2448,15 +1580,13 @@ function acceptHandover(e: Engine, run: RunRecord, r: RoleResult, artifact: stri
 // gates, checkpoints, closing, finish
 
 export interface GateExtras {
-  /** Skip/focus markers the phase added to tests (checked when the gates passed). */
-  integrity?: IntegrityProblem[];
   /** The optional e2e gate of this batch. */
   e2e?: { outcome: E2eOutcome; reason: string | null; tree: string };
 }
 
 const E2E_HINTS: Record<Exclude<E2eOutcome, "pass" | "fail">, string> = {
   config: "Fix the e2e setup (run /lr-e2e-test-init, or looprch e2e configure), or turn the gate off with looprch e2e disable; then run looprch resume",
-  missing: "Install the e2e package in the project (npm i -D e2e @e2e-dev/web) and run looprch e2e configure, or run looprch e2e disable; then looprch resume",
+  missing: "Install the e2e package in the project (looprch e2e init --install) and run looprch e2e configure, or run looprch e2e disable; then looprch resume",
   environment: "Check that the app starts and the model provider is reachable (see the LR-E2E .out/.err files of the gate run), then looprch resume to run the gates again; or looprch e2e disable",
   runner: "The e2e runner failed internally or was interrupted; looprch resume runs the gates again, or looprch e2e disable",
 };
@@ -2471,38 +1601,7 @@ export function applyGates(e: Engine, outcome: GatesOutcome, extras: GateExtras 
     block(e, `e2e_${e2e.outcome}`, `The optional e2e gate could not judge the application: ${e2e.reason ?? e2e.outcome}`, E2E_HINTS[e2e.outcome]);
     return;
   }
-  if (outcome.all_passed && c.tester_verdict === "pass" && extras.integrity?.length) {
-    const findings: Finding[] = extras.integrity.map((p, i) => ({ id: `TI-${i + 1}`, gate_id: "test-integrity", owner: "tester", summary: `${p.file} adds a ${p.marker} marker: \`${p.line}\`. A skipped or focused test makes the gates prove less than they claim; remove it, or keep it with a trailing comment \`looprch-allow-skip: <reason>\`.` }));
-    ev(e, { type: "evidence.integrity", role: "tester", data: { problems: extras.integrity.length, files: [...new Set(extras.integrity.map((p) => p.file))] } });
-    repairOrBlock(e, "test", findings, [], `test integrity: ${findings.length} skip/focus marker(s)`, true);
-    return;
-  }
-  const acknowledged = new Set(c.acknowledged_open ?? []);
-  const carried = outcome.all_passed && c.tester_verdict === "fail" && c.tester_failures.length > 0 && (c.review_changes ?? 0) > 0 && c.tester_failures.every((f) => acknowledged.has(f.id));
-  if (carried)
-    ev(e, { type: "warning", data: { message: `The Tester's failures are findings the Implementer reported not_fixed (${c.tester_failures.map((f) => f.id).join(", ")}); they go to the review instead of another test repair` } });
-  if (outcome.all_passed && (c.tester_verdict === "pass" || carried)) {
-    const sev3 = testcaseIndex(e.root, outcome.runs.filter((r) => r.gate_id !== E2E_GATE_ID));
-    const index = { available: sev3.available, cases: [...sev3.cases, ...testcaseIndex(e.root, outcome.runs.filter((r) => r.gate_id === E2E_GATE_ID)).cases] };
-    const retired = new Set(c.retired_obligations ?? []);
-    const current = (c.tester_verifications ?? []).filter((v) => !retired.has(v.id));
-    const open = new Set((c.review_changes ?? 0) > 0 ? c.review_findings.map((f) => f.id) : []);
-    const changed = new Set(c.reviewed_tree ? changedBetween(e.root, c.reviewed_tree, outcome.snapshot_tree) : []);
-    const stale = [...unprovenChecks(c, current, open), ...(open.size && c.reviewed_cases ? staleClaims(current, open, c.reviewed_cases, changed, e.root) : [])];
-    const unbacked = [...unbackedTests(current, index, e.root), ...stale];
-    ev(e, { type: "evidence.checked", data: { binding: index.available ? "testcases" : "files", cases: index.cases.length, verifications: (c.tester_verifications ?? []).length, unbacked: unbacked.length - stale.length, stale: stale.length } });
-    if (unbacked.length) {
-      const byId = new Map<string, string[]>();
-      for (const u of unbacked) byId.set(u.id, [...(byId.get(u.id) ?? []), `${u.test} (${u.reason})`]);
-      const findings: Finding[] = [...byId].map(([id, why]) => {
-        const rf = open.has(id) ? c.review_findings.find((f) => f.id === id) : undefined;
-        return { id, gate_id: EVIDENCE_GATE, summary: `claimed tests not backed by the gate evidence: ${why.join("; ")}`, ...(rf?.severity ? { severity: rf.severity } : {}), ...(rf?.fix ? { fix: rf.fix } : {}), ...(rf?.checks?.length ? { checks: rf.checks } : {}) };
-      });
-      ev(e, { type: "evidence.unbacked", role: "tester", data: { verifications: [...byId.keys()], tests: unbacked.map((u) => u.test).slice(0, 50) } });
-      repairOrBlock(e, "test", findings, [], `unbacked verifications ${[...byId.keys()].join(", ")}`, true);
-      return;
-    }
-    c.passing_cases = { available: index.available, cases: index.cases.filter((x) => x.status === "passed").map((x) => ({ name: x.name, classname: x.classname, file: x.file })) };
+  if (outcome.all_passed && c.tester_verdict === "pass") {
     c.snapshots.gates = outcome.snapshot_tree;
     afterGatesPassed(e);
     return;
@@ -2511,20 +1610,6 @@ export function applyGates(e: Engine, outcome: GatesOutcome, extras: GateExtras 
   findings.push(...c.tester_failures);
   const paths = outcome.runs.filter((r) => !r.ok).flatMap((r) => [r.stdout_path, r.stderr_path]);
   repairOrBlock(e, "test", findings, paths, findings.map((f) => f.gate_id ?? f.id).join(", ") || "tester verdict fail");
-}
-
-/** Acceptance checks of open review findings that a `verified` verification names no testcase for. */
-function unprovenChecks(c: NonNullable<State["current"]>, verifs: Verification[], open: Set<string>): { id: string; test: string; reason: string }[] {
-  const out: { id: string; test: string; reason: string }[] = [];
-  for (const v of verifs) {
-    if (v.status !== "verified" || !open.has(v.id)) continue;
-    const checks = c.review_findings.find((f) => f.id === v.id)?.checks ?? [];
-    const proven = new Set((v.checks ?? []).filter((x) => x.tests.length).map((x) => x.n));
-    checks.forEach((text, i) => {
-      if (!proven.has(i + 1)) out.push({ id: v.id, test: `check ${i + 1}`, reason: `check ${i + 1} ("${text.slice(0, 120)}") names no testcase in "checks"` });
-    });
-  }
-  return out;
 }
 
 export function doCheckpoint(e: Engine): { label: string | null; commit: string | null } {
@@ -2698,6 +1783,7 @@ export function issueSideRun(e: Engine, kind: "worker" | "adhoc_review", opts: {
     resume: false,
     question: opts.question,
     gateIds: phase?.gates.map((g) => g.id) ?? [],
+    readOnly: true,
   });
   const run: RunRecord = {
     run_id: runId,
@@ -2791,12 +1877,6 @@ export function answer(e: Engine, qid: string, option: string, text: string | nu
     case "debate_unresolved":
       answerDebateUnresolved(e, qid, option, (q.context.items as string[] | undefined) ?? []);
       break;
-    case "readback_unresolved":
-      answerReadback(e, qid, option);
-      break;
-    case "lineage_stuck":
-      answerLineageStuck(e, qid, option);
-      break;
     default: {
       const never: never = q.kind;
       throw new LrError("internal", `unhandled question ${String(never)}`);
@@ -2813,6 +1893,27 @@ export function pause(e: Engine): void {
   e.st.flags.pause_requested = true;
 }
 
+/** Plan files of an open protocol-4 (Looprch 0.7) phase, moved to v07/ when it restarts at planning. */
+const V07_FILES = /^(contract|plan|debate|readback|design-debate|traceability|changed-files|incoming-deferrals|review|test-report)([.-].*)?$|^blueprints$/;
+
+/**
+ * An open phase that started under protocol 4 restarts at planning under the new protocol: its
+ * contract, plan and debate files move to v07/, the code it already wrote stays on the branch.
+ */
+function restartForProtocol(e: Engine): void {
+  const st = e.st;
+  const c = st.current;
+  if (!c || st.protocol >= 5 || c.stage === "preflight" || c.stage === "closing") return;
+  const dir = projectPaths(e.root).phase(c.phase);
+  const archive = join(dir, "v07");
+  ensureDir(archive);
+  for (const f of readdirSafe(dir)) if (V07_FILES.test(f)) renameSync(join(dir, f), join(archive, f));
+  const fresh = newCurrent(c.phase, c.title, nowIso());
+  st.current = { ...fresh, stage: "planning", phase_base: c.phase_base, branch: c.branch, last_commit: c.last_commit, run_seq: c.run_seq, assignment_index: c.assignment_index, last_agent: c.last_agent };
+  if (st.pending_question && !(QUESTION_KINDS as readonly string[]).includes(st.pending_question.kind)) st.pending_question = null;
+  ev(e, { type: "stage.entered", stage: "planning", data: { round: 0, restarted_from: c.stage, archive: rel(e, archive) } });
+}
+
 export function resume(e: Engine, note: string | null): string[] {
   const st = e.st;
   const cleared: string[] = [];
@@ -2822,12 +1923,7 @@ export function resume(e: Engine, note: string | null): string[] {
       const v = verifyPackage(e.root);
       if (!v.ok) throw new LrError("spec_changed", "The package still does not verify", "Reseal an authorized amendment with SEV3, then run looprch init discover --accept-fingerprint");
     }
-    if (code === "repair_limit" && st.current) {
-      st.current.extra_rounds++;
-      const c = st.current;
-      const open = c.deltas.implementer?.findings ?? [];
-      if (c.stage === "repairing" && c.repair_source === "test" && !c.design && !c.work && open.length) startDesign(e, open.map((f) => f.id), "test_repeat", open);
-    }
+    if (code === "repair_limit" && st.current) st.current.extra_rounds++;
     if (code === "expansion_limit" && st.current) st.current.expansion_round = Math.max(0, st.current.expansion_round - 1);
     if (code === "result_invalid" && st.current) st.current.reask_count = 0;
     if ((code === "run_failed" || code === "cli_missing") && st.current) for (const k of Object.keys(st.current.attempts)) st.current.attempts[k] = 0;
@@ -2835,7 +1931,10 @@ export function resume(e: Engine, note: string | null): string[] {
     cleared.push("blocked");
   }
   if (st.flags.paused) {
-    if (st.flags.paused.reason.startsWith("protocol_changed")) markPhaseStart(st);
+    if (st.flags.paused.reason.startsWith("protocol_changed")) {
+      restartForProtocol(e);
+      markPhaseStart(st);
+    }
     st.flags.paused = null;
     cleared.push("paused");
   }
@@ -2864,7 +1963,7 @@ export function nextDescription(st: State): string {
     debating: "Plan Debater reviews the plan",
     synthesizing: "Planner finalizes the plan",
     plan_approval: "plan approval",
-    implementing: "Implementer implements the plan",
+    implementing: c.sessions && c.sessions.length > 1 ? `Implementer works on session ${(c.session_index ?? 0) + 1} of ${c.sessions.length}` : "Implementer implements the plan",
     testing: "Tester writes tests",
     gating: "run gates after the tester report",
     reviewing: "Reviewer reviews code and evidence",

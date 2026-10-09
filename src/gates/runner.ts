@@ -9,8 +9,8 @@ import { sha256 } from "../install/manifest.js";
 import { VERSION } from "../core/constants.js";
 import { head } from "../git/git.js";
 import type { Gate, PhaseDef } from "../sev3/manifest.js";
-import { junitCases, parseJunit } from "./junit.js";
-import { parseUnittest, unittestCases, type Counts, type TestCase } from "./unittest.js";
+import { parseJunit } from "./junit.js";
+import { parseUnittest, type Counts } from "./unittest.js";
 
 export interface GateRun {
   gate_run_id: string;
@@ -165,114 +165,6 @@ export function runGate(root: string, cfg: Config, gate: Gate, gateRunId: string
     run.reason = `inspection report ${manualReport} does not exist`;
   }
   return run;
-}
-
-export interface CaseIndex {
-  /** True when at least one gate of the batch produced named testcases. */
-  available: boolean;
-  cases: TestCase[];
-}
-
-/** Named testcases without their outcome (the passing cases of an earlier batch). */
-export interface CaseNames {
-  available: boolean;
-  cases: Pick<TestCase, "name" | "classname" | "file">[];
-}
-
-/** Named testcases from this gate batch: JUnit evidence files and verbose unittest output. */
-export function testcaseIndex(root: string, runs: GateRun[]): CaseIndex {
-  const cases: TestCase[] = [];
-  for (const r of runs) {
-    if (r.evidence.format === "junit" && r.evidence.path) {
-      const abs = join(root, r.evidence.path);
-      if (existsSync(abs)) cases.push(...junitCases(readFileSync(abs, "utf8")));
-    } else if (r.evidence.format === "unittest") {
-      const out = [r.stdout_path, r.stderr_path].map((p) => join(root, p)).filter((p) => existsSync(p)).map((p) => readFileSync(p, "utf8")).join("\n");
-      cases.push(...unittestCases(out));
-    }
-  }
-  return { available: cases.length > 0, cases };
-}
-
-const norm = (s: string): string => s.replace(/\\/g, "/").replace(/\s+/g, " ").trim();
-
-export function refMatches(ref: string, c: Pick<TestCase, "name" | "classname" | "file">, root: string): boolean {
-  const r = norm(ref);
-  const name = norm(c.name);
-  if (!r || !name) return false;
-  if (r === name) return true;
-  const file = norm(c.file).replace(`${norm(root)}/`, "");
-  const cls = norm(c.classname);
-  const candidates = [file, cls && `${cls}::${name}`, cls && `${cls}.${name}`, cls && `${cls} > ${name}`].filter(Boolean);
-  if (candidates.some((x) => x === r || x.endsWith(`/${r}`) || x.endsWith(`::${r}`) || x.endsWith(`.${r}`))) return true;
-  const sep = r.lastIndexOf("::");
-  if (sep < 0) return false;
-  const rFile = r.slice(0, sep);
-  const rName = r.slice(sep + 2);
-  if (rName !== name && !name.endsWith(` > ${rName}`)) return false;
-  const stem = rFile.replace(/\.[A-Za-z]+$/, "");
-  return !file && !cls ? true : file.includes(rFile) || cls.includes(rFile) || cls.replace(/\./g, "/").includes(stem) || cls.includes(stem.split("/").pop() ?? stem);
-}
-
-/**
- * Tester claims that the gate evidence does not back: a `verified` test reference must match a
- * passing testcase of this batch. Without named testcases, the reference must at least name an
- * existing test file (and a name that occurs in it).
- */
-type Claim = { id: string; status: string; tests: string[]; checks?: { n: number; tests: string[] }[] };
-
-const claimedTests = (v: Claim): string[] => [...new Set([...v.tests, ...(v.checks ?? []).flatMap((c) => c.tests)])];
-
-/** `path::name` or `path` of a test reference; null when it does not name a file. */
-function refFile(ref: string): string | null {
-  const sep = ref.lastIndexOf("::");
-  const file = (sep >= 0 ? ref.slice(0, sep) : ref).trim();
-  return /[/.]/.test(file) ? file.replace(/^\.\//, "") : null;
-}
-
-/**
- * Verifications of review findings whose proof is stale: for each check (or the finding as a
- * whole), at least one cited testcase must be new since the reviewed tree. A testcase that already
- * passed on the tree where the Reviewer found the defect cannot prove the repair. Without named
- * testcases, the cited test file must have changed since that tree.
- */
-export function staleClaims(verifs: Claim[], findingIds: Set<string>, reviewed: CaseNames, changedFiles: Set<string>, root: string): { id: string; test: string; reason: string }[] {
-  const out: { id: string; test: string; reason: string }[] = [];
-  const fresh = (t: string): boolean => {
-    if (reviewed.available) return !reviewed.cases.some((c) => refMatches(t, c, root));
-    const f = refFile(t);
-    return !!f && changedFiles.has(f);
-  };
-  for (const v of verifs) {
-    if (v.status !== "verified" || !findingIds.has(v.id)) continue;
-    const groups = v.checks?.length ? v.checks.map((c) => ({ label: `check ${c.n}`, tests: c.tests })) : [{ label: "the finding", tests: v.tests }];
-    for (const g of groups)
-      if (!g.tests.some(fresh))
-        out.push({ id: v.id, test: g.tests.join(", ") || "(none)", reason: `${g.label}: every cited testcase already passed on the reviewed tree, where the Reviewer found the defect; add a testcase that fails there` });
-  }
-  return out;
-}
-
-export function unbackedTests(verifs: Claim[], index: CaseIndex, root: string): { id: string; test: string; reason: string }[] {
-  const out: { id: string; test: string; reason: string }[] = [];
-  for (const v of verifs) {
-    if (v.status !== "verified") continue;
-    for (const t of claimedTests(v)) {
-      const hits = index.cases.filter((c) => refMatches(t, c, root));
-      if (index.available || hits.length) {
-        if (!hits.length) out.push({ id: v.id, test: t, reason: "no such testcase in the gate evidence" });
-        else if (!hits.some((c) => c.status === "passed")) out.push({ id: v.id, test: t, reason: `the testcase ${hits[0]!.status} in the gate evidence` });
-        continue;
-      }
-      const sep = t.lastIndexOf("::");
-      const file = (sep >= 0 ? t.slice(0, sep) : t).trim();
-      const name = sep >= 0 ? t.slice(sep + 2).trim() : "";
-      const abs = join(root, file);
-      if (!file || !existsSync(abs) || !statSync(abs).isFile()) out.push({ id: v.id, test: t, reason: "no named testcases in the gate evidence, and no such test file" });
-      else if (name && !readFileSync(abs, "utf8").includes(name)) out.push({ id: v.id, test: t, reason: `${file} does not contain ${name}` });
-    }
-  }
-  return out;
 }
 
 export interface GatesOutcome {

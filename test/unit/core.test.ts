@@ -195,18 +195,18 @@ describe("core/journal progress lines", () => {
     assert.deepEqual(lines, ["[GATES COMPLETE]\nResult: 1/2 gates passed.\nFailed: G-2 (exit 1)"]);
   });
 
-  test("review lines name the round, time budget, origins and resolutions", () => {
+  test("review lines name the round, time budget and resolutions", () => {
     const lines = renderProgress([
       ev("run.issued", { role: "reviewer", agent: "codex", run_id: "P-003-reviewer-2", data: { task: "review", mode: "delegate", mode_reason: "configured", model: "gpt", attempt: 1, timeout: "90m", review_round: 2, review_cap: 3 } }),
       ev("result.accepted", {
         role: "reviewer",
         agent: "codex",
-        data: { task: "review", decision: "changes_requested", review_round: 2, review_cap: 3, findings_total: 2, severities: { high: 1, medium: 1 }, findings: [{ id: "R-2", severity: "high", origin: "unfixed", summary: "still open" }, { id: "R-11", severity: "medium", origin: "regression", summary: "broke" }] },
+        data: { task: "review", decision: "changes_requested", review_round: 2, review_cap: 3, findings_total: 2, severities: { high: 1, medium: 1 }, findings: [{ id: "R-2", severity: "high", summary: "still open" }, { id: "R-11", severity: "medium", summary: "broke" }] },
       }),
       ev("result.accepted", { role: "implementer", agent: "cursor", data: { task: "repair", decision: "implemented", touched: 3, resolutions: [{ id: "R-2", status: "fixed" }, { id: "R-11", status: "not_fixed" }] } }),
     ]);
     assert.equal(lines[0], "[TASK START] P-003-reviewer-2: Reviewer (review) on codex/gpt · delegate · review round 2 of 3 · time budget 90m");
-    assert.equal(lines[1], "[REVIEW COMPLETE] (review round 2 of 3)\nResult: Changes requested (2 findings: 1 high, 1 medium).\nOrigin: 1 unfixed, 1 regression\nFindings: R-2 (high): still open; R-11 (medium): broke");
+    assert.equal(lines[1], "[REVIEW COMPLETE] (review round 2 of 3)\nResult: Changes requested (2 findings: 1 high, 1 medium).\nFindings: R-2 (high): still open; R-11 (medium): broke");
     assert.equal(lines[2], "[REPAIR COMPLETE] The Implementer on cursor finished; 3 files touched. Resolutions: 1 fixed, not fixed: R-11.");
   });
 
@@ -274,9 +274,11 @@ describe("core/config", () => {
     assert.match(r.warnings.join(), /D-05/);
   });
 
-  test("read-only role on a relay without read-only warns", () => {
-    const r = validateConfig(cfgWith((c) => (c.roles.reviewer = { mode: "delegate", agent: "kimi", model: "m", fallbacks: [] })), { caps });
+  test("only the advisory Worker is read-only: it warns on a relay without read-only; phase roles do not", () => {
+    const r = validateConfig(cfgWith((c) => (c.roles.worker = { mode: "delegate", agent: "kimi", model: "m", fallbacks: [] })), { caps });
     assert.match(r.warnings.join(), /read-only/);
+    const reviewer = validateConfig(cfgWith((c) => (c.roles.reviewer = { mode: "delegate", agent: "kimi", model: "m", fallbacks: [] })), { caps });
+    assert.doesNotMatch(reviewer.warnings.join(), /read-only/);
   });
 
   test("worker max_parallel range", () => {

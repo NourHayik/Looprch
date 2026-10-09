@@ -2,6 +2,67 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.8.0 - 2026-10-09
+
+A guiding plan, a simple workflow, an easy e2e setup. Protocol 5.
+
+### Changed
+
+- **The Planner writes a guiding plan instead of a contract.** `plan.md` reads like a senior
+  engineer's implementation plan: overview, concept and architecture, decisions with reasons,
+  numbered plan phases whose tasks say what to build, where, how and how to check it, tests,
+  risks, deferrals and a todo list. The result block carries only `plan` (todos, Implementer
+  sessions, a requirement map, deferrals), stored as `plan.json`. Obligations, interfaces, work
+  packages, planned tests, precision tiers and blueprints are gone: in CoreBit P-001 the contract
+  was 97 KB against a 5 KB plan.md.
+- **Implementer sessions.** The Planner groups the todos into sessions from the Implementer's model
+  and context budget (`--context-kb`, now asked in `/lr-init`); usually one session covers the
+  phase. Each session is one Implementer run with its own checkpoint. Todos a session leaves open
+  get one follow-up session.
+- **The Implementer starts right away.** No readback before approval. It makes small choices
+  itself and notes them; only a question that truly blocks it goes to the Planner, whose answer is
+  appended to plan.md as `## Addendum N` (new todos join the session). The Plan Debater is not
+  involved.
+- **The plan debate is simpler.** Findings are `{id, severity, summary, section, suggestion}`;
+  the Planner accepts or rejects each with a note; the Debater's checklist targets what makes a
+  cheaper Implementer fail, including sessions too large for its context. `limits.debate_rounds`
+  defaults to 2.
+- **Reviews and repairs are direct.** Findings are `{id, severity, summary, files, fix, owner}`;
+  the Implementer repairs them, the Tester proves the repairs, the Reviewer re-reviews. Resolutions
+  are optional.
+- **Handover file lists come from git**, written by Looprch; the Implementer writes the summary.
+- `looprch check` checks only that Looprch can read the result block.
+- `status --json` adds `current.session`, `sessions`, `todos_done` and `todos_total`; existing
+  fields keep their names.
+
+### Added
+
+- **`looprch e2e init`**: one command sets up the optional e2e gate. It asks (or takes flags for)
+  the model provider (`none`, `openrouter`, `openai`, `anthropic`, `google`, `deepseek`, `gateway`,
+  `openai-compatible`), how the app is reached and which phases; installs the packages with the
+  project's package manager (`--install`); writes `e2e.config.ts`, a first test without a model,
+  and a gitignored **`.env.e2e`** with every key the provider needs and where to get it. You paste
+  the key into that file and run `looprch e2e configure --enable`. Gate runs and `configure` read
+  `.env.e2e`; a variable exported in the shell wins. `/lr-e2e-test-init` is now three questions and
+  this command.
+
+### Removed
+
+- The checks that blocked roles more than they helped: file ownership and the read-only block for
+  phase roles (the Debater and Reviewer run without read-only mode; only the Worker and
+  `/lr-review` stay read-only), package scope and `deviations`, plan lint, requirement coverage as
+  a check, refs-changed dispositions, Tester verification coverage and evidence binding, the
+  skip/focus scan, `contract_review`/`files_reviewed`/`prior` coverage, cause routing, Reviewer
+  repair packages, Planner repair designs and `design_review`, finding lineages, handover file-list
+  matching. `limits.readback_rounds` and `limits.lineage_attempts` are dropped from existing
+  configs. What remains: a readable result block, passing gates, git safety.
+
+### Migration
+
+- A phase that started under 0.7 (protocol 4) pauses with `protocol_changed`. `looprch resume`
+  restarts it at planning: its contract, plan and debate files move to
+  `.looprch/phases/P-NNN/v07/`; the code on the phase branch stays.
+
 ## 0.7.3 - 2026-10-08
 
 ### Fixed

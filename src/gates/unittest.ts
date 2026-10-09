@@ -11,23 +11,6 @@ export interface ParseResult {
   reason: string | null;
 }
 
-export interface TestCase {
-  name: string;
-  classname: string;
-  file: string;
-  status: "passed" | "failed" | "skipped";
-}
-
-/** Testcases from verbose unittest output (`test_x (module.Class...) ... ok`); empty without -v. */
-export function unittestCases(output: string): TestCase[] {
-  const out: TestCase[] = [];
-  for (const m of output.matchAll(/^(\w+) \(([\w.]+)\)(?:\n.*?)?\s\.\.\.\s(ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$/gm)) {
-    const r = m[3]!;
-    out.push({ name: m[1]!, classname: m[2]!, file: "", status: r === "ok" || r === "expected failure" ? "passed" : r.startsWith("skipped") ? "skipped" : "failed" });
-  }
-  return out;
-}
-
 /** Python unittest: "Ran N tests" with N > 0, a final "OK" line, exit 0, and not everything skipped. */
 export function parseUnittest(output: string, exitCode: number | null): ParseResult {
   const counts: Counts = { tests: 0, failures: 0, errors: 0, skipped: 0 };

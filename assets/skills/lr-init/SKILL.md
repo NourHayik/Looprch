@@ -39,31 +39,34 @@ Implementer, Tester, Reviewer, Worker), ask:
    only be the Lead, never a Delegate target.
 3. Which model? Run `looprch models <agent> --json` and offer its `models`. If the list is empty
    or failed, ask the user to type the exact id. OpenCode models are `provider/model`.
-4. Optional: reasoning effort, timeout (Implementer default `2h`), approved fallbacks
+4. Implementer only: its context size in KB (`--context-kb`, about 4 KB per 1000 tokens, for
+   example `800` for a 200K-token model, `4000` for a 1M-token model). The Planner uses it to
+   decide how many Implementer sessions the plan needs; skip it when the user does not know.
+5. Optional: reasoning effort, timeout (Implementer default `2h`), approved fallbacks
    (agent + mode + model, tried in order when usage limits are exhausted).
 
 Persist each answer:
-- `looprch config set-role <role> --mode <direct|delegate> --agent <agent> --model <model> [--effort <e>] [--timeout <dur>]`
+- `looprch config set-role <role> --mode <direct|delegate> --agent <agent> --model <model> [--effort <e>] [--timeout <dur>] [--context-kb <n>]`
 - `looprch config add-fallback <role> --mode <m> --agent <agent> --model <model>`
 Role keys: `planner`, `plan_debater`, `implementer`, `tester`, `reviewer`, `worker`.
 
 Recommend a Plan Debater from a different model family than the Planner: a debate between two
 copies of one model shares its blind spots. Recommend the strongest models for Planner, Plan
-Debater and Reviewer, and a cheaper model for the Implementer: the Planner's packages are written
-for a literal executor, and the Implementer's model reads them back before approval.
+Debater and Reviewer, and a cheaper model for the Implementer: the Planner writes a guiding plan
+with a todo list, and the Implementer works through it.
 
 Optional settings, only if the user asks: `looprch config set approvals.plan high-risk`,
 `approvals.merge`, `limits.repair_rounds`, `limits.review_rounds` (reviews that may request
-changes per phase, default 3), `limits.debate_rounds` (Plan Debater passes, default 3),
-`limits.readback_rounds` (executability readbacks, default 2, 0 turns them off),
-`limits.lineage_attempts` (reports of one finding before you are asked, default 2),
+changes per phase, default 3), `limits.debate_rounds` (Plan Debater passes, default 2),
 `gates.env.<NAME> <value>`, `context_kb.<agent> <KB>`.
 
 ## 4. E2E testing (optional)
 
 Ask whether the user wants end-to-end tests with the TesterArmy `e2e` runner as an extra gate. If
-yes, follow the steps of `/lr-e2e-test-init` now. If no, skip it: Looprch works normally without
-it, and the user can run `/lr-e2e-test-init` at any time later.
+yes, follow `/lr-e2e-test-init` now: three questions (model provider, how the app is reached,
+which phases), then one command, `looprch e2e init`, writes everything; the user only pastes the
+key into `.env.e2e`. If no, skip it: Looprch works normally without it, and the user can run
+`/lr-e2e-test-init` at any time later.
 
 ## 5. Finish
 

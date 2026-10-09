@@ -40,39 +40,12 @@
         "reviewed_tree": { "type": ["string", "null"], "description": "Tree of the last review that requested changes" },
         "repair_reports": { "type": "array", "items": { "type": "string" }, "description": "final.md of Implementer repairs since the last review" },
         "review_notes": { "type": "array", "description": "Findings of an approving review, listed in the handover" },
-        "debate_findings": { "type": "array", "items": { "type": "string" }, "description": "Plan Debater finding ids the synthesis must disposition" },
-        "finding_ledger": {
-          "type": "object",
-          "description": "Review finding lineages keyed by finding id",
-          "additionalProperties": {
-            "type": "object",
-            "required": ["lineage", "reports", "designs", "status"],
-            "properties": {
-              "lineage": { "type": "string" },
-              "severity": { "type": ["string", "null"] },
-              "cause": { "enum": [null, "implementation", "plan", "requirement", "cross_phase", "test"] },
-              "owner": { "enum": [null, "implementer", "tester"] },
-              "fix": { "type": ["string", "null"], "description": "Fix of the first report; unfixed re-reports keep it" },
-              "checks": { "type": "array", "items": { "type": "string" }, "description": "Acceptance checks of the first report" },
-              "first_round": { "type": "integer" },
-              "last_round": { "type": "integer" },
-              "reports": { "type": "integer" },
-              "designs": { "type": "integer" },
-              "status": { "enum": ["open", "fixed"] }
-            }
-          }
-        },
-        "design": {
-          "type": ["object", "null"],
-          "description": "Planner repair design in progress",
-          "properties": { "findings": { "type": "array", "items": { "type": "string" } }, "step": { "enum": ["design", "debate", "revise"] }, "debate": { "type": "boolean" }, "reason": { "enum": ["plan_cause", "unfixed", "related", "needs_design"] } }
-        },
-        "designed_this_round": { "type": "array", "items": { "type": "string" } },
-        "passing_cases": { "type": "object", "description": "Testcases that passed in the latest passing gate batch {available, cases[{name, classname, file}]}" },
-        "reviewed_cases": { "type": "object", "description": "passing_cases at the last changes-requesting review; a proof of a repair needs a testcase outside it" },
-        "retired_obligations": { "type": "array", "items": { "type": "string" }, "description": "Contract ids retired by an amendment" },
-        "tester_verifications": { "type": "array", "description": "Latest Tester verification per id; checked against the gate evidence" },
-        "contract_review": { "type": "array", "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["met", "not_met"] } } } },
+        "sessions": { "type": ["array", "null"], "items": { "type": "array", "items": { "type": "string" } }, "description": "Implementer sessions of the approved plan: contiguous todo id groups, one Implementer run each" },
+        "session_index": { "type": "integer", "minimum": 0, "description": "The session the Implementer works on" },
+        "todos_done": { "type": "array", "items": { "type": "string" }, "description": "Todos the Implementer reported done" },
+        "followup_sessions": { "type": "array", "items": { "type": "integer" }, "description": "Indexes of follow-up sessions queued for todos a session left open" },
+        "debate_final": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Debate items the user decided for the Plan Debater" },
+        "context_request": { "type": ["object", "null"], "description": "The Implementer's blocking question the Planner answers next" },
         "snapshots": {
           "type": "object",
           "properties": { "gates": { "type": ["string", "null"] }, "review": { "type": ["string", "null"] }, "handover": { "type": ["string", "null"] } }
@@ -93,7 +66,7 @@
       "type": ["object", "null"],
       "required": ["id", "kind", "question", "options"],
       "properties": {
-        "kind": { "enum": ["commit_baseline", "ack_gates", "approve_plan", "approve_merge", "context_over_budget", "host_conflict", "rate_limit_long", "final_review"] }
+        "kind": { "enum": ["commit_baseline", "ack_gates", "approve_plan", "approve_merge", "context_over_budget", "host_conflict", "rate_limit_long", "final_review", "debate_unresolved"] }
       }
     },
     "sessions": {

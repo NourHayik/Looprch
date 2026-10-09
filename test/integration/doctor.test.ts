@@ -56,7 +56,7 @@ describe("doctor and config", () => {
     assert.equal(bad.json.error.code, "config_invalid");
     const oc = runCli(["config", "set-role", "implementer", "--mode", "delegate", "--agent", "opencode", "--model", "plain", "--json"], { cwd: proj, env });
     assert.match(oc.json.error.message, /provider\/model/);
-    for (const [role, agent, model] of [["plan_debater", "kimi", "k"], ["implementer", "opencode", "p/m"], ["tester", "codex", "c"], ["reviewer", "cursor", "r"]])
+    for (const [role, agent, model] of [["plan_debater", "kimi", "k"], ["implementer", "opencode", "p/m"], ["tester", "codex", "c"], ["reviewer", "cursor", "r"], ["worker", "kimi", "w"]])
       assert.equal(runCli(["config", "set-role", role!, "--mode", role === "reviewer" ? "direct" : "delegate", "--agent", agent!, "--model", model!], { cwd: proj, env }).code, 0);
     assert.equal(runCli(["config", "add-fallback", "implementer", "--mode", "delegate", "--agent", "codex", "--model", "c2"], { cwd: proj, env }).code, 0);
     const v = runCli(["config", "validate", "--json"], { cwd: proj, env });

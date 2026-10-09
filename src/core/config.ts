@@ -49,12 +49,8 @@ export interface Config {
     expansion_rounds: number;
     /** Reviews that may request changes in one phase; absent in older configs (default 3). */
     review_rounds?: number;
-    /** Plan Debater passes on the initial plan (debate plus rebuttals); default 3. */
+    /** Plan Debater passes on the initial plan (debate plus rebuttals); default 2. */
     debate_rounds?: number;
-    /** Executability readbacks by the Implementer's model before plan approval; 0 disables; default 2. */
-    readback_rounds?: number;
-    /** Review reports of one finding lineage before Looprch asks the user instead of repairing again; default 2. */
-    lineage_attempts?: number;
   };
   approvals: { plan: Approval; merge: Approval };
   git: { phase_branches: boolean };
@@ -97,20 +93,13 @@ export function defaultE2e(): E2eConfig {
   };
 }
 
-export const DEFAULT_DEBATE_ROUNDS = 3;
-export const DEFAULT_READBACK_ROUNDS = 2;
-export const DEFAULT_LINEAGE_ATTEMPTS = 2;
+export const DEFAULT_DEBATE_ROUNDS = 2;
+
+/** Limits of Looprch 0.7 that 0.8 removed; loadConfig drops them. */
+const RETIRED_LIMITS = ["readback_rounds", "lineage_attempts"];
 
 export function debateRounds(cfg: Config): number {
   return cfg.limits.debate_rounds ?? DEFAULT_DEBATE_ROUNDS;
-}
-
-export function readbackRounds(cfg: Config): number {
-  return cfg.limits.readback_rounds ?? DEFAULT_READBACK_ROUNDS;
-}
-
-export function lineageAttempts(cfg: Config): number {
-  return cfg.limits.lineage_attempts ?? DEFAULT_LINEAGE_ATTEMPTS;
 }
 
 export const DEFAULT_TIMEOUTS: Record<Role, string> = {
@@ -144,8 +133,6 @@ export function defaultConfig(): Config {
       expansion_rounds: 2,
       review_rounds: DEFAULT_REVIEW_ROUNDS,
       debate_rounds: DEFAULT_DEBATE_ROUNDS,
-      readback_rounds: DEFAULT_READBACK_ROUNDS,
-      lineage_attempts: DEFAULT_LINEAGE_ATTEMPTS,
     },
     approvals: { plan: "never", merge: "never" },
     git: { phase_branches: true },
@@ -199,7 +186,7 @@ function checkAssignment(issues: Issues, where: string, a: unknown, cfg: Config,
     else if (ctx.relayExists && !ctx.relayExists(agent)) issues.error(`${where}: relay ${agent}-delegate is not installed (run: looprch install-relay ${agent})`);
   }
   if (READ_ONLY_ROLES.includes(role) && a.mode === "delegate" && caps.readOnly === "none")
-    issues.warn(`${where}: ${agent}-delegate cannot enforce read-only; Looprch still checks git status before and after`);
+    issues.warn(`${where}: ${agent}-delegate cannot enforce read-only; Looprch still discards a side run that changes files`);
   if (caps.modelFormat === "provider/model" && isNonEmptyString(a.model) && !/^[^/]+\/.+/.test(a.model))
     issues.error(`${where}.model must be "provider/model" for ${agent}`);
   if (ctx.knownModels && isNonEmptyString(a.model)) {
@@ -256,8 +243,6 @@ export function validateConfig(raw: unknown, ctx: ValidationContext): Issues {
     if (!isInt(l.expansion_rounds, 0, 5)) issues.error("limits.expansion_rounds must be 0..5");
     if (l.review_rounds !== undefined && !isInt(l.review_rounds, 1, 10)) issues.error("limits.review_rounds must be 1..10");
     if (l.debate_rounds !== undefined && !isInt(l.debate_rounds, 1, 5)) issues.error("limits.debate_rounds must be 1..5");
-    if (l.readback_rounds !== undefined && !isInt(l.readback_rounds, 0, 3)) issues.error("limits.readback_rounds must be 0..3");
-    if (l.lineage_attempts !== undefined && !isInt(l.lineage_attempts, 1, 5)) issues.error("limits.lineage_attempts must be 1..5");
   }
   if (!isObject(cfg.approvals) || !oneOf(cfg.approvals.plan, APPROVALS) || !oneOf(cfg.approvals.merge, APPROVALS))
     issues.error(`approvals.plan and approvals.merge must be one of ${APPROVALS.join(", ")}`);
@@ -306,6 +291,12 @@ export function loadConfig(root: string): Config {
   const migrated = migrate(raw, "config", CONFIG_SCHEMA, CONFIG_MIGRATIONS, paths.backups, paths.config);
   const base = defaultConfig();
   const cfg = migrated as unknown as Config;
+  const limits = (cfg.limits ?? {}) as Record<string, unknown>;
+  if (RETIRED_LIMITS.some((k) => k in limits)) {
+    for (const k of RETIRED_LIMITS) delete limits[k];
+    if (limits.debate_rounds === 3) limits.debate_rounds = DEFAULT_DEBATE_ROUNDS;
+    writeJsonAtomic(paths.config, cfg);
+  }
   return {
     ...base,
     ...cfg,

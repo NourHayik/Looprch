@@ -57,91 +57,82 @@ describe("briefs", () => {
     assert.match(b, /P-000\/handover\.md/);
     assert.match(b, /R-1 \[high\]: bad — a\.py/);
     assert.match(b, /User note: be careful/);
-    assert.match(b, /never write or edit tests/);
+    assert.match(b, /Change the files your work needs/);
   });
 
-  test("read-only roles get the read-only rule", () => {
-    assert.match(assembleBrief(input({ role: "reviewer", task: "review" })), /You are read-only/);
+  test("phase roles have no file restrictions; only advisory side runs are read-only", () => {
+    assert.match(assembleBrief(input({ role: "reviewer", task: "review" })), /You review; you do not need to change files/);
+    assert.doesNotMatch(assembleBrief(input({ role: "reviewer", task: "review" })), /read-only|git status before and after/);
+    assert.match(assembleBrief(input({ role: "worker", task: "worker", packet: null, question: "q" })), /advisory run: do not change any file/);
+    assert.match(assembleBrief(input({ role: "reviewer", task: "adhoc_review", readOnly: true })), /advisory run/);
   });
 
-  test("review rounds: comprehensive first pass, safety-net re-review, final review", () => {
+  test("Planner and Plan Debater briefs state the Implementer and its context budget", () => {
+    assert.match(assembleBrief(input({ implementer: { agent: "opencode", model: "deepseek/deepseek-v4.1-flash", context_kb: 4000 } })), /The Implementer of this phase is opencode\/deepseek\/deepseek-v4\.1-flash, with a context budget of 4000 KB \(about 1000K tokens\)/);
+    assert.match(assembleBrief(input({ role: "plan_debater", task: "debate", implementer: { agent: "codex", model: "m", context_kb: null } })), /an unknown context budget: assume about 200K tokens/);
+    assert.match(assembleBrief(input({ implementer: null })), /The Implementer is not configured/);
+  });
+
+  test("review rounds: first pass, re-review, final review", () => {
     const timeouts = ["60m", "90m", "2h"];
     const review = (n: number, of = 3, resume = false) =>
       assembleBrief(input({ role: "reviewer", task: "review", resume, reviewRound: { n, of, tree: "tree3", prevTree: n > 1 ? "tree2" : null, timeout: timeouts[n - 1] ?? "2h" } }));
     const first = review(1);
     assert.match(first, /Review round 1 of 3\. Time budget: up to 60m\./);
     assert.match(first, /`git diff --stat abc123 tree3`/);
-    assert.match(first, /follow the first-review procedure and checklist, give `contract_review` for every obligation and deferral in contract\.json, and report every finding in this one pass/);
+    assert.match(first, /This is the first review: report every finding in this one pass/);
     assert.doesNotMatch(first, /Repair since your last review/);
     assert.doesNotMatch(first, /This is the final review/);
     const second = review(2, 3, true);
     assert.match(second, /Time budget: up to 90m/);
     assert.match(second, /Repair since your last review: `git diff --stat tree2 tree3`/);
-    assert.match(second, /report anything the earlier review missed/);
-    assert.doesNotMatch(second, /unless they are high or critical/);
+    assert.match(second, /report what still holds and anything new/);
     assert.match(second, /The code changed since your last run: inspect the current files/);
-    assert.doesNotMatch(second, /This is the final review/);
-    const last = review(3);
-    assert.match(last, /Review round 3 of 3\./);
-    assert.match(last, /This is the final review\. Still put every remaining issue in `findings`/);
+    assert.match(review(3), /This is the final review\. Request changes only for high or critical defects/);
     assert.match(review(1, 1), /This is the final review/);
-    const role = roleText("reviewer", "review");
-    for (const s of [/## Coverage/, /Walk every obligation and deferral in `contract\.json`/, /Security: trust boundaries/, /"origin": "missed"/, /`owner`/, /`cause` says where the defect comes from/, /`"related": "<earlier id>"`/, /report it in `prior`/]) assert.match(role, s);
-    assert.match(roleText("reviewer", "adhoc_review"), /Checklist:/);
-    assert.match(roleText("implementer", "repair"), /same defect wherever else it occurs/);
-    assert.match(roleText("implementer", "repair"), /report `resolutions`/);
-    assert.match(roleText("implementer", "repair"), /Fix the rule at its enforcement point for all\s+inputs/);
-    assert.match(roleText("implementer", "repair"), /walk every check against your code/);
-    assert.match(roleText("tester", "testing"), /A testcase that already passed when the Reviewer found the\s+defect cannot prove the repair/);
-    assert.match(roleText("implementer", "repair"), /`fixed` only when the whole rule holds, with the files your repair changed/);
-    assert.match(roleText("implementer", "repair"), /`needs_design` when the contract does not define/);
-    assert.match(role, /Describe the broken rule, not only the example/);
-    assert.match(roleText("tester", "testing"), /cover at least one input class the Implementer did not mention/);
-    assert.match(roleText("tester", "testing"), /Derive the rest from `contract\.json`/);
-    assert.match(roleText("tester", "testing"), /Never mock\s+the unit under test/);
-    assert.match(roleText("tester", "testing"), /looprch-allow-skip: <reason>/);
-    assert.match(roleText("plan_debater", "rebuttal"), /### Task: rebuttal/);
-    assert.match(roleText("plan_debater", "debate"), /`independent_risks`/);
-    assert.match(roleText("planner", "synthesis"), /Looprch rejects an accept whose refs did not change/);
-    assert.match(roleText("implementer", "readback"), /### Task: readback/);
-    assert.match(roleText("reviewer", "review"), /Write the repair yourself in `repair`/);
-    assert.match(roleText("planner", "planning"), /Enforceability/);
-    assert.match(roleText("planner", "context_answer"), /`contract_amendment` with the obligation/);
-    assert.match(roleText("planner", "context_answer"), /Return `repair_packages`/);
-    assert.match(roleText("planner", "planning"), /written for a literal executor/);
-    assert.match(roleText("plan_debater", "debate"), /Executability: the Implementer is a cheaper model/);
-    assert.match(roleText("implementer", "implementation"), /You execute the Planner's design; you do not redesign it/);
-    assert.match(roleText("plan_debater", "design_review"), /### Task: design_review/);
   });
 
-  test("output contract shows the object shapes reviewers and implementers must return", () => {
+  test("role prompts describe the simple workflow", () => {
+    const planner = roleText("planner", "planning");
+    for (const s of [/\*\*Concept and architecture\*\*/, /\*\*Plan phases\*\*/, /\*\*Done when\*\*/, /One session for the whole phase is the normal case/, /Never write whole files/, /closed rule/]) assert.match(planner, s);
+    assert.doesNotMatch(planner, /blueprint|obligation|work package/i);
+    assert.match(roleText("planner", "synthesis"), /`accept`: change the plan so the problem cannot happen/);
+    assert.match(roleText("planner", "context_answer"), /appended to\s+plan\.md as an addendum/);
+    assert.match(roleText("plan_debater", "debate"), /Sessions that do not fit the Implementer/);
+    assert.match(roleText("plan_debater", "rebuttal"), /### Task: rebuttal/);
+    const impl = roleText("implementer", "implementation");
+    assert.match(impl, /Start right away/);
+    assert.match(impl, /Never ask just to confirm/);
+    assert.match(impl, /`todos_done`/);
+    assert.doesNotMatch(impl, /readback|deviation|blueprint/i);
+    assert.match(roleText("implementer", "repair"), /same defect wherever else it occurs/);
+    assert.match(roleText("tester", "testing"), /cover at least one input class the Implementer did not mention/);
+    assert.match(roleText("tester", "testing"), /Mock only real external boundaries, never the unit under test/);
+    assert.match(roleText("reviewer", "review"), /Read every changed file/);
+    assert.match(roleText("reviewer", "adhoc_review"), /### Task: adhoc_review/);
+  });
+
+  test("output contract shows the object shapes each role returns", () => {
     const r = assembleBrief(input({ role: "reviewer", task: "review" }));
     assert.match(r, /"manual_gate_reports": \[\{"gate_id":"…","path":"\.looprch\/reports\/…"\}\]/);
     assert.match(r, /"owner":"implementer\|tester"/);
-    assert.match(r, /"cause":"implementation\|plan\|requirement\|cross_phase\|test"/);
-    assert.match(r, /"contract_review": \[\{"id":"O-1","status":"met\|not_met"\}\]/);
-    assert.match(r, /"prior": \[\{"id":"R-1","status":"fixed\|unfixed","failed_checks":\[2\]\}\]/);
-    assert.match(r, /"checks":\["one concrete, testable acceptance check per line/);
-    assert.match(assembleBrief(input({ role: "implementer", task: "repair" })), /"resolutions": \[\{"id":"R-1","status":"fixed\|not_fixed\|needs_design"/);
-    assert.match(assembleBrief(input({ role: "tester", task: "testing" })), /"verifications": \[\{"id":"O-1, T-1 or R-1","status":"verified\|failed\|inspected"/);
-    assert.match(r, /"files_reviewed": \["every changed file you read"\]/);
-    assert.match(r, /"repair":\{"files"/);
+    assert.doesNotMatch(r, /contract_review|files_reviewed|"cause"|"repair"/);
+    assert.match(assembleBrief(input({ role: "implementer", task: "implementation" })), /"todos_done": \["T-1"\]/);
+    assert.match(assembleBrief(input({ role: "implementer", task: "implementation" })), /only for a question that blocks the work/);
+    assert.match(assembleBrief(input({ role: "implementer", task: "repair" })), /"resolutions": \[\{"id":"R-1","status":"fixed\|not_fixed"/);
+    assert.match(assembleBrief(input({ role: "implementer", task: "handover" })), /Looprch adds the file lists from git/);
     assert.match(assembleBrief(input({ role: "plan_debater", task: "rebuttal" })), /"verdicts": \[\{"id":"D-1","verdict":"resolved\|conceded\|upheld"/);
-    assert.match(assembleBrief(input({ role: "plan_debater", task: "debate" })), /"independent_risks"/);
-    assert.match(assembleBrief(input({ role: "implementer", task: "readback", readOnly: true })), /You are read-only/);
-    assert.match(assembleBrief(input({ role: "implementer", task: "implementation" })), /open the packet only for the sources the package cites/);
-    assert.match(assembleBrief(input({ role: "planner", task: "planning" })), /"decisions": \[\{"id":"AD-1"/);
-    assert.match(assembleBrief(input({ role: "planner", task: "planning" })), /"contract": \{"obligations": \[/);
-    assert.match(assembleBrief(input({ role: "planner", task: "synthesis" })), /"debate_dispositions"/);
-    assert.match(assembleBrief(input({ role: "planner", task: "context_answer" })), /"contract_amendment"/);
+    assert.match(assembleBrief(input({ role: "plan_debater", task: "debate" })), /"suggestion":"the change that closes it"/);
+    assert.match(assembleBrief(input({ role: "implementer", task: "implementation" })), /plan\.md is your instruction/);
+    assert.match(assembleBrief(input({ role: "planner", task: "planning" })), /"plan": \{"todos": \[/);
+    assert.match(assembleBrief(input({ role: "planner", task: "planning" })), /"sessions": \[\["T-1","T-2","T-3"\]\]/);
+    assert.match(assembleBrief(input({ role: "planner", task: "synthesis" })), /"debate_dispositions": \[\{"id":"D-1","decision":"accept\|reject"/);
+    assert.match(assembleBrief(input({ role: "planner", task: "context_answer" })), /"new_todos"/);
   });
 
-  test("delta findings show owner, origin and the fix condition", () => {
-    const b = assembleBrief(
-      input({ role: "tester", task: "testing", delta: { kind: "repair", text: "Verify:", findings: [{ id: "R-7", severity: "medium", owner: "tester", origin: "unfixed", summary: "missing tests", fix: "two-connection test", checks: ["two connections contend", "the loser gets a conflict"] }] } }),
-    );
-    assert.match(b, /- R-7 \[medium, owner tester, unfixed\]: missing tests/);
-    assert.match(b, /  Fix: two-connection test\n  Check 1: two connections contend\n  Check 2: the loser gets a conflict/);
+  test("delta findings show severity, owner and the fix condition", () => {
+    const b = assembleBrief(input({ role: "tester", task: "testing", delta: { kind: "repair", text: "Verify:", findings: [{ id: "R-7", severity: "medium", owner: "tester", summary: "missing tests", fix: "two-connection test" }] } }));
+    assert.match(b, /- R-7 \[medium, owner tester\]: missing tests\n  Fix: two-connection test/);
   });
 
   test("role text picks the task section", () => {

@@ -2,7 +2,6 @@ import { LrError, UsageError } from "../core/errors.js";
 import { withLock } from "../core/lock.js";
 import { applyGates, loadEngine, persist, type GateExtras } from "../core/lifecycle.js";
 import { e2eSelected, runE2eGate } from "../gates/e2e.js";
-import { testIntegrityProblems } from "../gates/integrity.js";
 import { cachedOutcome, extraRunSlot, recordExtraRun, runPhaseGates } from "../gates/runner.js";
 import { head } from "../git/git.js";
 import { snapshotTree } from "../git/snapshot.js";
@@ -25,9 +24,8 @@ export async function run(argv: string[]): Promise<number> {
     const tested = snapshotTree(root);
     const outcome = cachedOutcome(root, phase, tested) ?? runPhaseGates(root, e.cfg, phase, tested, c.manual_reports);
     const extras: GateExtras = {};
-    if (outcome.all_passed && c.phase_base) extras.integrity = testIntegrityProblems(root, c.phase_base, tested);
     const e2e = e.cfg.integrations.e2e;
-    if (outcome.all_passed && !extras.integrity?.length && e2eSelected(e2e, c.phase) && c.e2e_passed_tree !== tested) {
+    if (outcome.all_passed && e2eSelected(e2e, c.phase) && c.e2e_passed_tree !== tested) {
       const slot = extraRunSlot(root, c.phase);
       const er = runE2eGate(root, e.cfg, e2e, slot.gateRunId, slot.outDir, tested, head(root));
       recordExtraRun(root, c.phase, er.run);

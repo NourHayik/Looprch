@@ -55,7 +55,7 @@ describe("status rendering", () => {
       version: "0.1.0",
       project: { id: "corebit", title: "Corebit" },
       spec: { package_fingerprint: "0a13ffff", phases_total: 89, phases_closed: 2 },
-      current: { phase: "P-003", title: "Tenant registry", index: 3, stage: "testing", round: 1, cap: 3, test_repairs: 0, evidence_rounds: 0, review_changes: 1, review_cap: 3, final_review_pending: false, contract_revision: 2, design: null, work: null, finding_ledger: {} },
+      current: { phase: "P-003", title: "Tenant registry", index: 3, stage: "testing", round: 1, cap: 3, test_repairs: 0, evidence_rounds: 0, review_changes: 1, review_cap: 3, final_review_pending: false, contract_revision: 2, design: null, work: null, finding_ledger: {}, session: null, sessions: null, todos_done: [], todos_total: 4 },
       active: { run_id: "P-003-tester-2", role: "tester", agent: "codex", mode: "delegate", effective_mode: "delegate", mode_reason: "configured", session_id: "019a1234", started_at: "", elapsed_s: 360, status: "running" },
       last_result: { role: "implementer", decision: "implemented", summary: "implementer implemented (opencode)", touched_files: 14 },
       flags: { pause_requested: false, paused: null, waiting: null, blocked: null },

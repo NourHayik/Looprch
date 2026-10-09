@@ -28,6 +28,7 @@ describe("Lead progress lines (integration)", () => {
       "PLANNING START",
       "TASK START",
       "PLANNING COMPLETE",
+      "PLAN",
       "DEBATE START",
       "TASK START",
       "DEBATE COMPLETE",
@@ -37,11 +38,10 @@ describe("Lead progress lines (integration)", () => {
       "TASK START",
       "REBUTTAL COMPLETE",
       "DEBATE CLOSED",
-      "TASK START",
-      "READBACK COMPLETE",
       "IMPLEMENTATION START",
       "TASK START",
       "IMPLEMENTATION COMPLETE",
+      "SESSION DONE",
       "TESTING START",
       "CHECKPOINT",
       "TESTING COMPLETE",
@@ -57,6 +57,8 @@ describe("Lead progress lines (integration)", () => {
     const debate = r.progress.find((l) => tag(l) === "DEBATE COMPLETE")!;
     assert.match(debate, /Result: Changes recommended \(1 finding: 1 medium\)/);
     assert.match(debate, /Summary: D-1 \(medium\): Clarify error handling\./);
+    assert.ok(r.progress.includes("[PLAN] P-001 plan: 1 todo in 1 Implementer session: .looprch/phases/P-001/plan.md"), r.progress.join("\n"));
+    assert.ok(r.progress.includes("[SESSION DONE] Implementer session 1 of 1: T-1 done."), r.progress.join("\n"));
     assert.match(r.progress.find((l) => tag(l) === "PHASE COMPLETE")!, /P-001 closed and merged \(tag looprch\/P-001\)/);
     assert.equal(r.progress.filter((l) => tag(l) === "PHASE START").length, 1);
     const starts = r.progress.filter((l) => tag(l) === "TASK START").map((l) => l.split(":")[0]);
@@ -84,10 +86,9 @@ describe("Lead progress lines (integration)", () => {
     assert.match(issues[0]!, /^\[ISSUE\]\nTask P-001-implementer-1 \(Implementer on opencode\) failed\.\nReason: failed/);
     assert.match(issues[0]!, /Action: Retry with the same agent\./);
     assert.match(issues[1]!, /Action: Switching the Implementer to codex\/codex-impl\./);
-    assert.ok(r.progress.some((l) => /^\[RETRY\] P-001-implementer-2: Implementer \(readback\) on opencode\/oc\/impl · delegate · attempt 2$/.test(l)), r.progress.join("\n"));
+    assert.ok(r.progress.some((l) => /^\[RETRY\] P-001-implementer-2: Implementer \(implementation\) on opencode\/oc\/impl · delegate · attempt 2$/.test(l)), r.progress.join("\n"));
     assert.ok(r.progress.includes("[FALLBACK] Implementer: opencode/oc/impl replaced by codex/codex-impl (run failed fallback)."), r.progress.join("\n"));
-    assert.ok(r.progress.some((l) => /^\[TASK START\] P-001-implementer-3: Implementer \(readback\) on codex\/codex-impl · delegate · fallback: earlier runs failed$/.test(l)), r.progress.join("\n"));
-    assert.ok(r.progress.some((l) => /^\[TASK START\] P-001-implementer-4: Implementer \(implementation\) on codex\/codex-impl/.test(l)), r.progress.join("\n"));
+    assert.ok(r.progress.some((l) => /^\[TASK START\] P-001-implementer-3: Implementer \(implementation\) on codex\/codex-impl · delegate · fallback: earlier runs failed$/.test(l)), r.progress.join("\n"));
     p.s.cleanup();
   });
 });

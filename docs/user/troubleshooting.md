@@ -20,7 +20,6 @@ hint; after fixing the cause run `looprch resume` (or `/lr-resume`).
 | `config_invalid` | Roles or limits are invalid | `looprch config validate` |
 | `result_invalid` | A role twice returned no valid `looprch-result` block | Read `.looprch/runs/<run>/final.md`, `looprch resume` |
 | `handover_mismatch` | Handover file lists still differ from git | `looprch resume` to ask again |
-| `readonly_violation` | A read-only role changed files | Undo the changes yourself (Looprch never reverts) |
 | `run_failed` | A role failed `limits.run_attempts` times and no fallback is left | Inspect the run folder, `looprch resume`. For "Antigravity auto-denied the … permission", see [agents/antigravity.md](agents/antigravity.md#permissions-in-phases) |
 | `usage_error` | A relay rejected Looprch's arguments | A Looprch bug: report `.looprch/runs/<run>/relay.stderr` |
 | `expansion_limit` | A role asked for extra sources too often | `looprch resume` allows one more round |

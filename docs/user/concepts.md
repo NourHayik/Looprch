@@ -16,11 +16,11 @@ runs Looprch performs on your code are evidence for the application.
 | Role | Does | Writes |
 |---|---|---|
 | Lead | Your agent running `/lr-*`; follows `looprch next` | nothing in `.looprch/` |
-| Planner | Implementation plan from the exact-source packet | `plan.md` (through Looprch) |
-| Plan Debater | A multi-round debate with the Planner: findings, then a verdict on every answer, read-only | `debate.md`, `debate.json` |
-| Implementer | The single sequential author of application code | application code |
+| Planner | A guiding plan from the exact-source packet: concept, architecture, decisions, tasks and a todo list in Implementer sessions | `plan.md`, `plan.json` (through Looprch) |
+| Plan Debater | A multi-round debate with the Planner: findings, then a verdict on every answer | `debate.md`, `debate.json` |
+| Implementer | The single sequential author of application code; works through the plan's todos, one run per session | application code |
 | Tester | Owns test code and every declared gate | tests |
-| Reviewer | Checks the actual code and evidence, read-only | `review.md` |
+| Reviewer | Checks the actual code and evidence | `review.md` |
 | Worker | Read-only advisory helper (`/lr-worker`) | nothing |
 
 ## Direct and Delegate

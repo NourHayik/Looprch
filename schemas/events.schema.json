@@ -13,14 +13,13 @@
         "init.discovered", "init.gates_acknowledged", "config.changed",
         "phase.started", "preflight.passed", "preflight.failed", "stage.entered",
         "run.issued", "run.dispatched", "run.completed", "run.failed", "run.interrupted", "run.reask",
-        "result.accepted", "result.rejected", "expansion.executed", "context.over_budget", "mode.auto_delegate", "readonly.violation",
+        "result.accepted", "result.rejected", "expansion.executed", "context.over_budget", "mode.auto_delegate",
         "gates.run", "gate.result", "checkpoint.committed",
         "quota.checked", "quota.wait", "quota.fallback", "assignment.changed", "ratelimit.detected",
         "question.asked", "question.answered", "paused", "resumed", "blocked",
         "todo.ticked", "review.skipped", "handover.accepted", "phase.merged", "phase.closed", "project.done",
         "spec.changed", "protocol.mismatch", "lock.stale_recovered", "warning",
-        "contract.accepted", "contract.amended", "design.escalated", "evidence.checked", "evidence.unbacked", "evidence.integrity",
-        "work.done", "work.deviations", "debate.round", "debate.closed", "readback.done", "repair.packaged"
+        "plan.accepted", "work.done", "debate.round", "debate.closed"
       ]
     },
     "phase": { "type": ["string", "null"] },
@@ -30,7 +29,7 @@
     "run_id": { "type": ["string", "null"] },
     "data": {
       "type": "object",
-      "description": "Free-form per type. Fields read by the progress lines: stage.entered {round}; run.issued {task, mode, mode_reason, model, attempt, timeout, review_round?, review_cap?}; result.accepted {decision, touched, task, findings_total, severities, findings[{id, severity?, owner?, origin?, summary}] (all findings), review_round?, review_cap?, resolutions?[{id, status}]}; assignment.changed {from, to, reason}; blocked {code, reason, hint}."
+      "description": "Free-form per type. Fields read by the progress lines: stage.entered {round}; run.issued {task, mode, mode_reason, model, attempt, timeout, review_round?, review_cap?, work_session?, work_sessions?}; result.accepted {decision, touched, task, findings_total, severities, findings[{id, severity?, owner?, summary}] (all findings), review_round?, review_cap?, resolutions?[{id, status}], todos_done?}; plan.accepted {todos, sessions, deferrals, dispositions}; work.done {session, sessions, todos, open}; assignment.changed {from, to, reason}; blocked {code, reason, hint}."
     }
   }
 }

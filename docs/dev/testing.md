@@ -21,14 +21,12 @@ global git config, and clears host environment markers (so tests behave the same
   and plays every role from the brief's machine-readable header. Behavior is scripted per
   `(agent, role, phase, task, nth)` by the JSON file in `LOOPRCH_FAKE_SCENARIO`: status
   (completed, failed, timeout, unavailable), decisions, `sleep_ms`, `kill_self`, `usage_error`,
-  `no_session`, `read_only_violation`, `touch`, `omit_block`, `omit_new_file`, `variant`. The
-  fake Planner returns a contract covering the phase's requirements (`drop_requirement`,
-  `deferrals`, `contract` override it), dispositions every debate finding (`omit_dispositions`)
-  and amends the contract for a repair design (`omit_amendment`, `contract_amendment`). The fake
-  Implementer edits `noteapp.py` on review repairs (`no_change`, `resolution_status`). The fake
-  Tester verifies every contract id and Delta finding (`verifications`, `omit_verifications`,
-  `bad_tests`). The fake Reviewer adds `cause`, `## Coverage`, `contract_review` and `prior`
-  (`raw_findings`, `omit_prior`, `prior`, `contract_review`, `omit_contract_review`). Calls are
+  `no_session`, `read_only_violation`, `touch`, `omit_block`, `variant`. The fake Planner returns
+  a plan block with one todo per session (`two_sessions`, `plan`, `deferrals` override it),
+  answers every open debate item (`omit_dispositions`, `disposition`) and may add todos to a
+  context answer (`new_todos`). The fake Implementer reports the todos its brief lists
+  (`todos_done` overrides it) and edits `noteapp.py` on repairs (`resolution_status` adds
+  resolutions). The fake Reviewer returns `findings` or `raw_findings`. Calls are
   logged to `fake-calls.jsonl`.
 - `test/fixtures/notes-impl/`: the application code and tests the fake Implementer and Tester
   write per phase (`buggy/` for a failing first attempt).
@@ -41,9 +39,9 @@ global git config, and clears host environment markers (so tests behave the same
 
 | Suite | Covers |
 |---|---|
-| unit | core (fsx, lock, journal, config, migrations, state), agents, sev3 helpers, gates and result parsers, briefs, quota policy, delegate argv/sessions/mode resolution, skills consistency, status rendering; protocol 4: contract executability, plan lint, dispositions that must change their refs, debate ledger, relay usage formats, the skip/focus scan, traceability, e2e config (`v07.test.ts`) |
-| integration | install/update/rollback/uninstall, add/remove/list, SEV3 discovery and packets, git operations, doctor and config, lifecycle transition rows, delegate dispatch, status/log/review/worker, the optional e2e gate with a fake `e2e` CLI (`test/fixtures/fake-e2e/`: configure/enable/disable, pass, failing test → repair, exit 2/3/timeout/missing binary → blocked, no report → fail, disabled → no run) |
-| e2e | E-1 to E-16 on notes-spec: happy path, repairs, cap, detached runs, interruption, spec change, quota wait and fallback, rate limits, read-only, re-asks, D-05, merge conflict, HEAD mismatch and pause. C-1 to C-17: the phase contract and convergence (uncovered requirements, debate dispositions, Plan-caused findings, violated obligations, contract_review coverage, false `fixed`, false `Verified` (missing testcase, or a stale testcase that already passed on the reviewed tree), per-check proofs, missing verifications, `related` variants, re-review consistency, `needs_design`, redesign with a design debate, deferrals across phases, a protocol-1 phase without a contract). 0.7.0: C-3b/C-3c the real debate (an accept that changes nothing is rejected, upheld items at the limit go to the user, contested items reach the Reviewer, lint and independent-risk items), C-19 chains and the readback, C-19b readback questions back to the Planner and the Debater, C-19c deviations, C-21 Reviewer repair packages, C-21b boundary routing and blueprints, C-21c `lineage_stuck`, C-8 gate caching |
+| unit | core (fsx, lock, journal, config, migrations, state), agents, sev3 helpers, gates and result parsers, briefs, quota policy, delegate argv/sessions/mode resolution, skills consistency, status rendering; protocol 5: plan sessions and files, the debate ledger, relay usage formats, gate caching, e2e config and `looprch e2e init` rendering, keys file and env loading (`plan.test.ts`) |
+| integration | install/update/rollback/uninstall, add/remove/list, SEV3 discovery and packets, git operations, doctor and config, lifecycle transition rows, delegate dispatch, status/log/review/worker, the optional e2e gate with a fake `e2e` CLI (`test/fixtures/fake-e2e/`: init with the keys file, configure/enable/disable, pass, failing test → repair, exit 2/3/timeout/missing binary → blocked, no report → fail, disabled → no run); sessions and follow-up sessions, a blocking question answered by the Planner alone, the debate limit, the protocol 4 restart |
+| e2e | E-1 to E-16 on notes-spec: happy path, test and review repairs, caps and the final review decision, detached runs, interruption, spec change, quota wait and fallback, rate limits, a Debater that touches a file, re-asks, the handover's git file lists, D-05, merge conflict, HEAD mismatch and pause. C-1, C-14, C-15, C-26: Implementer sessions, deferrals across phases, a protocol 4 phase restarting at planning, a fresh test-repair budget per review cycle |
 
 No test makes paid model calls. The manual smoke checklist for real agents is in
 [debugging.md](debugging.md).

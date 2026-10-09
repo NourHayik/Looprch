@@ -5,8 +5,8 @@ agents you already have (Codex, Cursor, Antigravity, Kimi Code, OpenCode, Grok B
 Hermes as a Lead host).
 
 - **SEV3** defines the project: requirements, contracts, phases, gates and `phases/todo.md`.
-- **Looprch** executes it: for every phase it runs Planner ⇄ Plan Debater (a real debate) →
-  executability readback by the Implementer's model → Implementer → Tester → Reviewer →
+- **Looprch** executes it: for every phase it runs Planner ⇄ Plan Debater (a real debate over a
+  guiding plan with a todo list) → Implementer (one run per plan session) → Tester → Reviewer →
   handover, checks machine evidence, commits on a phase branch and merges.
 - **delegate-skills** is the transport Looprch uses when a role runs in another agent's CLI.
 

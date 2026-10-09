@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 declare const __LOOPRCH_VERSION__: string | undefined;
 
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 export const TOOLKIT_VERSION = "1.2.0";
 export const CONFIG_SCHEMA = 1;
 export const STATE_SCHEMA = 1;
@@ -30,7 +30,8 @@ export const SKILLS = [
 export const ROLES = ["planner", "plan_debater", "implementer", "tester", "reviewer", "worker"] as const;
 export type Role = (typeof ROLES)[number];
 export const PRIMARY_ROLES: Role[] = ["planner", "plan_debater", "implementer", "tester", "reviewer"];
-export const READ_ONLY_ROLES: Role[] = ["plan_debater", "reviewer", "worker"];
+/** Roles that run in the agent's read-only mode: the advisory Worker only; phase roles have no file restrictions. */
+export const READ_ONLY_ROLES: Role[] = ["worker"];
 
 /** Directory that contains assets/ and vendor/ (repo checkout, npm package or installed version). */
 export function packageRoot(): string {

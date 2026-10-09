@@ -7,21 +7,22 @@ configured roles and posts every workflow step in the chat (see
 
 | Role | Responsibility |
 |---|---|
-| Planner | the architect: the implementation-ready plan and its contract (obligations with closed rules, decisions, interfaces, work packages written for a literal executor, planned tests, full-content blueprints for boundaries and invariants); answers every debate item; answers context requests; designs repairs for plan-caused, repeated and boundary findings |
-| Plan Debater | the Planner's opponent in a multi-round debate before any code exists: raises findings with evidence and a failure scenario, then judges every answer (resolved, conceded, upheld) until it agrees or the limit is reached; challenges repair designs; read-only |
-| Implementer | reads every package back before approval (questions and decisions it would have to make go to the Planner); then executes one package (or a short chain) per run, literally, reporting every file outside the package as a deviation; application code only, never tests |
-| Tester | test code and gates; writes the planned tests, verifies every obligation and tries to falsify every repair; never application code |
-| Reviewer | reviews the phase against the contract and beyond it; classifies each finding by cause and writes the repair package for implementation defects; read-only |
+| Planner | the architect: writes `plan.md`, a guide with the concept, the architecture, the decisions and every task described (what, where, how, done when), plus a todo list split into Implementer sessions sized to the Implementer's context; answers every debate item; answers the Implementer's rare blocking questions |
+| Plan Debater | the Planner's opponent in a multi-round debate before any code exists: looks for what would make a cheaper Implementer fail, then judges every answer (resolved, conceded, upheld) until it agrees or the limit is reached |
+| Implementer | starts right away and works through its session's todos in order, following plan.md; makes the small choices the plan leaves open and notes them; asks the Planner only when truly blocked |
+| Tester | test code and gates; writes the tests the plan describes and tries to break the code and every repair |
+| Reviewer | reviews the phase against plan.md and beyond it; every finding has a fix condition and an owner |
 
-All of them work from the same `contract.json`; see
-[running-phases.md](running-phases.md#the-phase-contract).
+No role is limited to certain files: the roles divide the work, Looprch does not police it. The
+gates, the Tester and the Reviewer judge the result. See
+[running-phases.md](running-phases.md#the-plan).
 
 Cost model: give the Planner, Plan Debater and Reviewer your strongest models, and give the Plan
 Debater a different model family from the Planner (two copies of one model share their blind
-spots). They decide and judge. The Implementer executes small, fully specified packages, so a
-cheaper model is enough: before approval, that same model reads the packages back and every
-question it would have to ask goes to the Planner first. `looprch status --json` shows the
-measured `usage` (runs, minutes, and the tokens the relays report) per role and model. The Tester proves the contract and tries to break repairs, so it needs
+spots). They decide and judge. The Implementer follows a plan that already took the design
+decisions, so a cheaper model is enough; set its context size (`--context-kb`) so the Planner can
+size the sessions. `looprch status --json` shows the measured `usage` (runs, minutes, and the
+tokens the relays report) per role and model. The Tester tries to break the code, so it needs
 more than the cheapest model: in CoreBit, a fast Tester wrote tests that passed without
 exercising the behavior.
 
@@ -41,8 +42,8 @@ Rules checked on every change:
 - a Direct role needs an agent with Direct support (Codex, Cursor, OpenCode in this version);
 - a Delegate role needs that agent's relay (`looprch install-relay <agent>`); Hermes has none;
 - OpenCode models are `provider/model`;
-- read-only roles (Plan Debater, Reviewer, Worker) on a relay without read-only support (Kimi)
-  only warn: Looprch still compares git status before and after the run.
+- the read-only Worker on a relay without read-only support (Kimi) only warns: a side run that
+  changes files is discarded.
 
 ## Which mode runs
 

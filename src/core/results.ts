@@ -1,16 +1,15 @@
 import { isNonEmptyString, isObject, isStringArray, oneOf } from "./validate.js";
-import { FINDING_CAUSES, FINDING_ORIGINS, FINDING_OWNERS, type FindingCause, type FindingOrigin, type FindingOwner, type ReviewerRepair, type Verification } from "./state.js";
-import { amendmentShapeErrors, contractShapeErrors, dispositionShape, reviewerRepairShape, workItemShape, type Amendment, type ContractBody, type Disposition, type WorkItem } from "./contract.js";
+import { FINDING_OWNERS, type FindingOwner } from "./state.js";
+import { dispositionShape, planShapeErrors, todoListErrors, type Disposition, type PlanBody, type Todo } from "./plan.js";
 import { VERDICTS, type Verdict } from "./debate.js";
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
-export const RESOLUTION_STATUSES = ["fixed", "not_fixed", "needs_design"] as const;
-export const VERIFICATION_STATUSES = ["verified", "failed", "inspected"] as const;
+export const RESOLUTION_STATUSES = ["fixed", "not_fixed"] as const;
 
 export const DECISIONS = {
   planner: ["plan_ready", "plan_final", "needs_expansion", "context_answer"],
   plan_debater: ["no_findings", "findings", "agree", "needs_expansion"],
-  implementer: ["implemented", "needs_context", "handover_ready", "ready", "questions"],
+  implementer: ["implemented", "needs_context", "handover_ready"],
   tester: ["pass", "fail"],
   reviewer: ["approve", "changes_requested"],
   worker: ["answered"],
@@ -30,41 +29,19 @@ export interface ResultFinding {
   severity?: string;
   summary: string;
   files?: string[];
+  /** Plan Debater: the plan section it concerns. */
   section?: string;
-  requirement_ids?: string[];
+  /** Plan Debater: the change that would close it. */
+  suggestion?: string;
+  /** Reviewer: the condition a repair must meet. */
   fix?: string;
   owner?: FindingOwner;
-  origin?: FindingOrigin;
-  cause?: FindingCause;
-  obligations?: string[];
-  related?: string;
-  refs?: string[];
-  checks?: string[];
-  /** Plan Debater: the packet quote or contract id that shows the defect. */
-  evidence?: string;
-  /** Plan Debater: how a literal executor would go wrong because of it. */
-  failure_scenario?: string;
-  /** Plan Debater: the change that would close it. */
-  proposed_resolution?: string;
-  /** Plan Debater: 0 to 1; findings below 0.5 are dropped. */
-  confidence?: number;
-  /** Reviewer, implementation cause: the executable repair. */
-  repair?: ReviewerRepair;
-}
-
-/** Executability readback of one work package by the Implementer's model. */
-export interface ReadbackPackage {
-  id: string;
-  questions: string[];
-  decisions_needed: string[];
-  would_create: { path: string; symbols: string[] }[];
 }
 
 export interface Resolution {
   id: string;
   status: (typeof RESOLUTION_STATUSES)[number];
   note?: string;
-  files?: string[];
 }
 
 export interface RoleResult {
@@ -76,39 +53,22 @@ export interface RoleResult {
   failures?: { id: string; gate_id?: string; summary: string; files?: string[] }[];
   expansion_requests?: ExpansionRequest[];
   files_changed?: string[];
-  context_request?: { question: string; reason: string; documents?: string[]; phases?: string[] };
+  context_request?: { question: string; reason: string };
   tests_written?: string[];
   manual_gate_reports?: { gate_id: string; path: string }[];
-  modified_files?: string[];
-  new_files?: string[];
-  deleted_files?: string[];
-  renamed?: { from: string; to: string }[];
-  reverted?: string[];
-  migrations?: unknown;
-  contracts_published?: { name: string; path: string }[];
-  verification_ids?: string[];
   limitations?: string[];
   evidence?: { path: string; lines?: string; note: string }[];
-  contract?: ContractBody;
+  /** Planner: todos, Implementer sessions, requirement map, deferrals. */
+  plan?: PlanBody;
   debate_dispositions?: Disposition[];
-  contract_amendment?: Amendment;
-  repair_packages?: WorkItem[];
-  work_package?: string;
-  verifications?: Verification[];
-  contract_review?: { id: string; status: "met" | "not_met"; note?: string }[];
-  prior?: { id: string; status: "fixed" | "unfixed"; note?: string; failed_checks?: number[] }[];
-  /** Plan Debater, first pass: the riskiest decisions it derived from the packet alone, and the contract ids that cover each. */
-  independent_risks?: { risk: string; covered_by: string[] }[];
-  /** Plan Debater, rebuttal: its verdict on the Planner's answer to every open item. */
+  /** Planner context answer: todos it adds to the current session. */
+  new_todos?: Todo[];
+  /** Plan Debater, rebuttal: its verdict on the Planner's answer to open items. */
   verdicts?: { id: string; verdict: Verdict; note?: string }[];
-  /** Implementer readback: one entry per work package. */
-  packages?: ReadbackPackage[];
-  /** Implementer: changes outside the package's files. */
-  deviations?: { file: string; what: string; why: string }[];
-  /** Implementer: the packages of a chain run. */
-  work_packages?: string[];
-  /** Reviewer: every changed file it read. */
-  files_reviewed?: string[];
+  /** Implementer: the todos of its session it finished. */
+  todos_done?: string[];
+  /** Implementer: choices it made where the plan left a small gap, and anything the next role should know. */
+  notes?: string[] | string;
 }
 
 export interface Extracted {
@@ -146,62 +106,19 @@ function checkList(errors: string[], obj: Record<string, unknown>, key: string, 
   });
 }
 
-const finding = (reviewer: boolean, debater = false) => (x: unknown) => {
+const finding = (x: unknown) => {
   if (!isObject(x)) return "must be an object";
-  if (debater && x.confidence !== undefined && !(typeof x.confidence === "number" && x.confidence >= 0 && x.confidence <= 1)) return `${String(x.id ?? "?")}: confidence must be a number from 0 to 1`;
-  if (debater)
-    for (const k of ["evidence", "failure_scenario", "proposed_resolution"])
-      if (!isNonEmptyString(x[k])) return `${String(x.id ?? "?")}: ${k} is required (evidence: the packet quote or contract id; failure_scenario: how a literal executor would go wrong; proposed_resolution: the change that closes it)`;
-  if (reviewer && x.repair !== undefined) {
-    const e = reviewerRepairShape(x.repair);
-    if (e) return `${String(x.id ?? "?")}: ${e}`;
-  }
-  if (reviewer && x.cause === "implementation" && x.owner !== "tester" && x.severity !== "low" && x.origin !== "unfixed" && x.related === undefined && x.repair === undefined)
-    return `${String(x.id ?? "?")}: an implementation finding carries "repair" {files, steps, done_when}: the exact package the Implementer executes (Looprch runs it without a Planner design)`;
   if (!isNonEmptyString(x.id)) return "id is required";
   if (!isNonEmptyString(x.summary)) return "summary is required";
   if (x.severity !== undefined && !oneOf(x.severity, SEVERITIES)) return `severity must be one of ${SEVERITIES.join(", ")}`;
-  if (reviewer && !isStringArray(x.files)) return "files must be a list of paths";
-  if (x.fix !== undefined && typeof x.fix !== "string") return "fix must be a string";
+  if (x.files !== undefined && !isStringArray(x.files)) return "files must be a list of paths";
   if (x.owner !== undefined && !oneOf(x.owner, FINDING_OWNERS)) return `owner must be one of ${FINDING_OWNERS.join(", ")}`;
-  if (x.origin !== undefined && !oneOf(x.origin, FINDING_ORIGINS)) return `origin must be one of ${FINDING_ORIGINS.join(", ")}`;
-  if (reviewer && !oneOf(x.cause, FINDING_CAUSES)) return `${x.id}: cause must be one of ${FINDING_CAUSES.join(", ")}`;
-  if (x.cause === "test" && x.owner !== undefined && x.owner !== "tester") return `${x.id}: a finding with cause test has owner tester`;
-  if (x.obligations !== undefined && !isStringArray(x.obligations)) return "obligations must be a list of contract ids";
-  if (x.refs !== undefined && !isStringArray(x.refs)) return "refs must be a list of contract ids";
-  if (x.related !== undefined && !isNonEmptyString(x.related)) return "related must be a finding id";
-  if (x.checks !== undefined && !isStringArray(x.checks)) return `${x.id}: checks must be a list of acceptance checks`;
-  if (reviewer && (x.severity === "high" || x.severity === "critical") && (!isStringArray(x.checks) || x.checks.length === 0))
-    return `${x.id} is ${x.severity}: list the acceptance checks a repair must pass in "checks" (one concrete, testable condition each: the cited example and the variants of the rule)`;
   return null;
 };
 
 const resolution = (x: unknown) => {
   if (!isObject(x) || !isNonEmptyString(x.id)) return "needs id";
   if (!oneOf(x.status, RESOLUTION_STATUSES)) return `status must be one of ${RESOLUTION_STATUSES.join(", ")}`;
-  if (x.note !== undefined && typeof x.note !== "string") return "note must be a string";
-  if (x.files !== undefined && !isStringArray(x.files)) return "files must be a list of paths";
-  if (x.status === "fixed" && (!isStringArray(x.files) || x.files.length === 0)) return `${x.id}: a fixed resolution lists the files the repair changed in "files"`;
-  return null;
-};
-
-const verification = (x: unknown) => {
-  if (!isObject(x) || !isNonEmptyString(x.id)) return "needs id";
-  if (!oneOf(x.status, VERIFICATION_STATUSES)) return `${x.id}: status must be one of ${VERIFICATION_STATUSES.join(", ")}`;
-  if (!isStringArray(x.tests)) return `${x.id}: tests must be a list of testcase names (use [] when inspected)`;
-  if (!isStringArray(x.variants)) return `${x.id}: variants must be a list (use [] when none)`;
-  if (x.status === "verified" && x.tests.length === 0) return `${x.id}: verified needs the testcase(s) that prove it in "tests"`;
-  if (x.note !== undefined && typeof x.note !== "string") return "note must be a string";
-  if (x.checks !== undefined) {
-    if (!Array.isArray(x.checks)) return `${x.id}: checks must be a list of {"n", "tests"}`;
-    for (const c of x.checks) if (!isObject(c) || typeof c.n !== "number" || !isStringArray(c.tests)) return `${x.id}: each checks entry is {"n": <check number>, "tests": [testcase names]}`;
-  }
-  return null;
-};
-
-const statusEntry = (statuses: readonly string[]) => (x: unknown) => {
-  if (!isObject(x) || !isNonEmptyString(x.id)) return "needs id";
-  if (!oneOf(x.status, statuses)) return `${x.id}: status must be one of ${statuses.join(", ")}`;
   return null;
 };
 
@@ -213,7 +130,9 @@ const expansion = (x: unknown) => {
 };
 
 const strings = (x: unknown) => (typeof x === "string" ? null : "must be a string");
+const gateReport = (x: unknown) => (isObject(x) && isNonEmptyString(x.gate_id) && isNonEmptyString(x.path) ? null : "needs gate_id and path");
 
+/** The result block's shape: only what Looprch needs to read the answer and continue. */
 export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: string): { ok: true; result: RoleResult } | { ok: false; errors: string[] } {
   const errors: string[] = [];
   if (!isObject(raw)) return { ok: false, errors: ["the block must contain one JSON object"] };
@@ -222,67 +141,35 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
   if (!oneOf(raw.decision, allowed)) errors.push(`decision must be one of ${allowed.join(", ")}`);
   if (raw.run_id !== undefined && runId && raw.run_id !== runId) errors.push(`run_id must be "${runId}"`);
   checkList(errors, raw, "expansion_requests", expansion);
+  if (raw.decision === "needs_expansion" && (!Array.isArray(raw.expansion_requests) || !raw.expansion_requests.length)) errors.push('decision needs_expansion needs "expansion_requests" naming SEV3 document or phase ids');
   switch (expectedRole) {
     case "planner":
-      if (raw.decision === "plan_ready" || raw.decision === "plan_final") errors.push(...contractShapeErrors(raw.contract));
+      if (raw.decision === "plan_ready" || raw.decision === "plan_final") errors.push(...planShapeErrors(raw.plan));
       checkList(errors, raw, "debate_dispositions", dispositionShape);
-      if (raw.contract_amendment !== undefined) errors.push(...amendmentShapeErrors(raw.contract_amendment));
-      checkList(errors, raw, "repair_packages", workItemShape("repair"));
+      errors.push(...todoListErrors(raw.new_todos, "new_todos"));
       break;
     case "plan_debater":
-      checkList(errors, raw, "findings", finding(false, true));
-      checkList(errors, raw, "verdicts", (x) => {
-        if (!isObject(x) || !isNonEmptyString(x.id) || !oneOf(x.verdict, VERDICTS)) return `needs id and verdict (${VERDICTS.join("|")})`;
-        if (x.verdict === "upheld" && !isNonEmptyString(x.note)) return `${x.id}: an upheld verdict needs "note": the step, contract field or packet line that still lets the failure happen`;
-        return null;
-      });
-      checkList(errors, raw, "independent_risks", (x) => (isObject(x) && isNonEmptyString(x.risk) && isStringArray(x.covered_by) ? null : 'needs {"risk", "covered_by": [contract ids, or [] when the plan does not cover it]}'));
-      if (raw.decision === "findings" && (!Array.isArray(raw.findings) || raw.findings.length === 0) && !(Array.isArray(raw.verdicts) && raw.verdicts.some((v) => isObject(v) && v.verdict === "upheld")))
-        errors.push("decision findings needs a non-empty findings list (or, in a rebuttal, an upheld verdict)");
+      checkList(errors, raw, "findings", finding);
+      checkList(errors, raw, "verdicts", (x) => (isObject(x) && isNonEmptyString(x.id) && oneOf(x.verdict, VERDICTS) ? null : `needs id and verdict (${VERDICTS.join("|")})`));
       break;
     case "implementer":
       checkList(errors, raw, "files_changed", strings);
+      checkList(errors, raw, "todos_done", strings);
       checkList(errors, raw, "resolutions", resolution);
-      checkList(errors, raw, "deviations", (x) => (isObject(x) && isNonEmptyString(x.file) && isNonEmptyString(x.what) && isNonEmptyString(x.why) ? null : "needs file, what and why"));
-      checkList(errors, raw, "packages", (x) => {
-        if (!isObject(x) || !isNonEmptyString(x.id)) return "needs the package id";
-        if (!isStringArray(x.questions) || !isStringArray(x.decisions_needed)) return `${x.id}: questions and decisions_needed must be lists (use [] for none)`;
-        if (!Array.isArray(x.would_create) || !x.would_create.every((w) => isObject(w) && isNonEmptyString(w.path) && isStringArray(w.symbols))) return `${x.id}: would_create must list {"path", "symbols": [...]}`;
-        return null;
-      });
-      if (raw.decision === "ready" || raw.decision === "questions") {
-        if (!Array.isArray(raw.packages)) errors.push("a readback lists every work package in packages");
-        else if (raw.decision === "ready" && raw.packages.some((p) => isObject(p) && ((Array.isArray(p.questions) && p.questions.length > 0) || (Array.isArray(p.decisions_needed) && p.decisions_needed.length > 0))))
-          errors.push("decision ready with questions or decisions_needed: use decision questions");
-      }
-      if (raw.work_packages !== undefined && !isStringArray(raw.work_packages)) errors.push("work_packages must list the package ids you implemented");
-      if (raw.work_package !== undefined && !isNonEmptyString(raw.work_package)) errors.push("work_package must be the id of the package you implemented");
       if (raw.decision === "needs_context") {
         const cr = raw.context_request;
-        if (!isObject(cr) || !isNonEmptyString(cr.question) || !isNonEmptyString(cr.reason)) errors.push("needs_context requires context_request {question, reason}");
-      }
-      if (raw.decision === "handover_ready") {
-        for (const k of ["modified_files", "new_files", "deleted_files"]) if (!isStringArray(raw[k])) errors.push(`${k} must be a list of paths (use [] when empty)`);
-        checkList(errors, raw, "renamed", (x) => (isObject(x) && isNonEmptyString(x.from) && isNonEmptyString(x.to) ? null : "needs from and to"));
-        checkList(errors, raw, "verification_ids", strings);
-        checkList(errors, raw, "limitations", strings);
+        if (!isObject(cr) || !isNonEmptyString(cr.question)) errors.push('needs_context requires context_request {"question", "reason"}');
       }
       break;
     case "tester":
       checkList(errors, raw, "tests_written", strings);
       checkList(errors, raw, "failures", (x) => (isObject(x) && isNonEmptyString(x.id) && isNonEmptyString(x.summary) ? null : "needs id and summary"));
-      checkList(errors, raw, "manual_gate_reports", (x) => (isObject(x) && isNonEmptyString(x.gate_id) && isNonEmptyString(x.path) ? null : "needs gate_id and path"));
-      checkList(errors, raw, "verifications", verification);
+      checkList(errors, raw, "manual_gate_reports", gateReport);
       break;
     case "reviewer":
-      checkList(errors, raw, "findings", finding(true));
-      checkList(errors, raw, "manual_gate_reports", (x) => (isObject(x) && isNonEmptyString(x.gate_id) && isNonEmptyString(x.path) ? null : "needs gate_id and path"));
-      checkList(errors, raw, "contract_review", statusEntry(["met", "not_met"]));
-      checkList(errors, raw, "prior", statusEntry(["fixed", "unfixed"]));
-      checkList(errors, raw, "files_reviewed", strings);
+      checkList(errors, raw, "findings", finding);
+      checkList(errors, raw, "manual_gate_reports", gateReport);
       if (raw.decision === "changes_requested" && (!Array.isArray(raw.findings) || raw.findings.length === 0)) errors.push("changes_requested needs a non-empty findings list");
-      else if (raw.decision === "changes_requested" && (raw.findings as unknown[]).every((f) => isObject(f) && f.severity === "low"))
-        errors.push("every finding is low: use approve and list the low findings as notes");
       break;
     case "worker":
       checkList(errors, raw, "evidence", (x) => (isObject(x) && isNonEmptyString(x.path) && typeof x.note === "string" ? null : "needs path and note"));

@@ -13,8 +13,6 @@ export type Task =
   | "context_answer"
   | "debate"
   | "rebuttal"
-  | "design_review"
-  | "readback"
   | "implementation"
   | "repair"
   | "handover"
@@ -22,6 +20,13 @@ export type Task =
   | "review"
   | "adhoc_review"
   | "worker";
+
+/** The Implementer the plan is written for: the Planner sizes the sessions to its context. */
+export interface ImplementerInfo {
+  agent: string;
+  model: string;
+  context_kb: number | null;
+}
 
 export interface BriefInput {
   root: string;
@@ -42,10 +47,12 @@ export interface BriefInput {
   gateIds: string[];
   /** Task review only: round number, review limit, reviewed tree, tree of the previous review, time budget. */
   reviewRound?: { n: number; of: number; tree: string | null; prevTree: string | null; timeout: string };
-  /** The run may not change files (read-only roles, and the Implementer's readback). */
+  /** The run may not change files (the advisory side runs). */
   readOnly?: boolean;
   /** Debate rounds: this pass and the limit. */
   debateRound?: { n: number; of: number };
+  /** Planner and Plan Debater runs: the Implementer the plan is for. */
+  implementer?: ImplementerInfo | null;
 }
 
 const ROLE_FILE: Record<Role, string> = {
@@ -64,8 +71,6 @@ const TASK_DECISIONS: Record<Task, string[]> = {
   context_answer: ["context_answer"],
   debate: ["findings", "no_findings", "needs_expansion"],
   rebuttal: ["agree", "findings"],
-  design_review: ["findings", "no_findings"],
-  readback: ["ready", "questions"],
   implementation: ["implemented", "needs_context"],
   repair: ["implemented", "needs_context"],
   handover: ["handover_ready"],
@@ -75,29 +80,28 @@ const TASK_DECISIONS: Record<Task, string[]> = {
   worker: ["answered"],
 };
 
-const CONTRACT_FIELD =
-  '"contract": {"obligations": [{"id":"O-1","requirements":["R-001.01"],"kind":"behavior|invariant|boundary|interface|data|failure|production|procedure","statement":"the rule, decidable by a test","rule":"boundary, invariant and failure: the closed condition (only X is accepted; everything else is rejected)","enforcement":"the single code path or structural constraint that enforces it","verify":"what the Tester must prove, with negative cases and variants","gates":["<gate id>"],"covers":["P-000/X-1 (incoming deferrals only)"]}], "deferrals": [{"id":"X-1","requirements":["…"],"what":"…","to_phase":"P-00N","interim":"fail-closed behavior in this phase"}], "decisions": [{"id":"AD-1","decision":"…","rationale":"…","rejected_alternatives":["…"],"requirements":["…"],"obligations":["O-1"]}], "interfaces": [{"id":"IF-1","file":"app/…","symbol":"Class::method","signature":"full signature with types","errors":["exception or error code and when"],"invariants":["…"]}], "work_packages": [{"id":"WP-1","title":"…","depends_on":[],"obligations":["O-1"],"decisions":["AD-1"],"interfaces":["IF-1"],"sources":["SEV3 document or requirement ids this package relies on"],"precision":"spec|full_content","files":[{"path":"app/…","action":"create|modify|delete","content":"what the file contains afterwards: classes, functions with signatures, keys, columns","blueprint":"true when plan.md carries the full file as ```<lang> blueprint=<path>"}],"steps":["one concrete instruction per entry, in order"],"done_when":["a command or observation with its expected result"],"tests":[{"id":"T-1","obligation":"O-1","kind":"positive|negative|boundary|adversarial","given":"…","when":"…","then":"…","file":"tests/…"}]}]}';
-const AMENDMENT_FIELD =
-  '"contract_amendment": {"obligations": [ {…same shape as a contract obligation, plus "resolves":["R-4"]} ], "deferrals": [ {… plus "resolves"} ], "decisions": [ … ], "interfaces": [ … ], "work_packages": [ {…same shape as a work package; during implementation, every new obligation needs one} ], "retire": ["O-7"]}; for a repair design also "repair_packages": [{"id":"RP-1","title":"…","findings":["R-1"],"depends_on":[],"precision":"spec|full_content","files":[{"path":"…","action":"create|modify|delete","content":"…","blueprint":false}],"steps":["…"],"done_when":["…"],"tests":[{"id":"T-R1","obligation":"O-3","kind":"adversarial","given":"…","when":"…","then":"…","file":"tests/…"}]}]';
-const DEBATE_FINDING =
-  '{"id":"D-1","severity":"low|medium|high|critical","summary":"…","section":"…","refs":["O-2"],"evidence":"the packet quote or contract id that shows it","failure_scenario":"the trigger and the wrong result a literal executor would produce","proposed_resolution":"the change that closes it","confidence":0.8}';
+const PLAN_FIELD =
+  '"plan": {"todos": [{"id":"T-1","title":"one line: what the todo delivers","section":"1. <plan phase>"}], "sessions": [["T-1","T-2","T-3"]] (Implementer sessions: contiguous groups of todos, one Implementer run each; usually one session with every todo), "requirements": {"R-001.01": ["T-2"]} (each requirement of the phase -> the todos or deferral ids that deliver it), "deferrals": [{"id":"X-1","what":"…","to_phase":"P-00N","interim":"safe behavior in this phase","requirements":["…"]}]}';
+const DEBATE_FINDING = '{"id":"D-1","severity":"low|medium|high|critical","summary":"the defect, and how the Implementer would go wrong because of it","section":"the plan section","suggestion":"the change that closes it"}';
+const EXPANSION_FIELD = 'with needs_expansion: "expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]';
+const CONTEXT_REQUEST = 'with needs_context (only for a question that blocks the work): "context_request": {"question":"…","reason":"why the plan does not answer it and a wrong guess would break the phase"}';
 
 function fields(role: Role, task: Task): string {
   switch (role) {
     case "planner":
-      if (task === "context_answer") return `${AMENDMENT_FIELD} (a repair design needs repair_packages, and an amendment for the findings the Delta names; both are optional for a context answer)`;
-      return `${CONTRACT_FIELD}${task === "synthesis" || task === "revise" ? '; "debate_dispositions": [{"id":"D-1","decision":"accept|partial|reject","reason":"…","refs":["contract ids that carry the change (accept, partial)"],"evidence":"reject: the packet section, contract id or code that shows the item does not hold"}] (one per open debate item in the Delta)' : ""}; with needs_expansion: "expansion_requests": [{"kind":"document|phase","id":"…","question":"…","reason":"…"}]`;
+      if (task === "context_answer") return '"new_todos": [{"id":"T-9","title":"…","section":"…"}] (optional: todos your answer adds; they join the Implementer\'s current session)';
+      return `${PLAN_FIELD}${task === "synthesis" || task === "revise" ? '; "debate_dispositions": [{"id":"D-1","decision":"accept|reject","note":"what you changed, or why the finding does not hold"}] (one per open debate item in the Delta)' : ""}; ${EXPANSION_FIELD}`;
     case "plan_debater":
-      if (task === "rebuttal") return `"verdicts": [{"id":"D-1","verdict":"resolved|conceded|upheld","note":"what you checked; for upheld, your counter-argument"}] (one per open item in the Delta), "findings": [${DEBATE_FINDING}] (new defects only)`;
-      if (task === "debate") return `"independent_risks": [{"risk":"a risky decision or boundary you derived from the packet before reading the plan","covered_by":["contract ids that answer it, or [] when the plan does not"]}], "findings": [${DEBATE_FINDING}]`;
-      return `"findings": [${DEBATE_FINDING}]`;
+      if (task === "rebuttal") return `"verdicts": [{"id":"D-1","verdict":"resolved|conceded|upheld","note":"what you checked; for upheld, what is still missing"}] (one per open item in the Delta), "findings": [${DEBATE_FINDING}] (new defects only)`;
+      return `"findings": [${DEBATE_FINDING}]; ${EXPANSION_FIELD}`;
     case "implementer":
-      if (task === "readback") return '"packages": [{"id":"WP-1","questions":["anything you do not know how to do"],"decisions_needed":["anything you would have to choose yourself: a class, signature, library, algorithm, error behavior"],"would_create":[{"path":"…","symbols":["Class::method(…)"]}]}] (one per work package)';
-      return '"files_changed": ["…"]; "work_package": "WP-1" (the package the Delta assigns; for a chain of packages, "work_packages": ["WP-1","WP-2"]); "deviations": [{"file":"…","what":"…","why":"…"}] (every file you changed that the package does not list; [] when none); after review findings: "resolutions": [{"id":"R-1","status":"fixed|not_fixed|needs_design","note":"what changed or why not","files":["paths your repair changed (required for fixed)"]}] (one per finding the Delta assigns to you); with needs_context: "context_request": {"question":"…","reason":"…"}; with handover_ready: "modified_files":[], "new_files":[], "deleted_files":[], "renamed":[{"from":"…","to":"…"}], "verification_ids":["P-001-g-1"], "limitations":[]';
+      if (task === "handover") return '"limitations": ["…"] (Looprch adds the file lists from git)';
+      if (task === "repair") return `"files_changed": ["…"], "resolutions": [{"id":"R-1","status":"fixed|not_fixed","note":"…"}] (optional, one per finding), "notes": ["…"]; ${CONTEXT_REQUEST}`;
+      return `"todos_done": ["T-1"] (the todos of your session you finished), "files_changed": ["…"], "notes": ["choices you made where the plan left a small gap"]; ${CONTEXT_REQUEST}`;
     case "tester":
-      return '"tests_written": ["…"], "verifications": [{"id":"O-1, T-1 or R-1","status":"verified|failed|inspected","tests":["testcase name as in the JUnit report, or path::name"],"checks":[{"n":1,"tests":["…"]}] (review findings with Check lines: every check),"variants":["…"],"note":"…"}], "failures": [{"id":"F-1","gate_id":"…","summary":"…"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"tests_written": ["…"], "failures": [{"id":"F-1","gate_id":"…","summary":"…","files":["…"]}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "reviewer":
-      return '"findings": [{"id":"R-1","severity":"high","summary":"the broken rule","files":["…"],"fix":"the condition the repair must meet","checks":["one concrete, testable acceptance check per line (required for high and critical)"],"owner":"implementer|tester","cause":"implementation|plan|requirement|cross_phase|test","obligations":["O-3"],"related":"R-2 (optional)","origin":"unfixed|regression|missed (re-reviews only)","repair":{"files":[{"path":"…","action":"modify","content":"what the file contains afterwards"}],"steps":["exact instruction"],"done_when":["command and expected result"]} (cause implementation: required)}], "contract_review": [{"id":"O-1","status":"met|not_met"}] (first review: every obligation, deferral, decision, contested debate item and deviation listed in the Delta), "files_reviewed": ["every changed file you read"], "prior": [{"id":"R-1","status":"fixed|unfixed","failed_checks":[2]}] (re-reviews: every earlier finding in the Delta), "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"findings": [{"id":"R-1","severity":"low|medium|high|critical","summary":"the broken rule and where it breaks","files":["…"],"fix":"the condition the repair must meet","owner":"implementer|tester"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "worker":
       return '"evidence": [{"path":"…","lines":"10-20","note":"…"}]';
     default: {
@@ -115,64 +119,59 @@ export function roleText(role: Role, task: Task): string {
   return section ? `${general}\n\n### Task: ${section.trim()}` : general;
 }
 
+/** The Implementer line of Planner and Plan Debater briefs. */
+function implementerLine(info: ImplementerInfo | null | undefined): string {
+  if (!info) return "The Implementer is not configured; assume a cheaper model with a context of about 200K tokens.";
+  const budget = info.context_kb ? `a context budget of ${info.context_kb} KB (about ${Math.round(info.context_kb / 4)}K tokens)` : "an unknown context budget: assume about 200K tokens";
+  return `The Implementer of this phase is ${info.agent}/${info.model}, with ${budget}.`;
+}
+
 function taskText(input: BriefInput): string {
   const lines: string[] = [];
+  const round = input.debateRound ? ` (debate round ${input.debateRound.n} of ${input.debateRound.of})` : "";
   switch (input.task) {
     case "planning":
-      lines.push(`Write the implementation plan for ${input.phase}.`);
+      lines.push(`Write the implementation plan for ${input.phase}: plan.md (the guide) and the plan block (todos and Implementer sessions).`, implementerLine(input.implementer));
       break;
     case "synthesis":
-      lines.push(`Answer every open debate item in the Delta${input.debateRound ? ` (debate round ${input.debateRound.n} of ${input.debateRound.of})` : ""} and write the full revised plan and contract.`);
+      lines.push(`Answer every open debate item in the Delta${round} and write the full revised plan.`, implementerLine(input.implementer));
       break;
     case "rebuttal":
-      lines.push(`Judge the Planner's answers to the open debate items${input.debateRound ? ` (debate round ${input.debateRound.n} of ${input.debateRound.of})` : ""} against the revised plan and contract, then look for new defects in what changed.`);
-      break;
-    case "readback":
-      lines.push("Read every work package as the executor who will implement it. Do not implement anything and do not edit files. Report, per package, every question and every decision you would have to make yourself.");
+      lines.push(`Judge the Planner's answers to the open debate items${round} against the revised plan, then look for new serious defects in what changed.`, implementerLine(input.implementer));
       break;
     case "revise":
-      lines.push("Revise the plan as the user asked (see Delta).");
+      lines.push("Revise the plan as the user asked (see Delta).", implementerLine(input.implementer));
       break;
     case "context_answer":
-      lines.push("Answer the context request or write the repair design in the Delta, from approved sources only.");
+      lines.push("Answer the Implementer's question in the Delta from the plan, the packet and the code. Looprch appends your answer to plan.md as an addendum.");
       break;
     case "debate":
-      lines.push(`Critically review the plan and its contract${input.debateRound ? ` (debate round ${input.debateRound.n} of ${input.debateRound.of}; the Planner answers every finding and you judge the answers in the next round)` : ""}. Write your independent risks from the packet before you read plan.md.`);
-      break;
-    case "design_review":
-      lines.push("Challenge the Planner's repair design and its contract amendment once (see Delta). Do not re-review the code.");
+      lines.push(`Challenge the plan against the packet${round}. The Planner answers every finding and you judge the answers in the next round.`, implementerLine(input.implementer));
       break;
     case "implementation":
-      lines.push("Implement the approved plan.");
+      lines.push("Implement your session's todos (see Delta) in order, following plan.md.");
       break;
     case "repair":
       lines.push("Repair the problems listed in the Delta, then stop.");
       break;
     case "handover":
-      lines.push(`Write the final handover. Phase base commit: \`${input.phaseBase ?? "unknown"}\`. Compare with \`git diff --name-status ${input.phaseBase ?? "<base>"}\` plus untracked files.`);
+      lines.push(`Write the final handover. Phase base commit: \`${input.phaseBase ?? "unknown"}\` (\`git diff --stat ${input.phaseBase ?? "<base>"}\` shows the phase's changes).`);
       break;
     case "testing":
       lines.push(`Write or update the tests for the declared gates: ${input.gateIds.join(", ") || "(none)"}. Looprch reruns every gate after you finish.`);
       break;
     case "review": {
       const base = input.phaseBase ?? "<phase_base>";
-      lines.push(`Review the implementation of ${input.phase}: actual code, the phase diff, the test report and gates.json.`);
+      lines.push(`Review the implementation of ${input.phase}: the actual code, the phase diff, the test report and gates.json.`);
       const r = input.reviewRound;
       if (r) {
         const tree = r.tree ?? "<tree>";
-        lines.push(
-          `Review round ${r.n} of ${r.of}. Time budget: up to ${r.timeout}. Use the time a complete review needs; do not stop early.`,
-          "",
-          `- Whole phase: \`git diff --stat ${base} ${tree}\`, one file: \`git diff ${base} ${tree} -- <path>\`. \`${tree}\` is the tree the gates ran on, including uncommitted and new files.`,
-        );
+        lines.push(`Review round ${r.n} of ${r.of}. Time budget: up to ${r.timeout}.`, "", `- Whole phase: \`git diff --stat ${base} ${tree}\`, one file: \`git diff ${base} ${tree} -- <path>\`. \`${tree}\` is the tree the gates ran on, including uncommitted and new files.`);
         if (r.n > 1 && r.prevTree) lines.push(`- Repair since your last review: \`git diff --stat ${r.prevTree} ${tree}\`.`);
         lines.push("");
-        if (r.n === 1) lines.push("This is the first review: follow the first-review procedure and checklist, give `contract_review` for every obligation and deferral in contract.json, and report every finding in this one pass.");
-        else lines.push("This is a re-review: follow the re-review rules. Give `prior` (fixed or unfixed) for every finding in the Delta against its unchanged Fix, check the repair diff for regressions, and report anything the earlier review missed.");
-        if (r.n >= r.of)
-          lines.push(
-            "This is the final review. Still put every remaining issue in `findings`. Request changes only for high or critical defects; with only medium or low findings, approve: Looprch records them as open review notes in the handover. If you request changes, the user decides how to continue.",
-          );
+        if (r.n === 1) lines.push("This is the first review: report every finding in this one pass.");
+        else lines.push("This is a re-review: check the earlier findings in the Delta against the current code, check the repair diff for regressions, and report what still holds and anything new.");
+        if (r.n >= r.of) lines.push("This is the final review. Request changes only for high or critical defects; with only medium or low findings, approve: Looprch records them as open review notes in the handover.");
       } else lines.push(`Phase diff: \`git diff --stat ${base}\` plus untracked files (\`git status --short\`).`);
       break;
     }
@@ -196,11 +195,9 @@ function deltaText(d: Delta | null, note: string | null): string {
   if (d) {
     lines.push(d.text);
     for (const f of d.findings ?? []) {
-      const tags = [f.severity, f.owner ? `owner ${f.owner}` : null, f.cause ? `cause ${f.cause}` : null, f.origin, f.related ? `related ${f.related}` : null].filter(Boolean).join(", ");
+      const tags = [f.severity, f.owner ? `owner ${f.owner}` : null].filter(Boolean).join(", ");
       lines.push(`- ${f.id}${tags ? ` [${tags}]` : ""}${f.gate_id ? ` (${f.gate_id})` : ""}: ${f.summary}${f.files?.length ? ` — ${f.files.join(", ")}` : ""}`);
-      if (f.obligations?.length) lines.push(`  Contract: ${f.obligations.join(", ")}`);
       if (f.fix) lines.push(`  Fix: ${f.fix}`);
-      (f.checks ?? []).forEach((c, i) => lines.push(`  Check ${i + 1}: ${c}`));
     }
     for (const p of d.paths ?? []) lines.push(`- read: \`${p}\``);
   }
@@ -209,7 +206,7 @@ function deltaText(d: Delta | null, note: string | null): string {
   return lines.join("\n");
 }
 
-/** Tasks whose report is large enough that a role writes it to its report file and fixes it in place. */
+/** Tasks whose report is large enough that the Planner writes it to its report file and fixes it in place. */
 export const REPORT_FILE_TASKS = new Set<Task>(["planning", "synthesis", "revise", "context_answer"]);
 
 function selfCheck(input: BriefInput): string[] {
@@ -217,12 +214,9 @@ function selfCheck(input: BriefInput): string[] {
   if (input.role === "planner" && REPORT_FILE_TASKS.has(input.task))
     return [
       "",
-      `Self-check before you end (it saves a rejected run): write your complete report, the markdown and the looprch-result block, to \`.looprch/runs/${input.runId}/report.md\` (the only file you may write), then run \`${check}\`. It applies every check Looprch applies when you finish (contract coverage, executability, the plan lint, blueprints, dispositions). Fix each problem it lists by editing that file, and run it again until it prints ok. Then end with a short final message; Looprch reads the report file.`,
+      `Self-check before you end: write your complete report, the markdown and the looprch-result block, to \`.looprch/runs/${input.runId}/report.md\`, then run \`${check}\`. It checks that Looprch can read the result block. Fix what it lists and run it again until it prints ok. Then end with a short final message; Looprch reads the report file.`,
     ];
-  return [
-    "",
-    `Self-check before you end (it saves a rejected run): pipe your looprch-result block into \`${check} --stdin\` (the block alone is enough) and fix each problem it lists. If you cannot run commands, skip this.`,
-  ];
+  return ["", `Self-check before you end: pipe your looprch-result block into \`${check} --stdin\` and fix what it lists. If you cannot run commands, skip this.`];
 }
 
 function outputContract(input: BriefInput): string {
@@ -253,14 +247,35 @@ function sizeNote(root: string, rel: string): string {
   }
 }
 
+function writeRule(input: BriefInput): string {
+  if (input.readOnly ?? READ_ONLY_ROLES.includes(input.role)) return "This is an advisory run: do not change any file.";
+  switch (input.role) {
+    case "planner":
+      return REPORT_FILE_TASKS.has(input.task) ? `Do not change project files; write your report to \`.looprch/runs/${input.runId}/report.md\` (see the self-check below).` : "Do not change project files.";
+    case "plan_debater":
+    case "reviewer":
+      return "You review; you do not need to change files.";
+    case "implementer":
+      return "Change the files your work needs. The Tester writes the phase's tests after you.";
+    case "tester":
+      return "Write and fix the tests; report application defects as failures for the Implementer.";
+    case "worker":
+      return "Do not change files.";
+    default: {
+      const never: never = input.role;
+      throw new Error(`unhandled role ${String(never)}`);
+    }
+  }
+}
+
 export function assembleBrief(input: BriefInput): string {
   const tpl = readFileSync(join(packageRoot(), "assets", "templates", "brief.md"), "utf8");
   const inputs: string[] = [];
   let n = 1;
-  const packageRun = input.role === "implementer" && (input.task === "implementation" || input.task === "repair");
+  const implementerRun = input.role === "implementer" && (input.task === "implementation" || input.task === "repair");
   const packetLine = input.packet
-    ? packageRun
-      ? `\`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). The package in the Delta is your instruction; open the packet only for the sources the package cites.`
+    ? implementerRun
+      ? `\`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). plan.md is your instruction; open the packet when you need the exact wording of a source.`
       : `\`${input.packet.path}\` — exact-source SEV3 packet (${input.packet.bytes} bytes). Read all of it.${sizeNote(input.root, input.packet.path)}`
     : input.phaseSource
       ? `\`${input.phaseSource}\` — current phase source.`
@@ -271,17 +286,7 @@ export function assembleBrief(input: BriefInput): string {
   if (existsSync(rules)) inputs.push(`${n++}. \`.looprch/user-rules.md\` — project rules every role follows.`);
   else inputs.push(`${n++}. \`.looprch/user-rules.md\` — does not exist: this project has no additional user rules. This is Looprch's authoritative answer; do not request the file.`);
   for (const i of input.inputs) inputs.push(`${n++}. \`${i.path}\` — ${i.why}${sizeNote(input.root, i.path)}`);
-  if (packetLine && planFirst) inputs.push(`${n++}. ${packetLine} Read the plan and the contract above first; the packet is what you check them against.`);
-  const readOnly = input.readOnly ?? READ_ONLY_ROLES.includes(input.role);
-  const writeRule = readOnly
-    ? "You are read-only: do not create, edit or delete any file. Looprch checks git status before and after."
-    : input.role === "implementer"
-      ? "Change application code only; never write or edit tests."
-      : input.role === "tester"
-        ? "Change test code (and gate evidence) only; never edit application code."
-        : input.role === "planner" && REPORT_FILE_TASKS.has(input.task)
-          ? `Do not edit project files. The one file you may write is your report, \`.looprch/runs/${input.runId}/report.md\` (see the self-check below).`
-          : "Do not edit files.";
+  if (packetLine && planFirst) inputs.push(`${n++}. ${packetLine} Read the plan above first; the packet is what you check it against.`);
   const vars: Record<string, string> = {
     role_title: input.role.replace("_", " "),
     role: input.role,
@@ -294,10 +299,8 @@ export function assembleBrief(input: BriefInput): string {
     phase_base: input.phaseBase ?? "none",
     role_text: roleText(input.role, input.task),
     root: input.root,
-    write_rule: writeRule,
-    read_rule: packageRun
-      ? "Read the package in the Delta completely and follow it. Open the other inputs where the package refers to them; the packet only for the sources the package cites."
-      : "Read every input listed below completely. Never summarize or skip the packet.",
+    write_rule: writeRule(input),
+    read_rule: implementerRun ? "Read plan.md completely, including any addenda at its end, then do the work in the Delta." : "Read every input listed below completely. Never summarize or skip the packet.",
     session_note: !input.resume
       ? ""
       : input.role === "reviewer" || input.role === "tester"

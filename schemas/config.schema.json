@@ -26,9 +26,7 @@
         "dispatch_max_wait": { "$ref": "#/$defs/duration" },
         "expansion_rounds": { "type": "integer", "minimum": 0, "maximum": 5 },
         "review_rounds": { "type": "integer", "minimum": 1, "maximum": 10 },
-        "debate_rounds": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Plan Debater passes on the initial plan (debate plus rebuttals), default 3" },
-        "readback_rounds": { "type": "integer", "minimum": 0, "maximum": 3, "description": "Executability readbacks by the Implementer's model before plan approval, default 2; 0 disables" },
-        "lineage_attempts": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Review reports of one finding lineage before the user is asked, default 2" }
+        "debate_rounds": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Plan Debater passes on the initial plan (debate plus rebuttals), default 2" }
       }
     },
     "approvals": {
@@ -48,7 +46,7 @@
       "properties": {
         "commit_generated": { "type": "boolean" },
         "e2e": {
-          "description": "Optional TesterArmy e2e gate (looprch e2e configure|enable|disable, /lr-e2e-test-init)",
+          "description": "Optional TesterArmy e2e gate (looprch e2e init|configure|enable|disable, /lr-e2e-test-init). Runs also read the keys file .env.e2e; a variable exported in the shell wins over it.",
           "type": "object",
           "required": ["enabled", "configured_at", "config", "bin", "args", "timeout", "env", "required_env", "phases"],
           "properties": {

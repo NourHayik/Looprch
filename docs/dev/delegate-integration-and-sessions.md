@@ -52,9 +52,11 @@ full packet and earlier final messages. Each phase starts new sessions.
 
 ## Read-only checks
 
-Read-only roles get `--read-only` where the relay supports it. Looprch always hashes the working
-tree before and after (`snapshotTree`); any change, or `readOnlyViolation` from the relay, blocks
-with `readonly_violation`. Looprch never reverts files.
+Only the advisory side runs (the Worker and `/lr-review`) are read-only: they get `--read-only`
+where the relay supports it, and Looprch hashes the working tree before and after
+(`snapshotTree`); any change, or `readOnlyViolation` from the relay, discards the side run's
+answer. Phase roles (Planner, Plan Debater, Implementer, Tester, Reviewer) run without the flag
+and without a file check. Looprch never reverts files.
 
 ## Environment hygiene
 

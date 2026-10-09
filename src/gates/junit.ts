@@ -1,27 +1,8 @@
-import type { Counts, ParseResult, TestCase } from "./unittest.js";
+import type { Counts, ParseResult } from "./unittest.js";
 
 function attr(tag: string, name: string): number {
   const m = new RegExp(`\\s${name}\\s*=\\s*["']([^"']*)["']`).exec(tag);
   return m ? Number(m[1]) || 0 : 0;
-}
-
-function attrText(tag: string, name: string): string {
-  const m = new RegExp(`\\s${name}\\s*=\\s*"([^"]*)"|\\s${name}\\s*=\\s*'([^']*)'`).exec(tag);
-  const raw = m ? (m[1] ?? m[2] ?? "") : "";
-  return raw.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-}
-
-/** Every testcase with its name, classname, file and outcome. */
-export function junitCases(xml: string): TestCase[] {
-  const body = xml.replace(/<!--[\s\S]*?-->/g, "").replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
-  const out: TestCase[] = [];
-  for (const m of body.matchAll(/<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g)) {
-    const tag = m[1] ?? "";
-    const inner = m[3] ?? "";
-    const status = /<(failure|error)\b/.test(inner) ? "failed" : /<skipped\b/.test(inner) ? "skipped" : "passed";
-    out.push({ name: attrText(tag, "name"), classname: attrText(tag, "classname") || attrText(tag, "class"), file: attrText(tag, "file"), status });
-  }
-  return out;
 }
 
 /**

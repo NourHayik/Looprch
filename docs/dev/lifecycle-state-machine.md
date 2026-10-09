@@ -18,27 +18,26 @@ stateDiagram-v2
   testing --> gating
   gating --> reviewing
   gating --> repairing
-  gating --> testing
   gating --> handover
   repairing --> testing
   reviewing --> handover
   reviewing --> repairing
+  reviewing --> testing
   handover --> closing
   handover --> gating
   closing --> closed
   closed --> [*]
 ```
 
-`gating --> testing` is the Tester-only round after unbacked verifications or skip markers.
 `synthesizing --> debating` is the rebuttal: the plan debate repeats until the Debater agrees or
-`limits.debate_rounds` is reached (D-26). `plan_approval --> synthesizing` is the executability
-readback that raised items (D-27). Inside `repairing`, a repair design runs Planner
-(`context_answer`), optionally Plan Debater (`design_review`, up to two passes) and Planner again
-before the Implementer; it is not a separate stage.
+`limits.debate_rounds` is reached (default 2). `plan_approval --> synthesizing` is the user's
+"revise" answer. `reviewing --> testing` is a review whose findings all belong to the Tester.
+Inside `implementing` and `repairing`, a blocking Implementer question runs the Planner
+(`context_answer`) and then the same Implementer session again; it is not a separate stage and
+the Plan Debater never sees it.
 
-The debate ledger is `.looprch/phases/P-NNN/debate.json` (`src/core/debate.ts`): items from the
-plan lint (`L-n`), the Debater (`D-n`), uncovered independent risks (`I-n`) and the readback
-(`K-n`), each with the Planner's disposition and the Debater's verdicts, open until resolved,
+The debate ledger is `.looprch/phases/P-NNN/debate.json` (`src/core/debate.ts`): the Debater's
+findings (`D-n`), each with the Planner's answer and the Debater's verdicts, open until resolved,
 conceded, contested or decided by the user.
 
 ## Evaluation order in next
@@ -62,16 +61,17 @@ conceded, contested or decided by the user.
 | Stage | Action / transition |
 |---|---|
 | preflight | checks (config, fingerprint + verify, toolkit, gate ack → `ask_user ack_gates`, relays and CLIs); git init, identity, baseline (`ask_user commit_baseline`), clean tree, base branch; create phase branch → planning |
-| planning | Planner (`planning`). `plan_ready` → plan.md and contract.json (the phase contract must cover every mapped requirement; incoming deferrals from closed phases are an input and must be covered; protocol 4 executability: decisions, interfaces, planned tests, closed rules, blueprints; the plan lint: existing paths, no TBD, required sections, blueprint blocks) → blueprints written to `phases/P-NNN/blueprints/`, vague wording added to the ledger as `L-n` → debating. `needs_expansion` → expansion packets, same session (limit `expansion_rounds`) |
-| debating | Plan Debater, read-only. Pass 1 (`debate`): `independent_risks` (uncovered ones become `I-n`) and `findings` (each with evidence, failure scenario, proposed resolution). Later passes (`rebuttal`): a verdict for every open item (`resolved`, `conceded`, `upheld`) plus new findings; `contract-diff.md` shows what changed since the Debater's last pass. Nothing open → readback / plan_approval; open and passes < `debate_rounds` + readback bonus → synthesizing; at the limit: open high/critical → `ask_user debate_unresolved` (keep the Planner's plan / side with the Debater for one last revision / pause), others contested |
-| synthesizing | same Planner session (`synthesis`, or `revise` after a user revision): full plan and contract and `debate_dispositions` for every open item (an accept or partial must name refs that changed in the contract; a reject needs evidence) → debating (rebuttal), or straight to plan_approval when only low items are open |
-| plan_approval | executability readback first (`limits.readback_rounds`, default 2): the Implementer's agent and model read every package read-only (`readback`); questions, self-made decisions and unlisted files become `K-n` items → synthesizing and one extra Debater pass; still open after the last readback → `ask_user readback_unresolved`. Then, if approvals apply: `ask_user approve_plan` (approve / revise). Then checkpoint "plan approved", the work queue `work` (the contract's work packages in `depends_on` order) → implementing |
-| implementing / repairing | a repair design in progress (`design`) runs first: Planner `context_answer` (step `design`, a `contract_amendment` that lists every design finding in `resolves`, merged into contract.json) → if the design covers a high or critical finding, or a lineage that already had a design, Plan Debater `design_review` (step `debate`) → on findings, Planner `context_answer` again (step `revise`) → Implementer. Else, if a context request is open: Planner `context_answer` → addendum (optionally an amendment) → Implementer resumes (the repair delta is kept). With a work queue, each Implementer run gets one package, or a chain of up to three small `spec` packages whose dependencies are done (`CHAIN_LIMITS`), rendered into the delta with its obligations, decisions, interfaces, blueprint paths, files, steps, done_when checks and planned tests (a repair package also gets only its findings), and must name it in `work_package` (a chain in `work_packages`). Files changed since the package started that the package does not list must be reported in `deviations` (else the re-ask); they become `DV-n` for the first review; `implemented` marks it done (`work.done`) and commits a checkpoint "implementation WP-n" / "repair N RP-n"; the next package runs with the queue's base delta; after the last one → testing. Without a queue: Implementer `implemented` → checkpoint "implementation" / "repair N" → testing. A repair after a review must return `resolutions` for every finding in its delta, and a `fixed` one must name files changed since `reviewed_tree` (else the re-ask); its `final.md` is added to `repair_reports`. `needs_design` resolutions (once per finding and round) open a repair design, then the same Implementer session repairs again |
-| testing | Tester; verdict, `verifications` (merged per id into `tester_verifications`) and manual reports stored → gating. The first run verifies every contract obligation, deferral and planned test (`T-n`, listed in its delta; a planned test is never `inspected`). After a review repair the Tester gets every finding (it fixes `owner: tester` ones, tries to falsify the rest, returns a verification for each) and the repair reports. A `failed` verification is a tester failure |
-| gating | `run_gates`. The latest runs are reused when every gate already passed on this exact tree with unchanged evidence (`gates.run` `cached`). When the SEV3 gates pass: skip/focus markers the phase added to test files (`src/gates/integrity.ts`) → a Tester-only round (`evidence.integrity`); then the optional e2e gate `LR-E2E` (enabled, configured, phase selected, tree not already passed): exit 1 or a missing report is a failing gate (normal repair), exit 2 → `blocked e2e_config`, exit 3 or timeout → `blocked e2e_environment`, missing binary → `blocked e2e_missing`, other → `blocked e2e_runner`. All gates pass and verdict pass (or, after a review, a `fail` whose failures are all ids the Implementer's latest resolutions report `not_fixed`, `acknowledged_open`: they go to the re-review, not into another test repair) → evidence binding: every `verified` verification's `tests` must match a passing testcase of this gate batch (JUnit, verbose unittest), or without named testcases an existing test file and name (`evidence.checked`). For open review findings, each acceptance check of a verified finding needs cited testcases, and one of them must not have passed on the reviewed tree (`reviewed_cases`; without named testcases, a test file changed since `reviewed_tree`), since a test that passed while the defect existed proves nothing (`evidence.checked` `stale`). Unbacked or stale claims (`evidence.unbacked`) → an evidence round for the Tester alone, whose delta keeps the findings' Fix and checks (`evidence_rounds`+1, its own budget of `limits.repair_rounds` + extra rounds, reset before each review; the Implementer is skipped). Backed → reviewing (post-run snapshot stored), or handover after a user-chosen unreviewed final repair (`review.skipped`, open findings go into handover.md); else repair (test, `test_repairs`+1; when a failure id or gate failed in the previous test repair too, the Planner writes repair packages first, reason `test_repeat`) or `blocked repair_limit` when `test_repairs` reached `limits.repair_rounds` + extra rounds (both reset when a review requests changes, so each review cycle has its own budget; `looprch resume` grants a round that the Planner designs) |
-| reviewing | `final_review_pending` → `ask_user final_review`. Snapshot must equal the gates snapshot (else gating). The brief carries "Review round n of N", the time budget and the diff commands (phase base → gates tree; re-reviews also `reviewed_tree` → gates tree); re-reviews get the open findings as a `rereview` delta and the repair reports. A run's timeout is the Reviewer timeout × (1 + 0.5 × (n − 1)). Round 1 returns `contract_review` for every contract id; re-reviews return `prior` for every earlier finding (see the phase rules in [schemas.md](schemas.md)). Findings go into `finding_ledger` (an `unfixed` re-report keeps its first Fix; `related` joins a lineage). `approve` → handover (findings become `review_notes`, listed in handover.md). `changes_requested` → `review_changes`+1, `reviewed_tree` stored → repair: findings with `owner: tester` (or `cause: test`) only → straight to testing; otherwise the Implementer findings are routed by cause (D-29): findings with `cause` plan, requirement or cross_phase, `origin: unfixed`, `related` to an earlier lineage, or high/critical on a `boundary` or `invariant` obligation open a Planner repair design (`design.escalated`, with a contract amendment, `amend`); the other implementation findings run as the Reviewer's own `repair` packages (`RV-n.m`, at most 5 findings and 25 steps each, grouped by shared files, `repair.packaged`), queued after the design's packages. The Plan Debater challenges the design when it amends the contract for a high or critical finding or replaces a design that did not hold. A lineage reported more than `limits.lineage_attempts` times → `ask_user lineage_stuck` (full-content blueprints / Implementer fallback / defer / pause) before any repair. The first review must also list `files_reviewed` (every changed file) and judge decisions, contested debate items and deviations in `contract_review`; it gets `changed-files.txt` and `traceability.md`. If that was the final allowed review (`limits.review_rounds` + `extra_reviews`), `final_review_pending` instead. The final review's `changes_requested` needs a high or critical finding (else the re-ask) |
-| final_review answer | `repair_and_review`: `extra_reviews`+1, repair, then one more review. `repair_and_handover`: final repair, tests and gates, then handover without a review. `pause`: paused; asked again after resume. The question names repeated lineages and their repair designs |
-| handover | snapshot changed → gating. File lists must equal `git diff --name-status` since the phase base (re-ask once, then `blocked handover_mismatch`) → closing. handover.md gets the contract status (from `contract_review`), the deferrals to later phases, the plan debate summary and the traceability matrix |
+| planning | Planner (`planning`); the brief names the Implementer's agent, model and context budget (`context_kb`). `plan_ready` → plan.md (the guide) and plan.json (todos, sessions, requirement map, deferrals; `plan.accepted`) → debating. Requirements the map does not mention go to the Debater as a hint. `needs_expansion` → expansion packets, same session (limit `expansion_rounds`) |
+| debating | Plan Debater. Pass 1 (`debate`): `findings`. Later passes (`rebuttal`): verdicts on the Planner's answers (`resolved`, `conceded`, `upheld`) plus new findings; `agree` closes every open item. Nothing open → plan_approval; open and passes < `debate_rounds` → synthesizing; at the limit: open high/critical → `ask_user debate_unresolved` (keep the Planner's plan / side with the Debater for one last revision / pause), others contested (the first review gets them) |
+| synthesizing | same Planner session (`synthesis`, or `revise` after a user revision): the full plan and `debate_dispositions` (`accept` or `reject` with a note) → debating (rebuttal), or straight to plan_approval when only low items are open |
+| plan_approval | if approvals apply: `ask_user approve_plan` (approve / revise). Then the sessions are normalized (unknown ids dropped, unlisted todos appended to the last session; notes go to the journal as warnings), checkpoint "plan approved" → implementing |
+| implementing | a blocking question open (`context_request`) → Planner `context_answer`: its report is appended to plan.md as `## Addendum N`, `new_todos` join plan.json and the current session → the same Implementer session continues. Else Implementer `implementation` with the delta "Session k of n" and its todos. `implemented` → `todos_done` recorded (no `todos_done` field means the whole session); todos the session left open are queued once as a follow-up session right after it (a follow-up gets no follow-up); `work.done`; checkpoint "implementation" (or "implementation session k"); next session, or testing after the last one |
+| repairing | Implementer `repair` with the findings in its delta (a blocking question works as in implementing). `implemented` → `repair_reports`, checkpoint "repair N" → testing |
+| testing | Tester; verdict, failures and manual reports stored → gating |
+| gating | `run_gates`. The latest runs are reused when every gate already passed on this exact tree with unchanged evidence (`gates.run` `cached`). When the SEV3 gates pass, the optional e2e gate `LR-E2E` runs (enabled, configured, phase selected, tree not already passed; its environment includes `.env.e2e`): exit 1 or a missing report is a failing gate (normal repair), exit 2 → `blocked e2e_config`, exit 3 or timeout → `blocked e2e_environment`, missing binary → `blocked e2e_missing`, other → `blocked e2e_runner`. All gates pass and verdict pass → reviewing (post-run snapshot stored), or handover after a user-chosen unreviewed final repair (`review.skipped`, open findings go into handover.md); else repair (test, `test_repairs`+1) or `blocked repair_limit` when `test_repairs` reached `limits.repair_rounds` + extra rounds (both reset when a review requests changes, so each review cycle has its own budget; `looprch resume` grants one round) |
+| reviewing | `final_review_pending` → `ask_user final_review`. Snapshot must equal the gates snapshot (else gating). The brief carries "Review round n of N", the time budget, the diff commands (phase base → gates tree; re-reviews also `reviewed_tree` → gates tree) and `changed-files.txt`; the first review also gets the contested debate items, re-reviews the earlier findings. A run's timeout is the Reviewer timeout × (1 + 0.5 × (n − 1)). `approve` → handover (findings become `review_notes`, listed in handover.md). `changes_requested` → `review_changes`+1, `reviewed_tree` stored → repair: Implementer findings go to the Implementer, `owner: tester` findings to the Tester after it (only Tester findings → straight to testing). If that was the final allowed review (`limits.review_rounds` + `extra_reviews`), `final_review_pending` instead |
+| final_review answer | `repair_and_review`: `extra_reviews`+1, repair, then one more review. `repair_and_handover`: final repair, tests and gates, then handover without a review. `pause`: paused; asked again after resume |
+| handover | snapshot changed → gating. Looprch appends the file lists from `git diff --name-status` since the phase base, the contributors, the gate runs, the plan's todos and deferrals, and the plan debate → closing |
 | closing | ticks todo.md and verifies; merge approval (`ask_user approve_merge`, hold → paused); final commit, `merge --no-ff`, tag, delete branch → `phase_closed` |
 
 ## Cross-cutting on every run
@@ -84,13 +84,14 @@ conceded, contested or decided by the user.
 - Implementer/Tester agent switch → checkpoint "agent switch" first, then a fresh session with the
   diff since the phase base and earlier final messages.
 - Context guard → `ask_user context_over_budget` when a larger-budget fallback exists.
+- Phase roles run without the agent's read-only mode; only the advisory side runs (Worker,
+  `/lr-review`) are read-only, and a side run that changes files is discarded.
 
 ## Cross-cutting on every result
 
-- Invalid block, or a phase rule violation (contract coverage, dispositions, resolutions,
-  verifications, review coverage and consistency) → one re-ask in the same session, then
-  `blocked result_invalid`.
-- Read-only role changed files (or the relay reports a violation) → `blocked readonly_violation`.
+- A block Looprch cannot read (no block, invalid JSON, wrong shape or decision, an expansion id
+  that is not a SEV3 source) → one re-ask in the same session, then `blocked result_invalid`.
+  There are no other result checks.
 - `failed` / `timeout` / `aborted` / interrupted → retry up to `run_attempts`, then fallback, then
   `blocked run_failed`. `*_unavailable` → fallback or `blocked cli_missing`. Exit 2 without a
   result → `blocked usage_error`.
@@ -115,5 +116,6 @@ Common: `protocol`, `action`, `phase`, `stage`, `round`, `summary`, optional `co
 
 Resume (`looprch resume [--note]`) clears paused/waiting/blocked; after `repair_limit` it grants
 one round and the note goes into the next brief (the block is raised in `repairing`, so the
-round is a repair, never another review); after `protocol_changed` the phase adopts the
-new protocol; `spec_changed` stays until the package verifies with an accepted fingerprint.
+round is a repair, never another review); after `protocol_changed` a phase from protocol 4
+restarts at planning (its contract, plan and debate files move to `v07/`), then adopts the new
+protocol; `spec_changed` stays until the package verifies with an accepted fingerprint.
