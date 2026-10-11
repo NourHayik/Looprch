@@ -2,8 +2,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { REPO, runCli, sandbox, writeExecutable } from "../helpers/tmp.js";
+import { dirname, join } from "node:path";
+import { CLI, REPO, runCli, sandbox, writeExecutable } from "../helpers/tmp.js";
 import { makePackage } from "../helpers/pkg.js";
 import { packageSpec } from "../../src/cli/update.js";
 
@@ -12,14 +12,14 @@ describe("install / update / rollback / uninstall", () => {
     const s = sandbox();
     const r = runCli(["install", "--from", REPO, "--json"], { env: s.env });
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.json.version, "0.8.2");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.2");
-    assert.ok(existsSync(join(s.lrHome, "versions/0.8.2/dist/looprch.mjs")));
+    assert.equal(r.json.version, "0.8.3");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.3");
+    assert.ok(existsSync(join(s.lrHome, "versions/0.8.3/dist/looprch.mjs")));
     assert.match(readFileSync(join(s.home, ".local/bin/looprch"), "utf8"), /looprch shim/);
     assert.equal(r.json.on_path, false);
     assert.match(r.json.path_hint, /\.local\/bin/);
     const v = spawnSync(join(s.home, ".local/bin/looprch"), ["version"], { env: { ...process.env, ...s.env }, encoding: "utf8" });
-    assert.match(v.stdout, /looprch 0\.8\.2 \(protocol 5,/);
+    assert.match(v.stdout, /looprch 0\.8\.3 \(protocol 5,/);
     s.cleanup();
   });
 
@@ -39,7 +39,7 @@ describe("install / update / rollback / uninstall", () => {
     const r = runCli(["install", "--from", bad, "--json"], { env: s.env });
     assert.equal(r.code, 1);
     assert.equal(r.json.error.code, "manifest_mismatch");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.2");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.3");
     s.cleanup();
   });
 
@@ -49,14 +49,14 @@ describe("install / update / rollback / uninstall", () => {
     const pkg = makePackage("0.9.0");
     const u = runCli(["update", "--from", pkg, "--yes", "--json"], { env: s.env });
     assert.equal(u.code, 0, u.stdout + u.stderr);
-    assert.equal(u.json.from, "0.8.2");
+    assert.equal(u.json.from, "0.8.3");
     assert.equal(u.json.to, "0.9.0");
     assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.9.0");
-    assert.ok(existsSync(join(s.lrHome, "versions/0.8.2")));
+    assert.ok(existsSync(join(s.lrHome, "versions/0.8.3")));
     const rb = runCli(["rollback", "--json"], { env: s.env });
     assert.equal(rb.code, 0);
-    assert.equal(rb.json.to, "0.8.2");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.2");
+    assert.equal(rb.json.to, "0.8.3");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.3");
     s.cleanup();
   });
 
@@ -67,7 +67,7 @@ describe("install / update / rollback / uninstall", () => {
     const u = runCli(["update", "--from", pkg, "--yes", "--json"], { env: s.env });
     assert.equal(u.code, 1);
     assert.equal(u.json.error.code, "self_test_failed");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.2");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.3");
     s.cleanup();
   });
 
@@ -130,6 +130,54 @@ describe("install / update / rollback / uninstall", () => {
       s.cleanup();
     });
   }
+
+  test("update downloads when the working directory was removed", () => {
+    const s = sandbox();
+    runCli(["install", "--from", REPO], { env: s.env });
+    const pkg = makePackage("0.9.1");
+    const tgz = join(s.dir, "looprch-0.9.1.tgz");
+    const packed = spawnSync("tar", ["czf", tgz, "-C", dirname(pkg), "package"], { encoding: "utf8" });
+    assert.equal(packed.status, 0, packed.stderr);
+    writeExecutable(
+      join(s.bin, "npm"),
+      `#!/bin/sh
+cd . >/dev/null 2>&1 || { echo "npm: cwd missing" >&2; exit 1; }
+if [ "$1" = "view" ]; then exit 1; fi
+dest=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--pack-destination" ]; then dest="$a"; fi
+  prev="$a"
+done
+cp "$LOOPRCH_FAKE_TGZ" "$dest/looprch.tgz"
+`,
+    );
+    const gone = join(s.dir, "gone");
+    mkdirSync(gone);
+    const runner = join(s.dir, "run-update.mjs");
+    writeFileSync(
+      runner,
+      `import { rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+rmSync(process.cwd(), { recursive: true, force: true });
+const r = spawnSync(process.execPath, ${JSON.stringify([CLI, "update", "--yes", "--json"])}, { env: process.env, encoding: "utf8" });
+process.stdout.write(r.stdout ?? "");
+process.stderr.write(r.stderr ?? "");
+if (r.error) process.stderr.write(r.error.message);
+process.exit(r.status ?? 1);
+`,
+    );
+    const r = spawnSync(process.execPath, [runner], {
+      cwd: gone,
+      env: { ...process.env, ...s.env, LOOPRCH_FAKE_TGZ: tgz },
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(JSON.parse(r.stdout).to, "0.9.1");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.9.1");
+    s.cleanup();
+  });
 
   test("update falls back to the GitHub repository when looprch is not on npm", () => {
     assert.equal(packageSpec(undefined, true), "looprch@latest");

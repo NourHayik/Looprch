@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { GITHUB_SPEC } from "../core/constants.js";
 import { LrError } from "../core/errors.js";
@@ -14,8 +14,24 @@ import { askConfirm } from "../ui/prompts.js";
 import { parse } from "./args.js";
 import { out } from "./output.js";
 
+/**
+ * A directory that exists. npm calls `process.cwd()` at startup and exits when the
+ * caller's directory was removed (`uv_cwd` ENOENT). The same process can still be
+ * running: Node caches the old path, and a child only fails once it asks again.
+ */
+function childCwd(): string {
+  try {
+    const cwd = process.cwd();
+    if (existsSync(cwd)) return cwd;
+  } catch {
+    // uv_cwd ENOENT: the directory was removed without changing into another one.
+  }
+  const dir = homedir();
+  return existsSync(dir) ? dir : tmpdir();
+}
+
 function onNpmRegistry(): boolean {
-  return spawnSync("npm", ["view", "looprch", "version"], { encoding: "utf8" }).status === 0;
+  return spawnSync("npm", ["view", "looprch", "version"], { cwd: childCwd(), encoding: "utf8" }).status === 0;
 }
 
 /** npm registry when the package is published there, otherwise the GitHub repository. */
@@ -27,10 +43,11 @@ export function packageSpec(version: string | undefined, registry: boolean): str
 function fetchPackage(version: string | undefined): { dir: string; cleanup: () => void } {
   const spec = packageSpec(version, onNpmRegistry());
   const tmp = mkdtempSync(join(tmpdir(), "looprch-update-"));
-  execFileSync("npm", ["pack", spec, "--pack-destination", tmp, "--silent"], { stdio: ["ignore", "pipe", "inherit"] });
+  const cwd = childCwd();
+  execFileSync("npm", ["pack", spec, "--pack-destination", tmp, "--silent"], { cwd, stdio: ["ignore", "pipe", "inherit"] });
   const tgz = readdirSync(tmp).find((f) => f.endsWith(".tgz"));
   if (!tgz) throw new LrError("download_failed", `npm pack ${spec} produced no tarball`);
-  execFileSync("tar", ["xzf", join(tmp, tgz), "-C", tmp]);
+  execFileSync("tar", ["xzf", join(tmp, tgz), "-C", tmp], { cwd });
   return { dir: join(tmp, "package"), cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
 }
 
@@ -56,10 +73,10 @@ export async function run(argv: string[]): Promise<number> {
     const ok = await askConfirm(`These projects have a phase in progress; the next phase step will pause until resumed if the protocol changes:\n  ${busy.join("\n  ")}\nUpdate anyway?`, !!values.yes);
     if (!ok) throw new LrError("cancelled", "Update cancelled");
   }
-  const pkg = values.from ? { dir: resolve(values.from), cleanup: () => {} } : fetchPackage(values.to);
+  const pkg = values.from ? { dir: resolve(childCwd(), values.from), cleanup: () => {} } : fetchPackage(values.to);
   try {
     const { version, reused } = installVersion(pkg.dir);
-    const test = spawnSync(process.execPath, [join(home.version(version), "dist", "looprch.mjs"), "self-test", "--json"], { encoding: "utf8", env: process.env });
+    const test = spawnSync(process.execPath, [join(home.version(version), "dist", "looprch.mjs"), "self-test", "--json"], { cwd: childCwd(), encoding: "utf8", env: process.env });
     if (test.status !== 0) {
       if (!reused && version !== from) rmSync(home.version(version), { recursive: true, force: true });
       throw new LrError("self_test_failed", `Self-test of ${version} failed; current version unchanged (${from ?? "none"})`, undefined, 1, test.stdout || test.stderr);

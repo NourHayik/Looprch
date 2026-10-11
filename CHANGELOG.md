@@ -2,6 +2,13 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.8.3 - 2026-10-11
+
+### Fixed
+
+- `looprch update` still downloads when the shell's working directory has been removed.
+  `npm`, `tar`, and the self-test start in a directory that exists. Protocol 5 is unchanged.
+
 ## 0.8.2 - 2026-10-11
 
 Findings cover the whole defect class, and the plan decides everything important, from the first

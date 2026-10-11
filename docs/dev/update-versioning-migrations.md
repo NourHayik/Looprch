@@ -17,7 +17,9 @@ MANIFEST.sha256` into `versions/<v>.tmp-<pid>`, verifies the manifest and rename
 `switchCurrent(v)` creates a temporary symlink and renames it over `current`, recording
 `{current, previous}` in `install.json`. `prune(2)` keeps the two newest plus current and
 previous. `update` runs the new version's `self-test` in a child process before switching; any
-failure leaves `current` untouched. `rollback` switches to `previous`.
+failure leaves `current` untouched. `npm` and `tar` are started in a directory that
+still exists, so a shell whose working directory was removed can still update.
+`rollback` switches to `previous`.
 
 ## Migrations
 
