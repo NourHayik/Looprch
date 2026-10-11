@@ -103,12 +103,12 @@ function fields(role: Role, task: Task): string {
       return `"findings": [${DEBATE_FINDING}]; ${EXPANSION_FIELD}`;
     case "implementer":
       if (task === "handover") return '"limitations": ["…"] (Looprch adds the file lists from git)';
-      if (task === "repair") return `"files_changed": ["…"], "resolutions": [{"id":"R-1","status":"fixed|not_fixed","note":"…"}] (optional, one per finding), "notes": ["…"]; ${CONTEXT_REQUEST}`;
+      if (task === "repair") return `"files_changed": ["…"], "resolutions": [{"id":"R-1","status":"fixed|not_fixed","note":"the instances you fixed and the search that found them","tests":["testcases that cover the rule, if you ran any"]}] (one per finding), "notes": ["…"]; ${CONTEXT_REQUEST}`;
       return `"todos_done": ["T-1"] (the todos of your session you finished), "files_changed": ["…"], "notes": ["choices you made where the plan left a small gap"]; ${CONTEXT_REQUEST}`;
     case "tester":
-      return '"tests_written": ["…"], "failures": [{"id":"F-1","gate_id":"…","summary":"…","files":["…"]}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}], "resolutions": [{"id":"R-12","status":"fixed|not_fixed","note":"the test that proves it, or why no declared gate can"}] (after a review repair: one per finding owned by the Tester)';
+      return '"tests_written": ["…"], "failures": [{"id":"F-1","gate_id":"…","summary":"…","files":["…"]}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}], "resolutions": [{"id":"R-12","status":"fixed|not_fixed","note":"what the tests prove across the finding\'s scope, or why no declared gate can","tests":["the testcase names a declared gate runs"]}] (after a review repair: one per finding in the Delta; fixed means verified)';
     case "reviewer":
-      return '"findings": [{"id":"R-1","severity":"low|medium|high|critical","summary":"the broken rule and where it breaks","files":["…"],"fix":"the condition the repair must meet","owner":"implementer|tester","plan_ref":"T-4 | Decision 5 | a requirement id the plan does not cover | defect"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"findings": [{"id":"R-1","severity":"low|medium|high|critical","summary":"the broken rule and where it breaks","files":["…"],"fix":"the condition the repair must meet","owner":"implementer|tester","plan_ref":"T-4 | Decision 5 | a requirement id the plan does not cover | defect","scope":"where the rule applies and how to find every instance (the search you ran, the entry points)"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "worker":
       return '"evidence": [{"path":"…","lines":"10-20","note":"…"}]';
     default: {
@@ -193,8 +193,8 @@ function taskText(input: BriefInput): string {
         lines.push(`Review round ${r.n} of ${r.of}. Time budget: up to ${r.timeout}.`, "", `- Whole phase: \`git diff --stat ${base} ${tree}\`, one file: \`git diff ${base} ${tree} -- <path>\`. \`${tree}\` is the tree the gates ran on, including uncommitted and new files.`);
         if (r.n > 1 && r.prevTree) lines.push(`- Repair since your last review: \`git diff --stat ${r.prevTree} ${tree}\`.`);
         lines.push("");
-        if (r.n === 1) lines.push("This is the first review: report every finding in this one pass.");
-        else lines.push("This is a re-review: check the earlier findings in the Delta against the current code, check the repair diff for regressions, and report what still holds and anything new.");
+        if (r.n === 1) lines.push("This is the first review: report every finding in this one pass. For each one, search the whole phase for every instance of the rule it breaks, and record the search in its scope.");
+        else lines.push("This is a re-review: check the earlier findings in the Delta against the current code (rerun each one's Scope; close it only when no instance remains and its proof holds), check the repair diff for regressions, and report what still holds and anything new.");
         if (r.n >= r.of) lines.push("This is the final review. Request changes only for high or critical defects; with only medium or low findings, approve: Looprch records them as open review notes in the handover.");
       } else lines.push(`Phase diff: \`git diff --stat ${base}\` plus untracked files (\`git status --short\`).`);
       break;
@@ -223,6 +223,7 @@ function deltaText(d: Delta | null, note: string | null): string {
       const tags = [f.severity, f.owner ? `owner ${f.owner}` : null, f.plan_ref ? `plan ${f.plan_ref}` : null].filter(Boolean).join(", ");
       lines.push(`- ${f.id}${tags ? ` [${tags}]` : ""}${f.gate_id ? ` (${f.gate_id})` : ""}: ${f.summary}${f.files?.length ? ` — ${f.files.join(", ")}` : ""}`);
       if (f.fix) lines.push(`  Fix: ${f.fix}`);
+      if (f.scope) lines.push(`  Scope: ${f.scope}`);
     }
     for (const p of d.paths ?? []) lines.push(`- read: \`${p}\``);
   }

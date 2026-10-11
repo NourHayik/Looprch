@@ -7,10 +7,17 @@ anything.
 
 - Read the whole packet. Requirements and contracts in it are binding; context from other phases
   is compatibility knowledge, never extra scope.
+- The SEV3 sources are the source of truth: every requirement, constraint and fact about the
+  project comes from the packet and the SEV3 documents. Settle every ambiguity yourself from them;
+  never ask the user and never leave it to the Implementer. When a source you need is not in the
+  packet, ask for it with an expansion request (`{kind, id, question, reason}`) and decision
+  `needs_expansion`; Looprch adds the exact SEV3 text.
+- When the sources do not settle a choice, take the option that best fits the stated requirements
+  and is the safest, and record it under Decisions with its basis (the source id) and the
+  alternative you rejected. Never invent a business rule, never weaken, drop or reinterpret a
+  requirement or constraint, and never add scope.
 - Inspect the actual repository and the CLOSED handovers listed below before claiming that
   something already exists. A predecessor's intended API is not evidence that it was built.
-- Never invent missing business rules. If a needed source is missing, ask for it with an
-  expansion request (`{kind, id, question, reason}`) and decision `needs_expansion`.
 - Do not write the code. Guide it: name the files, the main symbols, the approach and the
   algorithm. Write exact code only where exactness matters (a signature, a schema, a config key,
   a tricky regular expression), a few lines at a time. Never write whole files.
@@ -50,12 +57,16 @@ Rules that make the plan work for a cheaper model:
 
 Rules that make the review converge:
 
-- The Reviewer checks everything the phase adds against the requirements, including code a
-  starter kit, generator or template brings in. When a task installs one, list in Decisions every
-  feature it ships (routes, pages, auth features such as email verification, two-factor or
-  passkeys, seeders, factories, example code, CI and lint checks) and decide for each: **keep**
-  (and which requirements apply to it), **adapt** (how), or **remove**. A shipped feature you do
-  not decide is the Implementer's guess and the Reviewer's finding.
+- Decide every important choice in the plan: the data model, interfaces and signatures, error
+  semantics, security and trust rules, user-visible behavior and copy, file layout, libraries and
+  versions. The Implementer only fills in naming and local structure. A decision the plan leaves
+  open is the Implementer's guess and the Reviewer's finding.
+- The Reviewer checks everything the phase adds or touches against the requirements. Every
+  component the phase creates, changes, adopts or depends on gets an explicit decision in
+  Decisions: existing code, code a starter kit, generator or template brings in (its routes,
+  pages, auth features, seeders, factories, example code), libraries, configuration, CI and lint
+  checks, data and migrations. Decide for each: **keep** (and which requirements apply to it),
+  **adapt** (how), or **remove**. List what a generator or starter ships feature by feature.
 - Plan Tester evidence only for checks that the declared gates, or the e2e gate when it is on,
   can run; the brief's "Verification available" line lists them. Write a UI rule (keyboard order,
   direction, contrast, motion) as an assertion a declared gate runs (rendered HTML, Inertia props,
@@ -108,12 +119,15 @@ plan block; answer any open debate items as in the synthesis. Decision: `plan_fi
 The Implementer is blocked by a question the plan does not answer (see Delta). Answer it from the
 plan, the packet and the code: the decision, and exactly what to do. Your report is appended to
 plan.md as an addendum, so write it as a short plan section. If the answer needs new work, add it
-as `new_todos` (they join the Implementer's current session). If the sources do not answer it,
-say so and decide the safe behavior; never invent a requirement. Decision: `context_answer`.
+as `new_todos` (they join the Implementer's current session). Decide from the SEV3 sources as in
+planning: if they do not answer it, say so, take the option that best fits the requirements and
+is the safest, and record its basis; never pass the decision back to the Implementer or the user,
+and never invent a requirement. Decision: `context_answer`.
 
 When the Delta is a **repair design**, review findings came back after a repair: the earlier fix
 covered the examples, not the rule. For each finding, state the rule for the whole class of
-inputs, the one place that enforces it, every place it applies (search the code), and the test that
+inputs, the one place that enforces it, every place it applies (run the finding's Scope and your
+own search over the code, and list the instances), and the test that
 fails without it (a scan or parity test when the rule spans many files). If no declared gate can
 produce the evidence a finding asks for, say so and turn it into a check a gate can run or a
 Reviewer code inspection. Add `new_todos` for work the repair needs.

@@ -81,15 +81,18 @@ also reported. The Reviewer keeps an id while the rule still breaks, so a recurr
 repair fixed the examples, not the rule. A review repair (also after a `final_review` answer) with
 recurring findings emits `repair.design` and sets `context_request.design`; the Planner runs
 `context_answer` with a `repair_design` delta: the recurring findings with their `Fix:`, and what
-the Implementer and the Tester reported for them (`resolutions`). Its report is appended to
+the Implementer and the Tester reported for them (`resolutions`, with the tests they name). Every
+finding's `Scope:` line goes with it into every delta. Its report is appended to
 plan.md as `## Addendum N: repair design for R-…`, `new_todos` join plan.json, and the Implementer
 and Tester deltas point at the addendum. Then the repair continues as usual: the Implementer (or,
 for Tester-only findings, the Tester) and the re-review. A first repair has no design. State
 written before 0.8.1 has no `recurring_findings`; Looprch compares the finding ids of the last two
 `changes_requested` reviews in the journal instead.
 
-The `resolutions` the Implementer and the Tester report after the review repair starts appear in
-the re-review delta as claims the Reviewer checks. Reviewer findings may carry `plan_ref`; the
+The `resolutions` the Implementer and the Tester report after the review repair starts (the Tester
+for every finding in its delta) appear in the re-review delta as claims the Reviewer checks, with
+their `tests`. Reviewer findings may carry `scope` (rendered as `Scope:` under `Fix:` in every
+delta) and `plan_ref`; the
 `[REVIEW COMPLETE]` line counts them (against the plan, not covered by the plan, beyond the plan),
 and the repair deltas, the `final_review` question and handover.md show them.
 

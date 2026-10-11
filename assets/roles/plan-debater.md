@@ -19,12 +19,16 @@ Find what would make that Implementer fail:
 7. A cross-phase dependency without a deferral and a safe interim behavior.
 8. Sessions that do not fit the Implementer: a session too large for its context budget (the
    brief states it), or a split where an earlier session leaves nothing checkable.
-9. Adopted code left undecided: a starter kit, generator or template whose shipped features
-   (pages, auth features, seeders, example code, CI checks) the plan does not list as keep, adapt
-   or remove. The Reviewer will hold each one to the requirements.
+9. A component left undecided: existing code, code a starter kit, generator or template brings
+   in (its pages, auth features, seeders, example code), a library, configuration, CI or lint
+   checks, or data the phase creates, changes, adopts or depends on, without a keep, adapt or
+   remove decision. The Reviewer will hold each one to the requirements.
 10. A check no gate can run: the Tests section promises browser, manual or other evidence that
     neither the declared gates nor the e2e gate (see "Verification available" in the brief)
     produces, or a rule that spans many places with only examples and no enforcing check.
+11. A decision passed on or made against the sources: the plan leaves a choice to the
+    Implementer or asks the user, although the SEV3 sources settle it or the Planner must decide
+    it; or a decision weakens, drops or reinterprets a requirement or constraint of the packet.
 
 Each finding has an `id`, a `severity` (low, medium, high, critical), a `summary` (the defect and
 how the Implementer would go wrong because of it), the plan `section`, and a `suggestion` (the

@@ -2,6 +2,42 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.8.2 - 2026-10-11
+
+Findings cover the whole defect class, and the plan decides everything important, from the first
+review on. Protocol 5 (unchanged), no new checks: a phase started under 0.8.0 or 0.8.1 continues.
+
+### Added
+
+- **`scope` on review findings** (optional): where the rule applies and how to find every
+  instance (the search the Reviewer ran, the entry points). Every repair, test, re-review and
+  repair-design delta shows it as `Scope:` under `Fix:`.
+- **`tests` on resolutions** (optional, Implementer and Tester): the testcases that prove a
+  finding fixed. The re-review and the repair design show them next to each claim.
+
+### Changed
+
+- **Planner:** the SEV3 sources are the source of truth. It settles every ambiguity from them
+  (expansion requests, never the user), records the basis and the rejected alternative of each
+  decision, and never weakens, drops or reinterprets a requirement or adds scope. Every important
+  choice is made in the plan, and every component the phase creates, changes, adopts or depends
+  on (existing code, starter or generated code, libraries, configuration, CI, data) gets a keep,
+  adapt or remove decision; 0.8.1's rule covered only starter kits. A context answer decides the
+  same way and never passes the decision back.
+- **Plan Debater:** item 9 covers every undecided component; new item 11: a decision passed to
+  the Implementer or the user, or made against the sources.
+- **Reviewer:** every finding is a class: name the rule, search the whole phase for every
+  instance (pattern, entry points, sibling files, locales, roles, configurations, generated
+  code), list them all and record the search in `scope`. A re-review closes a finding only after
+  rerunning its scope and checking the Tester's named tests.
+- **Implementer:** a repair finds every instance first (the Scope search and its own), fixes the
+  shared cause at one place, searches again, and reports the instances and the search in each
+  resolution. A missing decision about behavior, interfaces, data, security or copy goes to the
+  Planner; only naming and local structure are small gaps.
+- **Tester:** after a review repair it proves every finding, whoever owns it, with a test over the
+  finding's whole scope that fails without the fix, and reports each one in `resolutions` with
+  the tests (`fixed` means verified).
+
 ## 0.8.1 - 2026-10-11
 
 Reviews that converge on the plan. Protocol 5 (unchanged): a phase started under 0.8.0 continues.

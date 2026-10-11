@@ -8,6 +8,7 @@ import { parseJunit } from "../../src/gates/junit.js";
 import { runGate } from "../../src/gates/runner.js";
 import { defaultConfig } from "../../src/core/config.js";
 import { extractResultBlock, validateResult } from "../../src/core/results.js";
+import { claimLines } from "../../src/core/lifecycle.js";
 import type { Gate } from "../../src/sev3/manifest.js";
 
 describe("unittest parser", () => {
@@ -143,6 +144,23 @@ describe("result blocks", () => {
     assert.equal(validateResult("tester", { role: "tester", decision: "pass", resolutions: [{ id: "R-12", status: "fixed", note: "two-connection test" }, { id: "R-13", status: "not_fixed", note: "the e2e gate is off" }] }).ok, true);
     assert.equal(validateResult("tester", { role: "tester", decision: "pass" }).ok, true);
     assert.match(errs(validateResult("tester", { role: "tester", decision: "pass", resolutions: [{ id: "R-12", status: "proxy" }] })), /status must be one of fixed, not_fixed/);
+  });
+  test("scope on review findings and tests on resolutions are optional; malformed values cost no re-ask", () => {
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-5", summary: "x", scope: "rg -n 'Login' resources/js; every page" }] }).ok, true);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-5", summary: "x", scope: ["not", "a", "string"] }] }).ok, true);
+    assert.equal(validateResult("tester", { role: "tester", decision: "pass", resolutions: [{ id: "R-5", status: "fixed", tests: ["CopyTest::every_page_is_translated"] }] }).ok, true);
+    assert.equal(validateResult("implementer", { role: "implementer", decision: "implemented", resolutions: [{ id: "R-5", status: "fixed", tests: "CopyTest" }] }).ok, true);
+  });
+  test("claim lines name the role, the status, the note and the tests", () => {
+    const claims = [
+      { id: "R-5", status: "fixed" as const, note: "12 pages, rg over resources/js", by: "implementer" as const },
+      { id: "R-5", status: "fixed" as const, tests: ["CopyTest::every_page_is_translated", "CopyTest::keys_match"], by: "tester" as const },
+      { id: "R-9", status: "not_fixed" as const, by: "tester" as const },
+    ];
+    assert.deepEqual(claimLines(claims, new Set(["R-5"])), [
+      "- R-5: the Implementer reported fixed: 12 pages, rg over resources/js",
+      "- R-5: the Tester reported fixed (tests: CopyTest::every_page_is_translated, CopyTest::keys_match)",
+    ]);
   });
   test("planner results need a plan with todos; sessions, requirements and deferrals are shaped", () => {
     const plan = { todos: [{ id: "T-1", title: "Add the ids module", section: "1. Data" }, { id: "T-2", title: "Wire the CLI" }], sessions: [["T-1", "T-2"]], requirements: { "R-ID": ["T-1"] }, deferrals: [{ id: "X-1", what: "auth", to_phase: "P-002" }] };

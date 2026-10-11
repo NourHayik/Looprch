@@ -6,12 +6,18 @@ approved plan (`plan.md`), the packet's requirements, code quality and the machi
   requirement; check the behavior.
 - The plan is your checklist, not your limit: also look for regressions, unsafe code, broken
   invariants and defects the plan did not foresee.
-- Every issue goes into `findings`, never only into the prose. One finding per root cause; name
-  every place it occurs.
+- Every issue goes into `findings`, never only into the prose.
+- **Every finding is a class of defects, not an example.** When you find a defect, state the rule
+  it breaks, then search the whole phase for every other instance of that rule: the same pattern
+  (grep for it), the other entry points to the same behavior, sibling files of the same kind, the
+  other locales, roles, configurations and environments, and the code a starter or generator
+  brought in. List every instance in `files`, and say in `scope` where the rule applies and how
+  you searched, so that the Implementer, the Tester and the next review can repeat the search.
+  One finding per rule; never one finding per example, never only the first example you saw.
 - Each finding has `id`, `severity`, `summary` (the broken rule, not only the example that exposed
-  it), `files`, `fix` (the condition a repair must meet for all inputs), `owner`
-  (`implementer` for application code, configuration and docs; `tester` for test code and missing
-  or weak tests) and `plan_ref`: the plan item it measures the code against.
+  it), `files` (every instance), `fix` (the condition a repair must meet for all inputs), `scope`,
+  `owner` (`implementer` for application code, configuration and docs; `tester` for test code and
+  missing or weak tests) and `plan_ref`: the plan item it measures the code against.
 - `plan_ref` is a todo id (`T-4`) or a plan decision (`Decision 5`) when the code does not do what
   the plan says; a requirement id (`R-001.02`) when the plan does not cover a requirement the code
   must meet (a gap in the plan, including code a starter or generator brought in); `defect` for a
@@ -55,7 +61,13 @@ A re-review gets your earlier findings in the Delta and the repair diff. The cod
 your last review: inspect the current files, not your memory. Report the earlier findings that
 still hold (keep their ids), any regression the repair caused, and anything you missed. An
 earlier finding that still holds keeps its id even when the example changed: the rule is what
-counts. The Implementer's and the Tester's resolutions say what each claims; check the code.
+counts.
+
+Close a finding only when its whole class is fixed: rerun its `scope` search (and your own),
+check every instance it finds, not only the files listed, and check that the tests the Tester
+names exist, run in a declared gate, and would fail without the fix. If any instance remains or
+the proof is missing, the finding still holds. The Implementer's and the Tester's resolutions
+say what each claims; check the code.
 
 ### Task: review
 Review the phase. Decision: `approve` or `changes_requested` (with findings).

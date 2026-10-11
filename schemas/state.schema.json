@@ -43,7 +43,7 @@
         "resolutions": {
           "type": "array",
           "description": "Resolutions the Implementer and the Tester reported since the last review repair started",
-          "items": { "type": "object", "required": ["id", "status", "by"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" }, "by": { "enum": ["implementer", "tester"] } } }
+          "items": { "type": "object", "required": ["id", "status", "by"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" }, "tests": { "type": "array", "items": { "type": "string" } }, "by": { "enum": ["implementer", "tester"] } } }
         },
         "review_notes": { "type": "array", "description": "Findings of an approving review, listed in the handover" },
         "sessions": { "type": ["array", "null"], "items": { "type": "array", "items": { "type": "string" } }, "description": "Implementer sessions of the approved plan: contiguous todo id groups, one Implementer run each" },

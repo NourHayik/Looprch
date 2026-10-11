@@ -97,7 +97,7 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.match(brief("P-001-implementer-2"), /Repair round 1 \(the review requested changes\)\. Fix every finding below at its root cause/);
     assert.match(brief("P-001-implementer-2"), /- R-1 \[high, owner implementer\]: Scripted finding — noteapp\.py\n  Fix: Scripted fix condition/);
     const tester = brief("P-001-tester-2");
-    assert.match(tester, /add tests that prove the other repairs/);
+    assert.match(tester, /prove every finding below with a test that covers its rule across its Scope/);
     assert.match(tester, /P-001-implementer-2\/final\.md/);
     const repair = events(p).find((e) => e.type === "result.accepted" && e.data.task === "repair");
     assert.deepEqual(repair.data.resolutions, [{ id: "R-1", status: "fixed" }]);

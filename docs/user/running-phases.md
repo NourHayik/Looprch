@@ -145,6 +145,13 @@ second is a safety net, and a third is for exceptional cases.
   `fixed` or `not_fixed` per finding); the Tester fixes the test findings, reports `fixed` or
   `not_fixed` for each, and adds tests that prove the repairs; the gates run again; then the
   re-review, which sees both roles' reports as claims to check.
+- **Findings are defect classes.** A finding names the broken rule, lists every instance in
+  `files`, and says in `scope` where the rule applies and how the Reviewer searched. The
+  Implementer runs that search, fixes the shared cause at one place, and reports the instances it
+  fixed; the Tester proves each finding with a test over its whole scope and names the tests; the
+  re-review reruns the search and closes a finding only when no instance remains and the named
+  tests prove it. The first review is built to find and fix everything; later rounds are a
+  safety net.
 - **A finding that comes back gets a repair design.** If the re-review reports a finding id again,
   the cheaper roles fixed the examples, not the rule. Before the next repair the Planner writes a
   repair design (`[REPAIR DESIGN]`): the rule for the whole class, where it is enforced and the

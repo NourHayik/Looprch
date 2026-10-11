@@ -1018,7 +1018,7 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessageIn: string, 
       ...(run.usage ? { usage: run.usage } : {}),
       findings_total: reported.length,
       severities: severityCounts(reported),
-      findings: reported.map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), ...("owner" in f && f.owner ? { owner: f.owner } : {}), ...(typeof f.plan_ref === "string" && f.plan_ref ? { plan_ref: f.plan_ref } : {}), summary: f.summary.slice(0, 300) })),
+      findings: reported.map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), ...("owner" in f && f.owner ? { owner: f.owner } : {}), ...(text(f.plan_ref) ? { plan_ref: text(f.plan_ref) } : {}), ...(text(f.scope) ? { scope: text(f.scope).slice(0, 300) } : {}), summary: f.summary.slice(0, 300) })),
       ...(run.task === "review" && !run.side ? { review_round: (st.current?.review_changes ?? 0) + 1, review_cap: reviewCap(e) } : {}),
       ...(result.resolutions ? { resolutions: result.resolutions.map((r) => ({ id: r.id, status: r.status })) } : {}),
       ...(result.debate_dispositions ? { dispositions: result.debate_dispositions.map((d) => ({ id: d.id, decision: d.decision })) } : {}),
@@ -1121,7 +1121,12 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
       paths,
     };
   else delete c.deltas.implementer;
-  c.deltas.tester = { kind: "repair", text: `Round ${c.round}: review findings. Fix the findings owned by the Tester, and add tests that prove the other repairs (each one must fail without the fix).`, findings, paths };
+  c.deltas.tester = {
+    kind: "repair",
+    text: `Round ${c.round}: review findings. Fix the findings owned by the Tester, and prove every finding below with a test that covers its rule across its Scope, every instance and not only the cited example; each test must fail without the fix. Report each finding in "resolutions" with the testcase names in "tests".`,
+    findings,
+    paths,
+  };
   if (finalRepair) delete c.deltas.reviewer;
   else c.deltas.reviewer = { kind: "rereview", text: "Your previous review requested the changes below. Check each one against the current code, report the ones that still hold (keep their ids) and anything new, and check the repair diff for regressions.", findings, paths };
   if (recurring.length) startRepairDesign(e, recurring, earlierClaims, paths);
@@ -1139,13 +1144,26 @@ function recurringFindings(e: Engine): string[] {
   return c.recurring_findings;
 }
 
-function recordResolutions(c: Current, r: RoleResult, by: ResolutionRecord["by"]): void {
-  if (!r.resolutions?.length) return;
-  c.resolutions = [...(c.resolutions ?? []), ...r.resolutions.map((x) => ({ id: x.id, status: x.status, by, ...(typeof x.note === "string" && x.note.trim() ? { note: x.note.trim().slice(0, 400) } : {}) }))];
+/** An optional free-text field of a role result: trimmed, or "" when absent or not a string. */
+function text(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
 }
 
-function claimLines(claims: ResolutionRecord[], ids: Set<string>): string[] {
-  return claims.filter((x) => ids.has(x.id)).map((x) => `- ${x.id}: the ${x.by === "implementer" ? "Implementer" : "Tester"} reported ${x.status === "fixed" ? "fixed" : "not fixed"}${x.note ? `: ${x.note}` : ""}`);
+function recordResolutions(c: Current, r: RoleResult, by: ResolutionRecord["by"]): void {
+  if (!r.resolutions?.length) return;
+  c.resolutions = [
+    ...(c.resolutions ?? []),
+    ...r.resolutions.map((x) => {
+      const tests = Array.isArray(x.tests) ? x.tests.map(text).filter(Boolean).slice(0, 20) : [];
+      return { id: x.id, status: x.status, by, ...(text(x.note) ? { note: text(x.note).slice(0, 400) } : {}), ...(tests.length ? { tests } : {}) };
+    }),
+  ];
+}
+
+export function claimLines(claims: ResolutionRecord[], ids: Set<string>): string[] {
+  return claims
+    .filter((x) => ids.has(x.id))
+    .map((x) => `- ${x.id}: the ${x.by === "implementer" ? "Implementer" : "Tester"} reported ${x.status === "fixed" ? "fixed" : "not fixed"}${x.note ? `: ${x.note}` : ""}${x.tests?.length ? ` (tests: ${x.tests.join(", ")})` : ""}`);
 }
 
 /**
@@ -1535,7 +1553,16 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
     case "review": {
       const path = writeArtifact(e, "review.md", artifact);
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
-      const findings: Finding[] = (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary, ...(f.files?.length ? { files: f.files } : {}), ...(f.fix ? { fix: f.fix } : {}), ...(f.owner ? { owner: f.owner } : {}), ...(typeof f.plan_ref === "string" && f.plan_ref.trim() ? { plan_ref: f.plan_ref.trim() } : {}) }));
+      const findings: Finding[] = (r.findings ?? []).map((f) => ({
+        id: f.id,
+        severity: f.severity,
+        summary: f.summary,
+        ...(f.files?.length ? { files: f.files } : {}),
+        ...(f.fix ? { fix: f.fix } : {}),
+        ...(f.owner ? { owner: f.owner } : {}),
+        ...(text(f.plan_ref) ? { plan_ref: text(f.plan_ref) } : {}),
+        ...(text(f.scope) ? { scope: text(f.scope) } : {}),
+      }));
       c.repair_reports = [];
       if (r.decision === "approve") {
         c.snapshots.review = c.snapshots.gates;

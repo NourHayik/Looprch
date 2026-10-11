@@ -38,12 +38,16 @@ export interface ResultFinding {
   owner?: FindingOwner;
   /** Reviewer: the plan item (`T-4`, `Decision 5`), the requirement the plan does not cover, or `defect`. */
   plan_ref?: string;
+  /** Reviewer: where the rule applies and how to find every instance (a search, the entry points). */
+  scope?: string;
 }
 
 export interface Resolution {
   id: string;
   status: (typeof RESOLUTION_STATUSES)[number];
   note?: string;
+  /** The testcases that prove the finding is fixed for its whole scope. */
+  tests?: string[];
 }
 
 export interface RoleResult {

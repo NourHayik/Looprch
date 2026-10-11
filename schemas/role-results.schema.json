@@ -45,9 +45,9 @@
         "files_changed": { "$ref": "#/$defs/paths" },
         "notes": { "description": "Choices made where the plan left a small gap", "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
         "resolutions": {
-          "description": "Repair, optional: fixed or not_fixed per finding",
+          "description": "Repair, optional (the brief asks for one per finding): fixed or not_fixed; the note names the instances fixed and the search",
           "type": "array",
-          "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" } } }
+          "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" }, "tests": { "type": "array", "items": { "type": "string" }, "description": "Optional: the testcases that prove the finding fixed across its scope" } } }
         },
         "context_request": {
           "description": "Required with needs_context: a question that blocks the work; the Planner answers it in plan.md",
@@ -66,9 +66,9 @@
         "failures": { "type": "array", "items": { "type": "object", "required": ["id", "summary"], "properties": { "id": { "type": "string" }, "gate_id": { "type": "string" }, "summary": { "type": "string" }, "files": { "$ref": "#/$defs/paths" } } } },
         "manual_gate_reports": { "$ref": "#/$defs/reports" },
         "resolutions": {
-          "description": "After a review repair, optional: fixed or not_fixed per finding owned by the Tester",
+          "description": "After a review repair, optional: per finding in the delta, fixed (verified by tests) or not_fixed",
           "type": "array",
-          "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" } } }
+          "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" }, "tests": { "type": "array", "items": { "type": "string" }, "description": "Optional: the testcases that prove the finding fixed across its scope" } } }
         }
       }
     },
@@ -121,7 +121,8 @@
         "suggestion": { "type": "string", "description": "Plan Debater: the change that closes it" },
         "fix": { "type": "string", "description": "Reviewer: the condition the repair must meet" },
         "owner": { "enum": ["implementer", "tester"], "description": "Reviewer: the role that fixes it (default implementer)" },
-        "plan_ref": { "type": "string", "description": "Reviewer, optional: the plan item the code is measured against (T-4, Decision 5), a requirement id the plan does not cover, or defect" }
+        "plan_ref": { "type": "string", "description": "Reviewer, optional: the plan item the code is measured against (T-4, Decision 5), a requirement id the plan does not cover, or defect" },
+        "scope": { "type": "string", "description": "Reviewer, optional: where the rule applies and how to find every instance (a search, the entry points)" }
       }
     },
     "expansion": {

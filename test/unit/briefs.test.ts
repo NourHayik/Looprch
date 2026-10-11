@@ -80,7 +80,7 @@ describe("briefs", () => {
     const first = review(1);
     assert.match(first, /Review round 1 of 3\. Time budget: up to 60m\./);
     assert.match(first, /`git diff --stat abc123 tree3`/);
-    assert.match(first, /This is the first review: report every finding in this one pass/);
+    assert.match(first, /This is the first review: report every finding in this one pass\./);
     assert.doesNotMatch(first, /Repair since your last review/);
     assert.doesNotMatch(first, /This is the final review/);
     const second = review(2, 3, true);
@@ -105,7 +105,7 @@ describe("briefs", () => {
     assert.match(impl, /Never ask just to confirm/);
     assert.match(impl, /`todos_done`/);
     assert.doesNotMatch(impl, /readback|deviation|blueprint/i);
-    assert.match(roleText("implementer", "repair"), /same defect wherever else it occurs/);
+    assert.match(roleText("implementer", "repair"), /at their root\s+cause, for every instance/);
     assert.match(roleText("tester", "testing"), /cover at least one input class the Implementer did not mention/);
     assert.match(roleText("tester", "testing"), /Mock only real external boundaries, never the unit under test/);
     assert.match(roleText("reviewer", "review"), /Read every changed file/);
@@ -135,6 +135,14 @@ describe("briefs", () => {
     assert.match(b, /- R-7 \[medium, owner tester\]: missing tests\n  Fix: two-connection test/);
     const ref = assembleBrief(input({ role: "implementer", task: "repair", delta: { kind: "repair", text: "Fix:", findings: [{ id: "R-1", severity: "high", owner: "implementer", plan_ref: "Decision 5", summary: "log mailer offered" }] } }));
     assert.match(ref, /- R-1 \[high, owner implementer, plan Decision 5\]: log mailer offered/);
+    const scoped = assembleBrief(input({ role: "implementer", task: "repair", delta: { kind: "repair", text: "Fix:", findings: [{ id: "R-5", severity: "high", summary: "English copy on Arabic screens", fix: "every visible string is translated", scope: "rg -n \"'[A-Z][a-z]+\" resources/js; every page and component" }] } }));
+    assert.match(scoped, /  Fix: every visible string is translated\n  Scope: rg -n "'\[A-Z\]\[a-z\]\+" resources\/js; every page and component/);
+  });
+
+  test("first review searches for the whole class; a re-review reruns the scope before closing", () => {
+    const review = (n: number) => assembleBrief(input({ role: "reviewer", task: "review", reviewRound: { n, of: 3, tree: "t", prevTree: n > 1 ? "p" : null, timeout: "60m" } }));
+    assert.match(review(1), /For each one, search the whole phase for every instance of the rule it breaks, and record the search in its scope/);
+    assert.match(review(2), /rerun each one's Scope; close it only when no instance remains and its proof holds/);
   });
 
   test("Planner, Debater, Tester and Reviewer briefs state what can produce evidence; the Implementer's does not", () => {
@@ -156,18 +164,36 @@ describe("briefs", () => {
 
   test("role prompts carry the convergence rules", () => {
     const planner = roleText("planner", "planning");
-    assert.match(planner, /starter kit, generator or template/);
+    assert.match(planner, /Every\s+component the phase creates, changes, adopts or depends on gets an explicit decision/);
+    assert.match(planner, /existing code, code a starter kit, generator or template brings in/);
     assert.match(planner, /\*\*keep\*\*[\s\S]*\*\*adapt\*\*[\s\S]*\*\*remove\*\*/);
+    assert.match(planner, /Decide every important choice in the plan/);
+    assert.match(planner, /The SEV3 sources are the source of truth/);
+    assert.match(planner, /never ask the user and never leave it to the Implementer/);
+    assert.match(planner, /never weaken, drop or reinterpret a\s+requirement or constraint/);
     assert.match(planner, /Never promise browser or\s+manual checks that no gate runs/);
-    assert.match(roleText("plan_debater", "debate"), /Adopted code left undecided/);
-    assert.match(roleText("plan_debater", "debate"), /A check no gate can run/);
+    assert.match(roleText("planner", "context_answer"), /never pass the decision back to the Implementer or the user/);
+    const debater = roleText("plan_debater", "debate");
+    assert.match(debater, /A component left undecided: existing code/);
+    assert.match(debater, /A check no gate can run/);
+    assert.match(debater, /A decision passed on or made against the sources/);
     const reviewer = roleText("reviewer", "review");
     assert.match(reviewer, /Plan conformance first/);
     assert.match(reviewer, /`plan_ref` is a todo id/);
     assert.match(reviewer, /do not file a finding for missing browser or\s+manual evidence/);
-    assert.match(roleText("tester", "testing"), /Never record a\s+stand-in/);
-    assert.match(assembleBrief(input({ role: "reviewer", task: "review" })), /"plan_ref":"T-4 \| Decision 5/);
-    assert.match(assembleBrief(input({ role: "tester", task: "testing" })), /"resolutions": \[\{"id":"R-12","status":"fixed\|not_fixed"/);
+    assert.match(reviewer, /\*\*Every finding is a class of defects, not an example\.\*\*/);
+    assert.match(reviewer, /Close a finding only when its whole class is fixed: rerun its `scope` search/);
+    const repair = roleText("implementer", "repair");
+    assert.match(repair, /Find every instance first: run the Scope search/);
+    assert.match(repair, /Fix the shared cause at one place/);
+    assert.match(roleText("implementer", "implementation"), /is not a small gap: ask the Planner/);
+    const tester = roleText("tester", "testing");
+    assert.match(tester, /Never record a\s+stand-in/);
+    assert.match(tester, /prove every finding in the Delta, whoever owns it/);
+    assert.match(tester, /`fixed` means verified, with the testcase names\s+in `tests`/);
+    assert.match(assembleBrief(input({ role: "reviewer", task: "review" })), /"plan_ref":"T-4 \| Decision 5[^"]*","scope":"where the rule applies/);
+    assert.match(assembleBrief(input({ role: "tester", task: "testing" })), /"resolutions": \[\{"id":"R-12","status":"fixed\|not_fixed","note":"[^"]*","tests":\[/);
+    assert.match(assembleBrief(input({ role: "implementer", task: "repair" })), /"resolutions": \[\{"id":"R-1","status":"fixed\|not_fixed","note":"the instances you fixed and the search that found them","tests":\[/);
   });
 
   test("role text picks the task section", () => {

@@ -336,6 +336,29 @@ describe("lifecycle transition rows", () => {
     p.s.cleanup();
   });
 
+  test("T-review: a finding's scope reaches the repair, test, re-review and repair-design briefs; the Tester's proof for an Implementer finding reaches the re-review", () => {
+    const p = setupProject();
+    const finding = { id: "R-1", severity: "high", summary: "Ids are not validated at every entry point", files: ["noteapp.py"], fix: "Every entry point rejects a malformed id", owner: "implementer", plan_ref: "T-1", scope: "rg -n 'def (add|show|delete)' noteapp.py; every CLI command" };
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested", findings: [finding] },
+      { role: "reviewer", phase: "P-001", nth: 2, decision: "changes_requested", findings: [finding] },
+      { role: "tester", phase: "P-001", nth: 2, resolution_status: "fixed", resolution_tests: ["test_every_command_rejects_bad_id"] },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    const scopeLine = /  Fix: Every entry point rejects a malformed id\n  Scope: rg -n 'def \(add\|show\|delete\)' noteapp\.py; every CLI command/;
+    const brief = (id: string) => readFileSync(join(p.root, `.looprch/runs/${id}/brief.md`), "utf8");
+    assert.match(brief("P-001-implementer-2"), scopeLine);
+    assert.match(brief("P-001-tester-2"), scopeLine);
+    assert.match(brief("P-001-tester-2"), /prove every finding below with a test that covers its rule across its Scope/);
+    assert.match(brief("P-001-reviewer-2"), scopeLine);
+    assert.match(brief("P-001-reviewer-2"), /- R-1: the Tester reported fixed: scripted \(tests: test_every_command_rejects_bad_id\)/);
+    const design = r.actions.find((a) => a.action === "run_role" && a.task === "context_answer");
+    assert.match(readFileSync(join(p.root, design.brief), "utf8"), scopeLine);
+    assert.match(readFileSync(join(p.root, design.brief), "utf8"), /- R-1: the Tester reported fixed: scripted \(tests: test_every_command_rejects_bad_id\)/);
+    p.s.cleanup();
+  });
+
   test("T-sessions: each Planner session is one Implementer run with its own checkpoint", () => {
     const p = setupProject();
     p.setScenario([{ role: "planner", phase: "P-001", task: "planning", two_sessions: true }]);

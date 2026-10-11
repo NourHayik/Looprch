@@ -69,6 +69,8 @@ export interface Finding {
   owner?: FindingOwner;
   /** Review findings: the plan item the code is measured against (`T-4`, `Decision 5`), a requirement id the plan does not cover, or `defect`. */
   plan_ref?: string;
+  /** Review findings: where the rule applies and how to find every instance. */
+  scope?: string;
 }
 
 export type PlanBasis = "plan" | "not_in_plan" | "defect";
@@ -96,6 +98,8 @@ export interface ResolutionRecord {
   id: string;
   status: "fixed" | "not_fixed";
   note?: string;
+  /** The testcases the role names as proof. */
+  tests?: string[];
   by: "implementer" | "tester";
 }
 
