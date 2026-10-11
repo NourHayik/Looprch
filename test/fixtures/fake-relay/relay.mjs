@@ -8,7 +8,8 @@
 // read_only_violation, touch (path to create), usage_error, omit_block, findings, failures,
 // final (literal final message), kill_self, raw_findings; planner: plan (the whole plan block),
 // two_sessions, deferrals, omit_dispositions, disposition, new_todos; plan_debater: verdict;
-// implementer: todos_done (list), resolution_status.
+// implementer: todos_done (list), resolution_status; tester: resolution_status (resolutions for
+// every Delta finding); reviewer findings pass through as given (plan_ref included).
 // report_file writes the report to the run's report.md; report_final is then the final message:
 // "block" (a pointer plus the result block without the markdown) or a literal string.
 import { execFileSync } from "node:child_process";
@@ -156,6 +157,7 @@ switch (role) {
     decision ||= "pass";
     extra.tests_written = [];
     if (decision === "fail") extra.failures = rule.failures || [{ id: "T-1", summary: "scripted failure" }];
+    if (rule.resolution_status) extra.resolutions = deltaIds().map((id) => ({ id, status: rule.resolution_status, note: "scripted" }));
     break;
   }
   case "reviewer": {

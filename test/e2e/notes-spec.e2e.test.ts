@@ -128,21 +128,30 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     p.s.cleanup();
   });
 
-  test("E-3e a finding that comes back goes to the Implementer again, never to a redesign", () => {
+  test("E-3e a finding that comes back gets a Planner repair design before the Implementer repairs it again", () => {
     const p = setupProject();
     p.setScenario([
       { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
       { role: "reviewer", phase: "P-001", nth: 2, decision: "changes_requested", findings: [{ id: "R-1", severity: "high", summary: "Scripted finding", files: ["noteapp.py"], fix: "Reject every variant", owner: "implementer" }] },
+      { role: "implementer", phase: "P-001", task: "repair", nth: 1, resolution_status: "fixed" },
     ]);
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
     assert.equal(r.last.action, "phase_closed");
     const seq = r.actions.filter((a) => a.action === "run_role").map((a) => `${a.role}:${a.task}`);
-    const second = seq.indexOf("reviewer:review", seq.indexOf("reviewer:review") + 1);
-    assert.deepEqual(seq.slice(second, second + 4), ["reviewer:review", "implementer:repair", "tester:testing", "reviewer:review"]);
-    assert.ok(!seq.includes("planner:context_answer"), "no repair design");
+    const first = seq.indexOf("reviewer:review");
+    assert.deepEqual(seq.slice(first, first + 2), ["reviewer:review", "implementer:repair"], "a first repair has no design");
+    const second = seq.indexOf("reviewer:review", first + 1);
+    assert.deepEqual(seq.slice(second, second + 5), ["reviewer:review", "planner:context_answer", "implementer:repair", "tester:testing", "reviewer:review"]);
+    const design = r.actions.find((a) => a.action === "run_role" && a.task === "context_answer");
+    const planner = readFileSync(join(p.root, design.brief), "utf8");
+    assert.match(planner, /Write the repair design for the review findings in the Delta/);
+    assert.match(planner, /- R-1 \[high, owner implementer\]: Scripted finding — noteapp\.py\n  Fix: Reject every variant/);
+    assert.match(planner, /What the Implementer and the Tester reported for them in the last repair:\n- R-1: the Implementer reported fixed: scripted/);
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/plan.md"), "utf8"), /## Addendum 1: repair design for R-1/);
     const repairs = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-implementer-")).sort().map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).filter((b) => /task=repair/.test(b));
     assert.equal(repairs.length, 2);
-    assert.match(repairs[1]!, /Repair round 2[\s\S]*- R-1 \[high, owner implementer\]: Scripted finding — noteapp\.py\n  Fix: Reject every variant/);
+    assert.match(repairs[1]!, /The Planner wrote a repair design for R-1 in plan\.md \(Addendum 1, at the end\)[\s\S]*Repair round 2[\s\S]*- R-1 \[high, owner implementer\]: Scripted finding — noteapp\.py\n  Fix: Reject every variant/);
+    assert.ok(r.progress.some((l) => l.startsWith("[REPAIR DESIGN] The Planner designs the repair of R-1")));
     p.s.cleanup();
   });
 
@@ -191,7 +200,8 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
       ["60m", "90m", "2h"],
     );
     const lastReview = seq.lastIndexOf("reviewer:review");
-    assert.deepEqual(seq.slice(lastReview, lastReview + 4), ["reviewer:review", "implementer:repair", "tester:testing", "implementer:handover"]);
+    assert.deepEqual(seq.slice(lastReview, lastReview + 5), ["reviewer:review", "planner:context_answer", "implementer:repair", "tester:testing", "implementer:handover"], "R-1 came back, so the final repair is designed first");
+    assert.match(asked[0].question, /Came back after a repair: R-1 \(a repair goes through a Planner repair design first\)/);
     const briefs = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-reviewer-")).sort().map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8"));
     assert.match(briefs[0]!, /Review round 1 of 3/);
     assert.match(briefs[1]!, /re-review/);
@@ -233,6 +243,9 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.equal(r.last.action, "phase_closed");
     const reviews = r.actions.filter((a) => a.action === "run_role" && a.role === "reviewer");
     assert.equal(reviews.length, 3);
+    const seq = r.actions.map((a) => (a.action === "run_role" ? `${a.role}:${a.task}` : a.action === "ask_user" ? `ask:${a.kind}` : a.action));
+    const asked = seq.indexOf("ask:final_review");
+    assert.deepEqual(seq.slice(asked, asked + 3), ["ask:final_review", "planner:context_answer", "implementer:repair"], "the answered final review designs the recurring R-1 first");
     const third = readFileSync(join(p.root, `.looprch/${reviews[2].brief.replace(/^\.looprch\//, "")}`), "utf8");
     assert.match(third, /Review round 3 of 3\./);
     assert.match(third, /This is the final review/);

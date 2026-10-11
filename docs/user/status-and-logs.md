@@ -20,6 +20,8 @@ Lead posts them unchanged.
 | `[IMPLEMENTATION …]`, `[TESTING …]`, `[GATES …]`, `[REVIEW …]`, `[REPAIR …]`, `[HANDOVER …]`, `[CLOSING START]` | each stage starts and completes, with the verdict, findings or failed gates |
 | `[REVIEW COMPLETE]` | the review round (n of N), the decision, the findings by severity and, for re-reviews, how many are `unfixed`, `regression` or `missed`; an approval lists its notes |
 | `[REPAIR COMPLETE]` | after a review: how many findings the Implementer reports as fixed and which are not fixed |
+| `Basis:` (in `[REVIEW COMPLETE]`) | how the findings relate to the plan: against the plan (a todo or decision the code misses), not covered by the plan, defects beyond the plan |
+| `[REPAIR DESIGN]` / `[REPAIR DESIGN COMPLETE]` | review findings came back after a repair; the Planner writes their repair design (an addendum at the end of plan.md) before the next repair |
 | `[REVIEW SKIPPED]` | you chose to hand over after the final review; the final repair goes to handover without another review |
 | `[TASK START]`, `[RETRY]` | a role run starts: run id, role, task, agent/model, mode, attempt, fallback reason; reviews add the round and the time budget |
 | `[ISSUE]` | a run failed, was interrupted or returned an invalid report: reason and what Looprch does next |

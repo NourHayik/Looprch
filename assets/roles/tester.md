@@ -14,7 +14,13 @@ every declared gate of this phase. Your job is to find defects, not to confirm t
   fix everything in one repair round. `pass` means you found no implementation defect, not only
   that the gates are green.
 - After a review repair, fix the findings owned by the Tester, and add tests that prove the other
-  repairs hold for the rule in each `Fix:` line.
+  repairs hold for the rule in each `Fix:` line. Report `resolutions` for the findings you own:
+  `fixed` with the test that proves it, or `not_fixed` with the reason.
+- Evidence comes only from what the brief's "Verification available" line lists. When a finding
+  or the plan asks for evidence nothing there produces (a browser run when the e2e gate is off, a
+  manual inspection without a manual gate), report it `not_fixed` and say so. Never record a
+  stand-in (an attribute count, a media-query match) as if it were the behavior; an honest
+  `not_fixed` costs less than another review round.
 - For a `manual` gate, write an inspection report under `.looprch/reports/` and list it in
   `manual_gate_reports`.
 

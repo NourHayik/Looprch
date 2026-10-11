@@ -264,6 +264,78 @@ describe("lifecycle transition rows", () => {
     p.s.cleanup();
   });
 
+  test("T-review: plan_ref reaches the repair brief, the Basis line and the handover; both roles' resolutions reach the re-review", () => {
+    const p = setupProject();
+    p.setScenario([
+      {
+        role: "reviewer",
+        phase: "P-001",
+        nth: 1,
+        decision: "changes_requested",
+        findings: [
+          { id: "R-1", severity: "high", summary: "Invalid ids pass", files: ["noteapp.py"], fix: "Reject every malformed id", owner: "implementer", plan_ref: "T-1" },
+          { id: "R-2", severity: "medium", summary: "No browser evidence", files: ["test_noteapp.py"], fix: "Record keyboard order", owner: "tester", plan_ref: "R-001.01" },
+        ],
+      },
+      { role: "implementer", phase: "P-001", task: "repair", resolution_status: "fixed" },
+      { role: "tester", phase: "P-001", nth: 2, resolution_status: "not_fixed" },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    assert.ok(r.progress.some((l) => /\nBasis: 1 against the plan, 1 not covered by the plan\.\n/.test(l)), r.progress.join("\n"));
+    assert.match(readFileSync(join(p.root, ".looprch/runs/P-001-implementer-2/brief.md"), "utf8"), /- R-1 \[high, owner implementer, plan T-1\]: Invalid ids pass/);
+    const rereview = readFileSync(join(p.root, ".looprch/runs/P-001-reviewer-2/brief.md"), "utf8");
+    assert.match(rereview, /What the Implementer and the Tester report for these findings \(claims; check the code\):/);
+    assert.match(rereview, /- R-1: the Implementer reported fixed: scripted/);
+    assert.match(rereview, /- R-2: the Tester reported not fixed: scripted/);
+    const accepted = runCli(["log", "--type", "result.accepted", "--json"], { cwd: p.root, env: p.env }).json;
+    assert.deepEqual(accepted.find((e: any) => e.data.task === "review").data.findings.map((f: any) => f.plan_ref), ["T-1", "R-001.01"]);
+    assert.ok(!r.actions.some((a) => a.action === "run_role" && a.task === "context_answer"), "a first repair gets no design");
+    p.s.cleanup();
+  });
+
+  test("T-review: a Tester-owned finding that comes back gets a Planner repair design, then the Tester; the Implementer is skipped", () => {
+    const p = setupProject();
+    const finding = { id: "R-7", severity: "medium", summary: "Concurrency test missing", files: ["test_noteapp.py"], fix: "two-connection test", owner: "tester" };
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested", findings: [finding] },
+      { role: "reviewer", phase: "P-001", nth: 2, decision: "changes_requested", findings: [finding] },
+    ]);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed");
+    const seq = r.actions.filter((a) => a.action === "run_role").map((a) => `${a.role}:${a.task}`);
+    const second = seq.indexOf("reviewer:review", seq.indexOf("reviewer:review") + 1);
+    assert.deepEqual(seq.slice(second, second + 4), ["reviewer:review", "planner:context_answer", "tester:testing", "reviewer:review"]);
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/plan.md"), "utf8"), /## Addendum 1: repair design for R-7\n\n\*\*Why:\*\* these review findings came back after a repair/);
+    const tester = readFileSync(join(p.root, ".looprch/runs/P-001-tester-3/brief.md"), "utf8");
+    assert.match(tester, /The Planner wrote a repair design for R-7 in plan\.md \(Addendum 1, at the end\)/);
+    assert.ok(r.progress.some((l) => l.startsWith("[REPAIR DESIGN] The Planner designs the repair of R-7")));
+    assert.ok(r.progress.some((l) => l.startsWith("[REPAIR DESIGN COMPLETE] The Planner wrote the repair design for R-7")));
+    assert.equal(state(p).current?.context_request ?? null, null);
+    p.s.cleanup();
+  });
+
+  test("T-review: a phase paused at the final review under 0.8.0 (no recurring_findings) still designs the recurring repair, from the journal", () => {
+    const p = setupProject({ config: { "limits.review_rounds": "2" } });
+    p.setScenario([
+      { role: "reviewer", phase: "P-001", nth: 1, decision: "changes_requested" },
+      { role: "reviewer", phase: "P-001", nth: 2, decision: "changes_requested" },
+    ]);
+    const ask = until(p, (x) => x.action === "ask_user" && x.kind === "final_review");
+    assert.equal(ask.kind, "final_review");
+    patchState(p, (s) => {
+      delete s.current.recurring_findings;
+      delete s.current.resolutions;
+    });
+    const r = drive({ root: p.root, env: p.env, scope: "phase", answers: { final_review: "repair_and_review" } });
+    assert.equal(r.last.action, "phase_closed");
+    const seq = r.actions.map((a) => (a.action === "run_role" ? `${a.role}:${a.task}` : a.action === "ask_user" ? `ask:${a.kind}` : a.action));
+    const asked = seq.indexOf("ask:final_review");
+    assert.match(r.actions[asked].question, /Came back after a repair: R-1/);
+    assert.deepEqual(seq.slice(asked, asked + 3), ["ask:final_review", "planner:context_answer", "implementer:repair"]);
+    p.s.cleanup();
+  });
+
   test("T-sessions: each Planner session is one Implementer run with its own checkpoint", () => {
     const p = setupProject();
     p.setScenario([{ role: "planner", phase: "P-001", task: "planning", two_sessions: true }]);

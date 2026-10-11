@@ -39,13 +39,19 @@
         "final_review_pending": { "type": "boolean", "description": "The final allowed review requested changes; a final_review question decides" },
         "reviewed_tree": { "type": ["string", "null"], "description": "Tree of the last review that requested changes" },
         "repair_reports": { "type": "array", "items": { "type": "string" }, "description": "final.md of Implementer repairs since the last review" },
+        "recurring_findings": { "type": "array", "items": { "type": "string" }, "description": "Ids of the last review's findings that the review before it also reported; their repair gets a Planner repair design first" },
+        "resolutions": {
+          "type": "array",
+          "description": "Resolutions the Implementer and the Tester reported since the last review repair started",
+          "items": { "type": "object", "required": ["id", "status", "by"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" }, "by": { "enum": ["implementer", "tester"] } } }
+        },
         "review_notes": { "type": "array", "description": "Findings of an approving review, listed in the handover" },
         "sessions": { "type": ["array", "null"], "items": { "type": "array", "items": { "type": "string" } }, "description": "Implementer sessions of the approved plan: contiguous todo id groups, one Implementer run each" },
         "session_index": { "type": "integer", "minimum": 0, "description": "The session the Implementer works on" },
         "todos_done": { "type": "array", "items": { "type": "string" }, "description": "Todos the Implementer reported done" },
         "followup_sessions": { "type": "array", "items": { "type": "integer" }, "description": "Indexes of follow-up sessions queued for todos a session left open" },
         "debate_final": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Debate items the user decided for the Plan Debater" },
-        "context_request": { "type": ["object", "null"], "description": "The Implementer's blocking question the Planner answers next" },
+        "context_request": { "type": ["object", "null"], "description": "The Implementer's blocking question the Planner answers next; with design (finding ids), the Planner writes their repair design" },
         "snapshots": {
           "type": "object",
           "properties": { "gates": { "type": ["string", "null"] }, "review": { "type": ["string", "null"] }, "handover": { "type": ["string", "null"] } }

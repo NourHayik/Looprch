@@ -48,6 +48,24 @@ Rules that make the plan work for a cheaper model:
 - Keep it proportional: a small phase gets a short plan. A typical phase plan is 10 to 30 KB.
   Length is not quality; every paragraph should remove a decision from the Implementer.
 
+Rules that make the review converge:
+
+- The Reviewer checks everything the phase adds against the requirements, including code a
+  starter kit, generator or template brings in. When a task installs one, list in Decisions every
+  feature it ships (routes, pages, auth features such as email verification, two-factor or
+  passkeys, seeders, factories, example code, CI and lint checks) and decide for each: **keep**
+  (and which requirements apply to it), **adapt** (how), or **remove**. A shipped feature you do
+  not decide is the Implementer's guess and the Reviewer's finding.
+- Plan Tester evidence only for checks that the declared gates, or the e2e gate when it is on,
+  can run; the brief's "Verification available" line lists them. Write a UI rule (keyboard order,
+  direction, contrast, motion) as an assertion a declared gate runs (rendered HTML, Inertia props,
+  a component test), or mark it in Tests as a Reviewer code inspection. Never promise browser or
+  manual checks that no gate runs.
+- A rule that must hold in many places (all visible copy translated, every user-creation path
+  provisions settings, every query scoped to the owner) gets one enforcing check that covers every
+  place: a key-parity test, a scan test over the source tree, a single choke point. A list of
+  examples gets fixed example by example, one review round each.
+
 ## The result block
 
 `plan` holds what Looprch needs to schedule the work:
@@ -92,3 +110,10 @@ plan, the packet and the code: the decision, and exactly what to do. Your report
 plan.md as an addendum, so write it as a short plan section. If the answer needs new work, add it
 as `new_todos` (they join the Implementer's current session). If the sources do not answer it,
 say so and decide the safe behavior; never invent a requirement. Decision: `context_answer`.
+
+When the Delta is a **repair design**, review findings came back after a repair: the earlier fix
+covered the examples, not the rule. For each finding, state the rule for the whole class of
+inputs, the one place that enforces it, every place it applies (search the code), and the test that
+fails without it (a scan or parity test when the rule spans many files). If no declared gate can
+produce the evidence a finding asks for, say so and turn it into a check a gate can run or a
+Reviewer code inspection. Add `new_todos` for work the repair needs.

@@ -133,6 +133,41 @@ describe("briefs", () => {
   test("delta findings show severity, owner and the fix condition", () => {
     const b = assembleBrief(input({ role: "tester", task: "testing", delta: { kind: "repair", text: "Verify:", findings: [{ id: "R-7", severity: "medium", owner: "tester", summary: "missing tests", fix: "two-connection test" }] } }));
     assert.match(b, /- R-7 \[medium, owner tester\]: missing tests\n  Fix: two-connection test/);
+    const ref = assembleBrief(input({ role: "implementer", task: "repair", delta: { kind: "repair", text: "Fix:", findings: [{ id: "R-1", severity: "high", owner: "implementer", plan_ref: "Decision 5", summary: "log mailer offered" }] } }));
+    assert.match(ref, /- R-1 \[high, owner implementer, plan Decision 5\]: log mailer offered/);
+  });
+
+  test("Planner, Debater, Tester and Reviewer briefs state what can produce evidence; the Implementer's does not", () => {
+    const verification = { gates: [{ id: "GATE-core", kind: "test", negative: false }, { id: "GATE-neg", kind: "test", negative: true }, { id: "GATE-ui", kind: "manual", negative: false }], e2e: false };
+    for (const [role, task] of [["planner", "planning"], ["plan_debater", "debate"], ["tester", "testing"], ["reviewer", "review"]] as const) {
+      const b = assembleBrief(input({ role, task, verification }));
+      assert.match(b, /Verification available: declared gates GATE-core \(test\), GATE-neg \(test, negative\); e2e gate off \(nothing runs a browser[^)]*\); manual gates GATE-ui\./, role);
+    }
+    assert.doesNotMatch(assembleBrief(input({ role: "implementer", task: "implementation", verification })), /Verification available/);
+    assert.match(assembleBrief(input({ role: "reviewer", task: "review", verification: { gates: [], e2e: true } })), /declared gates none; e2e gate on \(Looprch runs the e2e gate in a real browser[^)]*\); manual gates none\./);
+  });
+
+  test("a repair design brief asks the Planner for the rule, not an answer to a question", () => {
+    const b = assembleBrief(input({ task: "context_answer", delta: { kind: "repair_design", text: "These review findings came back after a repair.", findings: [{ id: "R-5", severity: "high", summary: "English copy on Arabic screens" }] } }));
+    assert.match(b, /Write the repair design for the review findings in the Delta: they came back after a repair/);
+    assert.doesNotMatch(b, /Answer the Implementer's question/);
+    assert.match(roleText("planner", "context_answer"), /When the Delta is a \*\*repair design\*\*/);
+  });
+
+  test("role prompts carry the convergence rules", () => {
+    const planner = roleText("planner", "planning");
+    assert.match(planner, /starter kit, generator or template/);
+    assert.match(planner, /\*\*keep\*\*[\s\S]*\*\*adapt\*\*[\s\S]*\*\*remove\*\*/);
+    assert.match(planner, /Never promise browser or\s+manual checks that no gate runs/);
+    assert.match(roleText("plan_debater", "debate"), /Adopted code left undecided/);
+    assert.match(roleText("plan_debater", "debate"), /A check no gate can run/);
+    const reviewer = roleText("reviewer", "review");
+    assert.match(reviewer, /Plan conformance first/);
+    assert.match(reviewer, /`plan_ref` is a todo id/);
+    assert.match(reviewer, /do not file a finding for missing browser or\s+manual evidence/);
+    assert.match(roleText("tester", "testing"), /Never record a\s+stand-in/);
+    assert.match(assembleBrief(input({ role: "reviewer", task: "review" })), /"plan_ref":"T-4 \| Decision 5/);
+    assert.match(assembleBrief(input({ role: "tester", task: "testing" })), /"resolutions": \[\{"id":"R-12","status":"fixed\|not_fixed"/);
   });
 
   test("role text picks the task section", () => {

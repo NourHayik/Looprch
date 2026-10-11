@@ -10,13 +10,13 @@ import { assembleBrief, REPORT_FILE_TASKS, writeBrief, type ImplementerInfo, typ
 import { now, nowIso, reviewTimeout } from "./clock.js";
 import { LrError, errorMessage } from "./errors.js";
 import { ensureDir, writeFileAtomic } from "./fsx.js";
-import { appendEvent, type EventInput } from "./journal.js";
+import { appendEvent, readEvents, type EventInput } from "./journal.js";
 import { resolveMode, type ModeReason } from "./mode.js";
 import { projectPaths } from "./paths.js";
 import { preflightChecks } from "./preflight.js";
 import { extractResultBlock, validateResult, type ExpansionRequest, type RoleResult } from "./results.js";
 import { loadRun, relayOutDir, saveRun, type RunRecord, type RunStatus } from "./runs.js";
-import { loadState, markPhaseStart, newCurrent, QUESTION_KINDS, saveState, type AssignmentChange, type Delta, type Finding, type QuestionKind, type Scope, type Stage, type State } from "./state.js";
+import { basisCounts, loadState, markPhaseStart, newCurrent, QUESTION_KINDS, saveState, type AssignmentChange, type Current, type Delta, type Finding, type QuestionKind, type ResolutionRecord, type Scope, type Stage, type State } from "./state.js";
 import { incomingDeferrals, loadPlan, newPlan, normalizeSessions, savePlan, unmappedRequirements, type Plan } from "./plan.js";
 import { adapterFor } from "../agents/index.js";
 import { readRelayResult } from "../delegate/result.js";
@@ -33,7 +33,7 @@ import { commitBaseline, ensureRepo, requireIdentity } from "../git/baseline.js"
 import { closePhase, phaseBranch, startPhaseBranch } from "../git/phase.js";
 import { changedBetween, diffNameStatus, snapshotTree } from "../git/snapshot.js";
 import { loadGates, type GatesOutcome } from "../gates/runner.js";
-import type { E2eOutcome } from "../gates/e2e.js";
+import { e2eSelected, type E2eOutcome } from "../gates/e2e.js";
 
 export interface Engine {
   root: string;
@@ -217,6 +217,7 @@ function step(e: Engine): Action | null {
       if (c.context_request) return issueRun(e, "planner", "context_answer");
       return issueRun(e, "implementer", c.stage === "implementing" ? "implementation" : "repair");
     case "testing":
+      if (c.context_request?.design) return issueRun(e, "planner", "context_answer");
       return issueRun(e, "tester", "testing");
     case "gating":
       return { ...base(e, `Run the ${phase.gates.length} declared gate(s) of ${c.phase}`), action: "run_gates", command: ["looprch", "gates", "run", "--phase", c.phase] };
@@ -577,7 +578,7 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
   const inputs = runInputs(e, role, task, phase);
   const before = snapshotTree(e.root);
   const own = c.deltas[role] ?? null;
-  const delta = task === "implementation" ? sessionDelta(e, own) : (own ?? (task === "review" ? reviewTargetsDelta(e) : null));
+  const delta = task === "implementation" ? sessionDelta(e, own) : task === "review" ? withClaims(c, own ?? reviewTargetsDelta(e)) : own;
   if (delta?.kind === "switch" && c.phase_base) {
     const diffPath = join(projectPaths(e.root).run(runId), "diff.patch");
     writeFileAtomic(diffPath, gitOk(e.root, ["diff", c.phase_base, "HEAD"]));
@@ -607,6 +608,7 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
     userNote: c.user_note,
     resume: !!sessionId,
     gateIds: phase.gates.map((g) => g.id),
+    verification: { gates: phase.gates.map((g) => ({ id: g.id, kind: g.kind, negative: g.negative })), e2e: e2eSelected(e.cfg.integrations.e2e, c.phase) },
     readOnly,
     ...(role === "planner" || role === "plan_debater" ? { implementer: implementerInfo(e) } : {}),
     ...(debateRound ? { debateRound } : {}),
@@ -694,6 +696,13 @@ function sessionDelta(e: Engine, own: Delta | null): Delta {
     : ["Implement the whole plan in plan.md."];
   const text = lines.join("\n");
   return { ...(own ?? {}), kind: own?.kind ?? "notes", text: own?.text ? `${own.text}\n\n${text}` : text };
+}
+
+/** A re-review sees what the Implementer and the Tester reported for each of its findings. */
+function withClaims(c: Current, d: Delta | null): Delta | null {
+  if (!d?.findings?.length || !c.resolutions?.length) return d;
+  const lines = claimLines(c.resolutions, new Set(d.findings.map((f) => f.id)));
+  return lines.length ? { ...d, text: `${d.text}\n\nWhat the Implementer and the Tester report for these findings (claims; check the code):\n${lines.join("\n")}` } : d;
 }
 
 /** A first review also checks the plan debate items the Planner and the Plan Debater did not agree on. */
@@ -1009,11 +1018,12 @@ export function acceptResult(e: Engine, run: RunRecord, finalMessageIn: string, 
       ...(run.usage ? { usage: run.usage } : {}),
       findings_total: reported.length,
       severities: severityCounts(reported),
-      findings: reported.map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), ...("owner" in f && f.owner ? { owner: f.owner } : {}), summary: f.summary.slice(0, 300) })),
+      findings: reported.map((f) => ({ id: f.id, ...(f.severity ? { severity: f.severity } : {}), ...("owner" in f && f.owner ? { owner: f.owner } : {}), ...(typeof f.plan_ref === "string" && f.plan_ref ? { plan_ref: f.plan_ref } : {}), summary: f.summary.slice(0, 300) })),
       ...(run.task === "review" && !run.side ? { review_round: (st.current?.review_changes ?? 0) + 1, review_cap: reviewCap(e) } : {}),
       ...(result.resolutions ? { resolutions: result.resolutions.map((r) => ({ id: r.id, status: r.status })) } : {}),
       ...(result.debate_dispositions ? { dispositions: result.debate_dispositions.map((d) => ({ id: d.id, decision: d.decision })) } : {}),
       ...(result.todos_done ? { todos_done: result.todos_done } : {}),
+      ...(run.task === "context_answer" && st.current?.context_request?.design ? { design: st.current.context_request.design } : {}),
     },
   });
   if (run.side) return { status: "accepted", decision: result.decision, artifact: writeSideOutput(e, run, artifact, result), errors: [] };
@@ -1098,6 +1108,10 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   const finalRepair = reviewsExhausted(e);
   const mine = findings.filter((f) => f.owner !== "tester");
   const theirs = findings.filter((f) => f.owner === "tester");
+  const recurringIds = recurringFindings(e);
+  const recurring = findings.filter((f) => recurringIds.includes(f.id));
+  const earlierClaims = c.resolutions ?? [];
+  c.resolutions = [];
   const head = finalRepair ? `Final repair round ${c.round} (the review requested changes; no further review follows)` : `Repair round ${c.round} (the review requested changes)`;
   if (mine.length)
     c.deltas.implementer = {
@@ -1110,18 +1124,66 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   c.deltas.tester = { kind: "repair", text: `Round ${c.round}: review findings. Fix the findings owned by the Tester, and add tests that prove the other repairs (each one must fail without the fix).`, findings, paths };
   if (finalRepair) delete c.deltas.reviewer;
   else c.deltas.reviewer = { kind: "rereview", text: "Your previous review requested the changes below. Check each one against the current code, report the ones that still hold (keep their ids) and anything new, and check the repair diff for regressions.", findings, paths };
+  if (recurring.length) startRepairDesign(e, recurring, earlierClaims, paths);
   transition(e, mine.length ? "repairing" : "testing");
+}
+
+/** State written before 0.8.1 has no recurring_findings; the journal still holds the finding ids of every review. */
+function recurringFindings(e: Engine): string[] {
+  const c = cur(e);
+  if (c.recurring_findings) return c.recurring_findings;
+  const reviews = readEvents(e.root, { phase: c.phase, type: "result.accepted" }).events.filter((x) => x.data.task === "review" && x.data.decision === "changes_requested");
+  const previous = reviews.at(-2)?.data.findings;
+  const earlier = new Set(Array.isArray(previous) ? previous.map((f: { id?: unknown }) => String(f.id)) : []);
+  c.recurring_findings = c.review_findings.filter((f) => earlier.has(f.id)).map((f) => f.id);
+  return c.recurring_findings;
+}
+
+function recordResolutions(c: Current, r: RoleResult, by: ResolutionRecord["by"]): void {
+  if (!r.resolutions?.length) return;
+  c.resolutions = [...(c.resolutions ?? []), ...r.resolutions.map((x) => ({ id: x.id, status: x.status, by, ...(typeof x.note === "string" && x.note.trim() ? { note: x.note.trim().slice(0, 400) } : {}) }))];
+}
+
+function claimLines(claims: ResolutionRecord[], ids: Set<string>): string[] {
+  return claims.filter((x) => ids.has(x.id)).map((x) => `- ${x.id}: the ${x.by === "implementer" ? "Implementer" : "Tester"} reported ${x.status === "fixed" ? "fixed" : "not fixed"}${x.note ? `: ${x.note}` : ""}`);
+}
+
+/**
+ * Review findings that came back after a repair go to the Planner first: the cheaper roles fixed
+ * the examples, so the Planner writes the rule for the whole class, where it is enforced and the
+ * test that fails without it. Its answer is appended to plan.md like a context answer.
+ */
+function startRepairDesign(e: Engine, recurring: Finding[], claims: ResolutionRecord[], paths: string[]): void {
+  const c = cur(e);
+  const ids = recurring.map((f) => f.id);
+  const claimed = claimLines(claims, new Set(ids));
+  c.context_request = { question: `Repair design for ${ids.join(", ")}: these review findings came back after a repair.`, reason: "the earlier repair fixed the examples the Reviewer named, not the rule", design: ids };
+  c.deltas.planner = {
+    kind: "repair_design",
+    text: [
+      "These review findings came back after a repair: the repair fixed the examples the Reviewer named, not the rule. Write the repair design the Implementer and the Tester follow next (Looprch appends it to plan.md as an addendum).",
+      "For each finding: the rule for the whole class of inputs; the one place that enforces it; every place it applies (search the code, not only the files listed); and the test that fails without it (a scan or parity test when the rule spans many files). If no declared gate can produce the evidence a finding asks for, say so and turn it into a check a gate runs, or a Reviewer code inspection. Add \"new_todos\" for work the repair needs.",
+      ...(claimed.length ? ["", "What the Implementer and the Tester reported for them in the last repair:", ...claimed] : []),
+    ].join("\n"),
+    findings: recurring,
+    paths: [...paths, ...existingInputs(e, [["test-report.md", "latest test report"]]).map((x) => x.path)],
+  };
+  ev(e, { type: "repair.design", role: "planner", data: { findings: ids } });
 }
 
 function finalReviewQuestion(e: Engine): Action {
   const c = cur(e);
   const qid = `final_review-${c.phase}-${c.review_changes ?? 0}`;
   const serious = c.review_findings.filter((f) => f.severity === "high" || f.severity === "critical").length;
+  const basis = basisCounts(c.review_findings);
+  const basisText = basis.plan + basis.not_in_plan + basis.defect ? ` Against the plan: ${basis.plan}; not covered by the plan: ${basis.not_in_plan}; beyond the plan: ${basis.defect}.` : "";
+  const recurring = recurringFindings(e);
+  const recurringText = recurring.length ? ` Came back after a repair: ${recurring.join(", ")} (a repair goes through a Planner repair design first).` : "";
   return ask(
     e,
     "final_review",
     qid,
-    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s), ${serious} high or critical (see .looprch/phases/${c.phase}/review.md). How should Looprch continue?`,
+    `The final review (${c.review_changes ?? 0} of ${reviewCap(e)}) of ${c.phase} still requests changes: ${c.review_findings.length} finding(s), ${serious} high or critical (see .looprch/phases/${c.phase}/review.md).${basisText}${recurringText} How should Looprch continue?`,
     [
       { id: "repair_and_review", label: "Repair, then run one more review" },
       { id: "repair_and_handover", label: "Repair, then hand over without another review (findings listed in handover.md)" },
@@ -1349,7 +1411,9 @@ function acceptContextAnswer(e: Engine, r: RoleResult, artifact: string): string
   const planMd = phaseFile(e, "plan.md");
   const old = existsSync(planMd) ? readFileSync(planMd, "utf8").trim() : "";
   const question = c.context_request?.question ?? "";
-  const path = writeArtifact(e, "plan.md", `${old}\n\n## Addendum ${n}: answer to the Implementer\n\n**Question:** ${question}\n\n${artifact.trim()}`);
+  const design = c.context_request?.design ?? null;
+  const heading = design ? `## Addendum ${n}: repair design for ${design.join(", ")}\n\n**Why:** these review findings came back after a repair; this design covers the whole rule, not the examples.` : `## Addendum ${n}: answer to the Implementer\n\n**Question:** ${question}`;
+  const path = writeArtifact(e, "plan.md", `${old}\n\n${heading}\n\n${artifact.trim()}`);
   c.addenda.push(`Addendum ${n}`);
   const added: string[] = [];
   const plan = loadPlan(e.root, c.phase);
@@ -1361,6 +1425,17 @@ function acceptContextAnswer(e: Engine, r: RoleResult, artifact: string): string
       added.push(...fresh.map((t) => t.id));
       if (c.stage === "implementing" && c.sessions?.length) c.sessions[c.session_index ?? 0]!.push(...added);
     }
+  }
+  if (design) {
+    const note = `The Planner wrote a repair design for ${design.join(", ")} in plan.md (Addendum ${n}, at the end): these findings came back after the last repair. Follow the design for the whole rule, not only the cited examples.`;
+    const todos = added.length ? ` It added ${added.join(", ")}; do ${added.length > 1 ? "them" : "it"} in this run.` : "";
+    for (const role of ["implementer", "tester"] as const) {
+      const d = c.deltas[role];
+      if (d) c.deltas[role] = { ...d, text: `${note}${role === "implementer" ? todos : ""}\n\n${d.text}`, paths: [...(d.paths ?? []), rel(e, planMd)] };
+    }
+    c.context_request = null;
+    delete c.deltas.planner;
+    return path;
   }
   const prior = c.deltas.implementer;
   const answered = `The Planner answered your question in plan.md (Addendum ${n}, at the end).${added.length ? ` It added ${added.join(", ")}; do ${added.length > 1 ? "them" : "it"} in this run too.` : ""} Continue.`;
@@ -1442,6 +1517,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         finishSession(e, run, r);
         return null;
       }
+      recordResolutions(c, r, "implementer");
       c.repair_reports = [...(c.repair_reports ?? []), rel(e, join(projectPaths(e.root).run(run.run_id), "final.md"))];
       e.st.pending_checkpoint = { label: `repair ${c.round}` };
       transition(e, "testing");
@@ -1452,13 +1528,14 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       c.tester_verdict = r.decision === "pass" ? "pass" : "fail";
       c.tester_failures = (r.failures ?? []).map((f) => ({ id: f.id, summary: f.summary, gate_id: f.gate_id, files: f.files }));
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
+      recordResolutions(c, r, "tester");
       transition(e, "gating");
       return path;
     }
     case "review": {
       const path = writeArtifact(e, "review.md", artifact);
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
-      const findings: Finding[] = (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary, ...(f.files?.length ? { files: f.files } : {}), ...(f.fix ? { fix: f.fix } : {}), ...(f.owner ? { owner: f.owner } : {}) }));
+      const findings: Finding[] = (r.findings ?? []).map((f) => ({ id: f.id, severity: f.severity, summary: f.summary, ...(f.files?.length ? { files: f.files } : {}), ...(f.fix ? { fix: f.fix } : {}), ...(f.owner ? { owner: f.owner } : {}), ...(typeof f.plan_ref === "string" && f.plan_ref.trim() ? { plan_ref: f.plan_ref.trim() } : {}) }));
       c.repair_reports = [];
       if (r.decision === "approve") {
         c.snapshots.review = c.snapshots.gates;
@@ -1467,6 +1544,8 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
         if (findings.length) c.deltas.implementer = { kind: "notes", text: "The Reviewer approved with the notes below; they are not repaired. List each one in Limitations.", findings };
         transition(e, "handover");
       } else {
+        const earlier = new Set(c.review_findings.map((f) => f.id));
+        c.recurring_findings = findings.filter((f) => earlier.has(f.id)).map((f) => f.id);
         c.review_findings = findings;
         c.review_changes = (c.review_changes ?? 0) + 1;
         c.test_repairs = 0;
@@ -1493,7 +1572,7 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
 // handover
 
 function findingLines(findings: Finding[]): string[] {
-  return findings.map((f) => `- ${f.id}${f.severity ? ` [${f.severity}]` : ""}: ${f.summary}${f.files?.length ? ` (${f.files.join(", ")})` : ""}`);
+  return findings.map((f) => `- ${f.id}${f.severity ? ` [${f.severity}]` : ""}${f.plan_ref ? ` (plan: ${f.plan_ref})` : ""}: ${f.summary}${f.files?.length ? ` (${f.files.join(", ")})` : ""}`);
 }
 
 function unreviewedSection(e: Engine, findings: Finding[]): string {

@@ -136,11 +136,26 @@ second is a safety net, and a third is for exceptional cases.
   integration, edge cases and error handling, security, performance, maintainability and tests.
   It also gets the plan debate items that stayed contested.
 - **Every finding is actionable.** It has a severity, the files, a `fix` (the condition the repair
-  must meet, for all inputs, not only the example) and an `owner`: the Implementer for
-  application code, the Tester for test code.
+  must meet, for all inputs, not only the example), an `owner` (the Implementer for application
+  code, the Tester for test code) and a `plan_ref`: the todo or decision the code misses, a
+  requirement the plan does not cover, or `defect`. The `[REVIEW COMPLETE]` line counts them
+  ("Basis: 4 against the plan, 6 not covered by the plan, 2 defects beyond the plan"), so you can
+  see whether the Implementer missed the plan or the plan missed something.
 - **Repairs go straight to the Implementer.** It fixes the findings it owns (optionally reporting
-  `fixed` or `not_fixed` per finding); the Tester fixes the test findings and adds tests that
-  prove the repairs; the gates run again; then the re-review.
+  `fixed` or `not_fixed` per finding); the Tester fixes the test findings, reports `fixed` or
+  `not_fixed` for each, and adds tests that prove the repairs; the gates run again; then the
+  re-review, which sees both roles' reports as claims to check.
+- **A finding that comes back gets a repair design.** If the re-review reports a finding id again,
+  the cheaper roles fixed the examples, not the rule. Before the next repair the Planner writes a
+  repair design (`[REPAIR DESIGN]`): the rule for the whole class, where it is enforced and the
+  test that fails without it, appended to plan.md as an addendum the Implementer and the Tester
+  follow.
+- **Evidence comes only from what can run.** Every brief of the Planner, the Plan Debater, the
+  Tester and the Reviewer lists the declared gates and whether the e2e gate is on. Without the e2e
+  gate nothing runs a browser, so the plan turns UI rules into assertions a gate runs, the Tester
+  reports `not_fixed` instead of recording a stand-in, and the Reviewer inspects the code instead
+  of asking for browser evidence. Turn on the e2e gate (`looprch e2e init`) when a phase needs
+  real browser checks.
 - **Round 2 is the safety net.** The re-review gets the earlier findings, the repair reports and
   the repair diff. It reports what still holds, any regression and anything round 1 missed.
 - **Each round gets more time.** Review round n runs with the Reviewer timeout × (1 + 0.5 ×

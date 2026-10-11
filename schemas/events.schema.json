@@ -19,7 +19,7 @@
         "question.asked", "question.answered", "paused", "resumed", "blocked",
         "todo.ticked", "review.skipped", "handover.accepted", "phase.merged", "phase.closed", "project.done",
         "spec.changed", "protocol.mismatch", "lock.stale_recovered", "warning",
-        "plan.accepted", "work.done", "debate.round", "debate.closed"
+        "plan.accepted", "work.done", "debate.round", "debate.closed", "repair.design"
       ]
     },
     "phase": { "type": ["string", "null"] },

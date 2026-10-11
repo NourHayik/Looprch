@@ -36,6 +36,8 @@ export interface ResultFinding {
   /** Reviewer: the condition a repair must meet. */
   fix?: string;
   owner?: FindingOwner;
+  /** Reviewer: the plan item (`T-4`, `Decision 5`), the requirement the plan does not cover, or `defect`. */
+  plan_ref?: string;
 }
 
 export interface Resolution {
@@ -165,6 +167,7 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       checkList(errors, raw, "tests_written", strings);
       checkList(errors, raw, "failures", (x) => (isObject(x) && isNonEmptyString(x.id) && isNonEmptyString(x.summary) ? null : "needs id and summary"));
       checkList(errors, raw, "manual_gate_reports", gateReport);
+      checkList(errors, raw, "resolutions", resolution);
       break;
     case "reviewer":
       checkList(errors, raw, "findings", finding);

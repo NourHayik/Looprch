@@ -137,6 +137,13 @@ describe("result blocks", () => {
     assert.match(errs(validateResult("reviewer", { role: "reviewer", decision: "approve", manual_gate_reports: [".looprch/reports/t.json"] })), /needs gate_id and path/);
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "approve", contract_review: [{ id: "O-1", status: "maybe" }], prior: "anything" }).ok, true, "fields of older protocols are ignored");
   });
+  test("plan_ref on review findings and Tester resolutions are optional; a bad resolution status is named", () => {
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", summary: "x", plan_ref: "T-4" }, { id: "R-2", summary: "y", plan_ref: "R-FOUND-03" }, { id: "R-3", summary: "z", plan_ref: "defect" }] }).ok, true);
+    assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", summary: "x", plan_ref: 4 }] }).ok, true, "a malformed plan_ref costs no re-ask; Looprch drops it");
+    assert.equal(validateResult("tester", { role: "tester", decision: "pass", resolutions: [{ id: "R-12", status: "fixed", note: "two-connection test" }, { id: "R-13", status: "not_fixed", note: "the e2e gate is off" }] }).ok, true);
+    assert.equal(validateResult("tester", { role: "tester", decision: "pass" }).ok, true);
+    assert.match(errs(validateResult("tester", { role: "tester", decision: "pass", resolutions: [{ id: "R-12", status: "proxy" }] })), /status must be one of fixed, not_fixed/);
+  });
   test("planner results need a plan with todos; sessions, requirements and deferrals are shaped", () => {
     const plan = { todos: [{ id: "T-1", title: "Add the ids module", section: "1. Data" }, { id: "T-2", title: "Wire the CLI" }], sessions: [["T-1", "T-2"]], requirements: { "R-ID": ["T-1"] }, deferrals: [{ id: "X-1", what: "auth", to_phase: "P-002" }] };
     assert.equal(validateResult("planner", { role: "planner", decision: "plan_ready", plan }).ok, true);

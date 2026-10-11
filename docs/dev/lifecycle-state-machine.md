@@ -66,13 +66,35 @@ conceded, contested or decided by the user.
 | synthesizing | same Planner session (`synthesis`, or `revise` after a user revision): the full plan and `debate_dispositions` (`accept` or `reject` with a note) → debating (rebuttal), or straight to plan_approval when only low items are open |
 | plan_approval | if approvals apply: `ask_user approve_plan` (approve / revise). Then the sessions are normalized (unknown ids dropped, unlisted todos appended to the last session; notes go to the journal as warnings), checkpoint "plan approved" → implementing |
 | implementing | a blocking question open (`context_request`) → Planner `context_answer`: its report is appended to plan.md as `## Addendum N`, `new_todos` join plan.json and the current session → the same Implementer session continues. Else Implementer `implementation` with the delta "Session k of n" and its todos. `implemented` → `todos_done` recorded (no `todos_done` field means the whole session); todos the session left open are queued once as a follow-up session right after it (a follow-up gets no follow-up); `work.done`; checkpoint "implementation" (or "implementation session k"); next session, or testing after the last one |
-| repairing | Implementer `repair` with the findings in its delta (a blocking question works as in implementing). `implemented` → `repair_reports`, checkpoint "repair N" → testing |
-| testing | Tester; verdict, failures and manual reports stored → gating |
+| repairing | a repair design open (`context_request.design`) → Planner `context_answer` first (see below). Implementer `repair` with the findings in its delta (a blocking question works as in implementing). `implemented` → `resolutions` and `repair_reports` stored, checkpoint "repair N" → testing |
+| testing | a repair design open for Tester-only findings → Planner `context_answer` first. Tester; verdict, failures, manual reports and `resolutions` stored → gating |
 | gating | `run_gates`. The latest runs are reused when every gate already passed on this exact tree with unchanged evidence (`gates.run` `cached`). When the SEV3 gates pass, the optional e2e gate `LR-E2E` runs (enabled, configured, phase selected, tree not already passed; its environment includes `.env.e2e`): exit 1 or a missing report is a failing gate (normal repair), exit 2 → `blocked e2e_config`, exit 3 or timeout → `blocked e2e_environment`, missing binary → `blocked e2e_missing`, other → `blocked e2e_runner`. All gates pass and verdict pass → reviewing (post-run snapshot stored), or handover after a user-chosen unreviewed final repair (`review.skipped`, open findings go into handover.md); else repair (test, `test_repairs`+1) or `blocked repair_limit` when `test_repairs` reached `limits.repair_rounds` + extra rounds (both reset when a review requests changes, so each review cycle has its own budget; `looprch resume` grants one round) |
 | reviewing | `final_review_pending` → `ask_user final_review`. Snapshot must equal the gates snapshot (else gating). The brief carries "Review round n of N", the time budget, the diff commands (phase base → gates tree; re-reviews also `reviewed_tree` → gates tree) and `changed-files.txt`; the first review also gets the contested debate items, re-reviews the earlier findings. A run's timeout is the Reviewer timeout × (1 + 0.5 × (n − 1)). `approve` → handover (findings become `review_notes`, listed in handover.md). `changes_requested` → `review_changes`+1, `reviewed_tree` stored → repair: Implementer findings go to the Implementer, `owner: tester` findings to the Tester after it (only Tester findings → straight to testing). If that was the final allowed review (`limits.review_rounds` + `extra_reviews`), `final_review_pending` instead |
 | final_review answer | `repair_and_review`: `extra_reviews`+1, repair, then one more review. `repair_and_handover`: final repair, tests and gates, then handover without a review. `pause`: paused; asked again after resume |
 | handover | snapshot changed → gating. Looprch appends the file lists from `git diff --name-status` since the phase base, the contributors, the gate runs, the plan's todos and deferrals, and the plan debate → closing |
 | closing | ticks todo.md and verifies; merge approval (`ask_user approve_merge`, hold → paused); final commit, `merge --no-ff`, tag, delete branch → `phase_closed` |
+
+### Repair design for findings that come back
+
+When a review requests changes, Looprch stores `recurring_findings`: the ids the previous review
+also reported. The Reviewer keeps an id while the rule still breaks, so a recurring id means the
+repair fixed the examples, not the rule. A review repair (also after a `final_review` answer) with
+recurring findings emits `repair.design` and sets `context_request.design`; the Planner runs
+`context_answer` with a `repair_design` delta: the recurring findings with their `Fix:`, and what
+the Implementer and the Tester reported for them (`resolutions`). Its report is appended to
+plan.md as `## Addendum N: repair design for R-…`, `new_todos` join plan.json, and the Implementer
+and Tester deltas point at the addendum. Then the repair continues as usual: the Implementer (or,
+for Tester-only findings, the Tester) and the re-review. A first repair has no design. State
+written before 0.8.1 has no `recurring_findings`; Looprch compares the finding ids of the last two
+`changes_requested` reviews in the journal instead.
+
+The `resolutions` the Implementer and the Tester report after the review repair starts appear in
+the re-review delta as claims the Reviewer checks. Reviewer findings may carry `plan_ref`; the
+`[REVIEW COMPLETE]` line counts them (against the plan, not covered by the plan, beyond the plan),
+and the repair deltas, the `final_review` question and handover.md show them.
+
+The Planner, Plan Debater, Tester and Reviewer briefs carry a "Verification available" line: the
+declared gates with their kinds, whether the e2e gate runs for this phase, and the manual gates.
 
 ## Cross-cutting on every run
 

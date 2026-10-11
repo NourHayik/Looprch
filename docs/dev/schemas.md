@@ -56,8 +56,8 @@ fields: `role`, `decision`, optional `run_id`. Decisions per role:
 | planner | `plan_ready`, `plan_final`, `needs_expansion`, `context_answer` | `plan{todos[{id, title, section}], sessions[[ids]], requirements{id: [ids]}, deferrals[{id, what, to_phase, interim, requirements[]}]}` (required with `plan_ready`/`plan_final`); synthesis and revise: `debate_dispositions[{id, decision: accept or reject, note}]`; context answer: `new_todos[]`; `expansion_requests[]` |
 | plan_debater | `findings`, `no_findings`, `agree`, `needs_expansion` | `findings[{id, severity, summary, section, suggestion}]`; rebuttal: `verdicts[{id, verdict: resolved, conceded or upheld, note}]` |
 | implementer | `implemented`, `needs_context`, `handover_ready` | `todos_done[]`, `files_changed[]`, `notes`; repair: optional `resolutions[{id, status: fixed or not_fixed, note}]`; `context_request{question, reason}` with `needs_context`; handover: `limitations[]` |
-| tester | `pass`, `fail` | `tests_written[]`, `failures[{id, gate_id, summary, files[]}]`, `manual_gate_reports[{gate_id, path}]` |
-| reviewer | `approve`, `changes_requested` | `findings[{id, severity, summary, files[], fix, owner: implementer or tester}]` (non-empty with `changes_requested`), `manual_gate_reports[{gate_id, path}]` |
+| tester | `pass`, `fail` | `tests_written[]`, `failures[{id, gate_id, summary, files[]}]`, `manual_gate_reports[{gate_id, path}]`; after a review repair: optional `resolutions[{id, status: fixed or not_fixed, note}]` for the findings it owns |
+| reviewer | `approve`, `changes_requested` | `findings[{id, severity, summary, files[], fix, owner: implementer or tester, plan_ref}]` (non-empty with `changes_requested`; `plan_ref` optional: `T-n` or `Decision n` when the code misses the plan, a requirement id the plan does not cover, or `defect`; a non-string is dropped), `manual_gate_reports[{gate_id, path}]` |
 | worker | `answered` | `evidence[{path, lines, note}]` |
 
 Expansion request: `{kind: "document"|"phase", id, question, reason}`; the ids must be SEV3

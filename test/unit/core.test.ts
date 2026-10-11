@@ -10,7 +10,7 @@ import { acquireLock, releaseLock, readLock, withLock } from "../../src/core/loc
 import { appendEvent, lastSeq, progressStart, readEvents, renderProgress, takeProgress, EVENT_TYPES, type EventType, type LrEvent } from "../../src/core/journal.js";
 import { defaultConfig, validateConfig, type AgentCaps, type AgentId, type Config, loadConfig, saveConfig } from "../../src/core/config.js";
 import { migrate } from "../../src/core/migrations.js";
-import { initialState, loadState, saveState } from "../../src/core/state.js";
+import { basisCounts, initialState, loadState, planBasis, saveState } from "../../src/core/state.js";
 import { projectPaths } from "../../src/core/paths.js";
 import { LrError } from "../../src/core/errors.js";
 import { formatDuration, reviewTimeout } from "../../src/core/clock.js";
@@ -169,6 +169,20 @@ describe("core/journal progress lines", () => {
       debate({ decision: "findings", findings_total: 5, severities: { high: 1, medium: 4 }, findings: [{ id: "D-1", severity: "high", summary: "Missing rollback." }, { id: "D-2", severity: "medium", summary: "Name the gate." }] }),
       "[DEBATE COMPLETE]\nResult: Changes recommended (5 findings: 1 high, 4 medium).\nSummary: D-1 (high): Missing rollback.; D-2 (medium): Name the gate.; 3 more",
     );
+  });
+
+  test("review basis, repair design and design answer lines", () => {
+    const review = renderProgress([
+      ev("result.accepted", {
+        role: "reviewer",
+        agent: "codex",
+        data: { task: "review", decision: "changes_requested", review_round: 2, review_cap: 3, findings_total: 4, severities: { high: 2, medium: 2 }, findings: [{ id: "R-1", plan_ref: "T-1", summary: "a" }, { id: "R-2", plan_ref: "Decision 5", summary: "b" }, { id: "R-3", plan_ref: "R-FOUND-03", summary: "c" }, { id: "R-4", plan_ref: "defect", summary: "d" }] },
+      }),
+    ])[0]!;
+    assert.match(review, /\nBasis: 2 against the plan, 1 not covered by the plan, 1 defect beyond the plan\.\nFindings: /);
+    assert.doesNotMatch(renderProgress([ev("result.accepted", { role: "reviewer", agent: "codex", data: { task: "review", decision: "changes_requested", findings_total: 1, findings: [{ id: "R-1", summary: "a" }] } })])[0]!, /Basis:/);
+    assert.equal(renderProgress([ev("repair.design", { role: "planner", data: { findings: ["R-5", "R-12"] } })])[0], "[REPAIR DESIGN] The Planner designs the repair of R-5, R-12 before the next repair: they came back after the last one.");
+    assert.match(renderProgress([ev("result.accepted", { role: "planner", agent: "codex", data: { task: "context_answer", decision: "context_answer", design: ["R-5"] } })])[0]!, /^\[REPAIR DESIGN COMPLETE\] The Planner wrote the repair design for R-5/);
   });
 
   test("failures name the follow-up action", () => {
@@ -353,5 +367,10 @@ describe("core/state", () => {
   test("schema required keys match the initial state", () => {
     const schema = JSON.parse(readFileSync(join(REPO, "schemas/state.schema.json"), "utf8"));
     assert.deepEqual([...schema.required].sort(), Object.keys(initialState()).sort());
+  });
+
+  test("plan_ref basis: a todo or decision is the plan, defect is beyond it, anything else the plan does not cover", () => {
+    assert.deepEqual(["T-4", "Decision 5", "decision 2", "R-FOUND-03", "G-001", "defect", "Defect", "", " ", undefined].map(planBasis), ["plan", "plan", "plan", "not_in_plan", "not_in_plan", "defect", "defect", null, null, null]);
+    assert.deepEqual(basisCounts([{ plan_ref: "T-1" }, { plan_ref: "R-1" }, {}, { plan_ref: "defect" }]), { plan: 1, not_in_plan: 1, defect: 1 });
   });
 });

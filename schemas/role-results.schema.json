@@ -64,7 +64,12 @@
         "decision": { "enum": ["pass", "fail"] },
         "tests_written": { "$ref": "#/$defs/paths" },
         "failures": { "type": "array", "items": { "type": "object", "required": ["id", "summary"], "properties": { "id": { "type": "string" }, "gate_id": { "type": "string" }, "summary": { "type": "string" }, "files": { "$ref": "#/$defs/paths" } } } },
-        "manual_gate_reports": { "$ref": "#/$defs/reports" }
+        "manual_gate_reports": { "$ref": "#/$defs/reports" },
+        "resolutions": {
+          "description": "After a review repair, optional: fixed or not_fixed per finding owned by the Tester",
+          "type": "array",
+          "items": { "type": "object", "required": ["id", "status"], "properties": { "id": { "type": "string" }, "status": { "enum": ["fixed", "not_fixed"] }, "note": { "type": "string" } } }
+        }
       }
     },
     {
@@ -115,7 +120,8 @@
         "section": { "type": "string", "description": "Plan Debater: the plan section" },
         "suggestion": { "type": "string", "description": "Plan Debater: the change that closes it" },
         "fix": { "type": "string", "description": "Reviewer: the condition the repair must meet" },
-        "owner": { "enum": ["implementer", "tester"], "description": "Reviewer: the role that fixes it (default implementer)" }
+        "owner": { "enum": ["implementer", "tester"], "description": "Reviewer: the role that fixes it (default implementer)" },
+        "plan_ref": { "type": "string", "description": "Reviewer, optional: the plan item the code is measured against (T-4, Decision 5), a requirement id the plan does not cover, or defect" }
       }
     },
     "expansion": {

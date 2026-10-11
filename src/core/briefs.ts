@@ -53,6 +53,13 @@ export interface BriefInput {
   debateRound?: { n: number; of: number };
   /** Planner and Plan Debater runs: the Implementer the plan is for. */
   implementer?: ImplementerInfo | null;
+  /** What can produce evidence in this phase: the declared gates and whether the e2e gate runs. */
+  verification?: Verification;
+}
+
+export interface Verification {
+  gates: { id: string; kind: string; negative: boolean }[];
+  e2e: boolean;
 }
 
 const ROLE_FILE: Record<Role, string> = {
@@ -99,9 +106,9 @@ function fields(role: Role, task: Task): string {
       if (task === "repair") return `"files_changed": ["…"], "resolutions": [{"id":"R-1","status":"fixed|not_fixed","note":"…"}] (optional, one per finding), "notes": ["…"]; ${CONTEXT_REQUEST}`;
       return `"todos_done": ["T-1"] (the todos of your session you finished), "files_changed": ["…"], "notes": ["choices you made where the plan left a small gap"]; ${CONTEXT_REQUEST}`;
     case "tester":
-      return '"tests_written": ["…"], "failures": [{"id":"F-1","gate_id":"…","summary":"…","files":["…"]}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"tests_written": ["…"], "failures": [{"id":"F-1","gate_id":"…","summary":"…","files":["…"]}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}], "resolutions": [{"id":"R-12","status":"fixed|not_fixed","note":"the test that proves it, or why no declared gate can"}] (after a review repair: one per finding owned by the Tester)';
     case "reviewer":
-      return '"findings": [{"id":"R-1","severity":"low|medium|high|critical","summary":"the broken rule and where it breaks","files":["…"],"fix":"the condition the repair must meet","owner":"implementer|tester"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
+      return '"findings": [{"id":"R-1","severity":"low|medium|high|critical","summary":"the broken rule and where it breaks","files":["…"],"fix":"the condition the repair must meet","owner":"implementer|tester","plan_ref":"T-4 | Decision 5 | a requirement id the plan does not cover | defect"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "worker":
       return '"evidence": [{"path":"…","lines":"10-20","note":"…"}]';
     default: {
@@ -126,6 +133,19 @@ function implementerLine(info: ImplementerInfo | null | undefined): string {
   return `The Implementer of this phase is ${info.agent}/${info.model}, with ${budget}.`;
 }
 
+const VERIFYING_ROLES = new Set<Role>(["planner", "plan_debater", "tester", "reviewer"]);
+
+/** The checks that can produce evidence in this phase; nothing else counts as Tester evidence. */
+export function verificationLine(v: Verification): string {
+  const gates = v.gates.filter((g) => g.kind !== "manual");
+  const manual = v.gates.filter((g) => g.kind === "manual");
+  const gateList = gates.length ? gates.map((g) => `${g.id} (${g.kind}${g.negative ? ", negative" : ""})`).join(", ") : "none";
+  const e2e = v.e2e
+    ? "on (Looprch runs the e2e gate in a real browser after the declared gates pass)"
+    : "off (nothing runs a browser: browser behavior needs an assertion a declared gate runs, or a Reviewer code inspection)";
+  return `Verification available: declared gates ${gateList}; e2e gate ${e2e}; manual gates ${manual.length ? manual.map((g) => g.id).join(", ") : "none"}.`;
+}
+
 function taskText(input: BriefInput): string {
   const lines: string[] = [];
   const round = input.debateRound ? ` (debate round ${input.debateRound.n} of ${input.debateRound.of})` : "";
@@ -143,7 +163,11 @@ function taskText(input: BriefInput): string {
       lines.push("Revise the plan as the user asked (see Delta).", implementerLine(input.implementer));
       break;
     case "context_answer":
-      lines.push("Answer the Implementer's question in the Delta from the plan, the packet and the code. Looprch appends your answer to plan.md as an addendum.");
+      lines.push(
+        input.delta?.kind === "repair_design"
+          ? "Write the repair design for the review findings in the Delta: they came back after a repair. Read the code they concern. Looprch appends your design to plan.md as an addendum; the Implementer and the Tester follow it next."
+          : "Answer the Implementer's question in the Delta from the plan, the packet and the code. Looprch appends your answer to plan.md as an addendum.",
+      );
       break;
     case "debate":
       lines.push(`Challenge the plan against the packet${round}. The Planner answers every finding and you judge the answers in the next round.`, implementerLine(input.implementer));
@@ -186,6 +210,7 @@ function taskText(input: BriefInput): string {
       throw new Error(`unhandled task ${String(never)}`);
     }
   }
+  if (input.verification && VERIFYING_ROLES.has(input.role)) lines.push("", verificationLine(input.verification));
   return lines.join("\n");
 }
 
@@ -195,7 +220,7 @@ function deltaText(d: Delta | null, note: string | null): string {
   if (d) {
     lines.push(d.text);
     for (const f of d.findings ?? []) {
-      const tags = [f.severity, f.owner ? `owner ${f.owner}` : null].filter(Boolean).join(", ");
+      const tags = [f.severity, f.owner ? `owner ${f.owner}` : null, f.plan_ref ? `plan ${f.plan_ref}` : null].filter(Boolean).join(", ");
       lines.push(`- ${f.id}${tags ? ` [${tags}]` : ""}${f.gate_id ? ` (${f.gate_id})` : ""}: ${f.summary}${f.files?.length ? ` — ${f.files.join(", ")}` : ""}`);
       if (f.fix) lines.push(`  Fix: ${f.fix}`);
     }

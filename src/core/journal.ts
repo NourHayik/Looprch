@@ -4,7 +4,7 @@ import { nowIso } from "./clock.js";
 import { projectPaths } from "./paths.js";
 import type { Task } from "./briefs.js";
 import type { ModeReason } from "./mode.js";
-import type { QuestionKind, Stage } from "./state.js";
+import { basisCounts, type QuestionKind, type Stage } from "./state.js";
 
 export const EVENT_TYPES = [
   "init.discovered",
@@ -52,6 +52,7 @@ export const EVENT_TYPES = [
   "work.done",
   "debate.round",
   "debate.closed",
+  "repair.design",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -259,6 +260,17 @@ function findingsText(d: Record<string, unknown>): string {
   return shown.join("; ") || "see the report";
 }
 
+/** How the review findings relate to the plan: the code missed a plan item, the plan missed a requirement, or neither. */
+function basisLine(d: Record<string, unknown>): string[] {
+  const counts = basisCounts(arr<{ plan_ref?: string }>(d.findings));
+  const parts = [
+    counts.plan ? `${counts.plan} against the plan` : "",
+    counts.not_in_plan ? `${counts.not_in_plan} not covered by the plan` : "",
+    counts.defect ? `${plural(counts.defect, "defect")} beyond the plan` : "",
+  ].filter(Boolean);
+  return parts.length ? [`Basis: ${parts.join(", ")}.`] : [];
+}
+
 function resolutionsText(d: Record<string, unknown>): string {
   const list = arr<{ id: string; status: string }>(d.resolutions);
   if (!list.length) return "";
@@ -362,6 +374,8 @@ function progressLine(e: LrEvent, i: number, all: LrEvent[]): string | null {
     }
     case "debate.closed":
       return `[DEBATE CLOSED] ${str(d.rounds)} Debater pass(es), ${str(d.items)} item(s): ${str(d.resolved)} resolved, ${str(d.conceded)} conceded, ${str(d.contested)} contested, ${str(d.user_decided)} decided by you.`;
+    case "repair.design":
+      return `[REPAIR DESIGN] The Planner designs the repair of ${arr<string>(d.findings).join(", ")} before the next repair: they came back after the last one.`;
     case "run.reask":
     case "init.discovered":
     case "init.gates_acknowledged":
@@ -462,6 +476,7 @@ function acceptedLine(e: LrEvent): string | null {
     case "revise":
       return `[PLAN UPDATED] The Planner revised the plan as you asked: .looprch/phases/${phase}/plan.md`;
     case "context_answer":
+      if (arr<string>(d.design).length) return `[REPAIR DESIGN COMPLETE] The Planner wrote the repair design for ${arr<string>(d.design).join(", ")} (an addendum at the end of .looprch/phases/${phase}/plan.md).`;
       return `[QUESTION ANSWERED] The Planner answered the Implementer's question (an addendum at the end of .looprch/phases/${phase}/plan.md).`;
     case "implementation":
     case "repair":
@@ -473,7 +488,7 @@ function acceptedLine(e: LrEvent): string | null {
       const round = num(d.review_round) ? ` (review round ${num(d.review_round)} of ${num(d.review_cap) ?? "?"})` : "";
       if (decision === "approve")
         return total ? block(`[REVIEW COMPLETE] Approved by the ${by}${round}.`, `Notes (not repaired, listed in the handover): ${findingsText(d)}`) : `[REVIEW COMPLETE] Approved by the ${by}${round}.`;
-      return block(`[REVIEW COMPLETE]${round}`, `Result: Changes requested (${plural(total, "finding")}${severities(d.severities)}).`, `Findings: ${findingsText(d)}`);
+      return block(`[REVIEW COMPLETE]${round}`, `Result: Changes requested (${plural(total, "finding")}${severities(d.severities)}).`, ...basisLine(d), `Findings: ${findingsText(d)}`);
     }
     case "handover":
       return null;

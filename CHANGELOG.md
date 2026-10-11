@@ -2,6 +2,54 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.8.1 - 2026-10-11
+
+Reviews that converge on the plan. Protocol 5 (unchanged): a phase started under 0.8.0 continues.
+
+In Qasdan P-001 the Implementer finished every todo and every gate passed, yet three reviews
+requested changes (14, 6, then 3 findings). About half of round 1 was code the Laravel starter
+brought in that the plan never decided (email verification, two-factor, passkeys, the welcome
+page, the seeder, CI checks); one finding asked for browser evidence that no declared gate could
+produce; and a bilingual-copy finding came back in every round as a new example.
+
+### Added
+
+- **Repair design for findings that come back.** When a re-review reports a finding id the
+  previous review also reported, the Planner writes a repair design before the next repair: the
+  rule for the whole class, the one place that enforces it, every place it applies, and the test
+  that fails without it. It is appended to plan.md as `## Addendum N: repair design for R-…`; the
+  Implementer and the Tester follow it. Also after a `final_review` answer, and for Tester-only
+  findings. New event `repair.design`, progress lines `[REPAIR DESIGN]` and
+  `[REPAIR DESIGN COMPLETE]`. A first repair has no design.
+- **`plan_ref` on review findings** (optional): the todo or decision the code misses, a
+  requirement the plan does not cover, or `defect`. The `[REVIEW COMPLETE]` line adds
+  "Basis: n against the plan, n not covered by the plan, n defects beyond the plan"; repair
+  deltas, the `final_review` question and handover.md show it.
+- **Tester `resolutions`** (optional, after a review repair): `fixed` or `not_fixed` per finding it
+  owns. The re-review sees what the Implementer and the Tester report as claims to check.
+- **"Verification available"** in the Planner, Plan Debater, Tester and Reviewer briefs: the
+  declared gates with their kinds, whether the e2e gate runs, and the manual gates.
+- The `final_review` question lists the basis counts and the findings that came back.
+
+### Changed
+
+- **Planner:** when a task installs a starter, generator or template, the plan lists every feature
+  it ships and decides keep, adapt or remove; Tester evidence is planned only for what a declared
+  gate (or the e2e gate) runs; a rule that spans many places gets one enforcing check instead of
+  examples.
+- **Plan Debater:** two more checks: adopted code left undecided, and a check no gate can run.
+- **Reviewer:** checks plan conformance first (each todo and decision), then looks beyond the plan;
+  does not file findings for browser or manual evidence nothing can produce, and inspects the code
+  instead; keeps a finding's id while its rule still breaks.
+- **Tester:** never records a stand-in (an attribute count, a media-query match) as evidence;
+  reports `not_fixed` with the reason instead.
+
+### Migration
+
+- None needed. A phase paused under 0.8.0 (for example at the `final_review` question) has no
+  `recurring_findings` in its state; Looprch takes them from the journal, so its next repair is
+  designed too.
+
 ## 0.8.0 - 2026-10-09
 
 A guiding plan, a simple workflow, an easy e2e setup. Protocol 5.

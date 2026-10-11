@@ -67,11 +67,41 @@ export interface Finding {
   /** Review findings: the condition the repair must meet. */
   fix?: string;
   owner?: FindingOwner;
+  /** Review findings: the plan item the code is measured against (`T-4`, `Decision 5`), a requirement id the plan does not cover, or `defect`. */
+  plan_ref?: string;
+}
+
+export type PlanBasis = "plan" | "not_in_plan" | "defect";
+
+/** What a review finding was measured against: a plan item, a requirement the plan missed, or neither. */
+export function planBasis(ref: string | undefined): PlanBasis | null {
+  const r = ref?.trim();
+  if (!r) return null;
+  if (/^defect$/i.test(r)) return "defect";
+  if (/^(T-\d+|decision\b)/i.test(r)) return "plan";
+  return "not_in_plan";
+}
+
+export function basisCounts(findings: { plan_ref?: string }[]): Record<PlanBasis, number> {
+  const counts: Record<PlanBasis, number> = { plan: 0, not_in_plan: 0, defect: 0 };
+  for (const f of findings) {
+    const b = planBasis(f.plan_ref);
+    if (b) counts[b]++;
+  }
+  return counts;
+}
+
+/** What the Implementer or the Tester reported for one finding (a claim the Reviewer checks). */
+export interface ResolutionRecord {
+  id: string;
+  status: "fixed" | "not_fixed";
+  note?: string;
+  by: "implementer" | "tester";
 }
 
 /** Instructions carried into the next brief for a role (repair findings, re-ask, user note). */
 export interface Delta {
-  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "revise" | "retry" | "switch" | "synthesis" | "rebuttal";
+  kind: "reask" | "repair" | "rereview" | "unreviewed" | "notes" | "expansion" | "context_answer" | "repair_design" | "revise" | "retry" | "switch" | "synthesis" | "rebuttal";
   text: string;
   findings?: Finding[];
   paths?: string[];
@@ -113,6 +143,10 @@ export interface Current {
   reviewed_tree?: string | null;
   /** final.md of the Implementer repair runs since the last review. */
   repair_reports?: string[];
+  /** Ids of the last review's findings that were also in the review before it: the repair did not hold. */
+  recurring_findings?: string[];
+  /** Resolutions the Implementer and the Tester reported since the last review repair started. */
+  resolutions?: ResolutionRecord[];
   /** Findings of an approving review (notes), listed in the handover. */
   review_notes?: Finding[];
   /** Implementer sessions of the approved plan: contiguous todo id groups, one Implementer run each. */
@@ -130,7 +164,8 @@ export interface Current {
   expansion_round: number;
   reask_count: number;
   extra_rounds: number;
-  context_request: { question: string; reason: string } | null;
+  /** A question for the Planner; with `design`, the Planner writes the repair design of those recurring findings. */
+  context_request: { question: string; reason: string; design?: string[] } | null;
   addenda: string[];
   deltas: Partial<Record<string, Delta>>;
   /** Fallback index per role for this phase (0 = primary assignment). */
