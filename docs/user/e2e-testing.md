@@ -86,16 +86,25 @@ node_modules/.bin/e2e run --config <config> --reporter list,junit --output <fres
 
 Looprch reads only the `junit.xml` of that run (a stopped run keeps the previous run's report, so
 the directory is always fresh) and records the run in `gates.json`, where the Reviewer sees it.
-It does not run again on a tree it already passed on, and it never runs when SEV3 gates fail.
+It does not run again on a tree it already passed on or was excluded from, and it never runs when
+an executable SEV3 gate fails.
 
 | Result | What Looprch does |
 |---|---|
 | exit 0 and a passing report | the gate passes |
 | exit 1 (tests failed), or exit 0 without a report | a failing gate: the normal repair round |
-| exit 2 (configuration, collection, credentials) | `blocked e2e_config`: fix the setup, or `looprch e2e disable`, then `looprch resume` |
-| exit 3 (app, engine or model provider), timeout | `blocked e2e_environment`: `looprch resume` runs the gates again |
-| `node_modules/.bin/e2e` missing | `blocked e2e_missing` |
+| exit 2 (configuration, collection, credentials) | blocked for diagnosis; it could be a test configuration defect |
+| exit 3 (app, engine or model provider), timeout | blocked for diagnosis; it could be an application defect |
+| `node_modules/.bin/e2e` missing | excluded for this phase; no browser test evidence |
+| required config file or environment value missing before the run | excluded for this phase; no browser test evidence |
 | exit 4 or a signal | `blocked e2e_runner` |
+
+An excluded run has `ok: false` and `excluded: true` in `gates.json`. Ambiguous process errors
+remain blocked so a broken application or test is not mistaken for missing capability. The Reviewer sees the
+reason and must inspect the code independently; it may still report an application defect.
+The handover and final report identify the missing verification, and the Lead must tell the user.
+`looprch gates run --json` reports `all_passed: false` and `can_continue: true` when all executable
+gates passed but one was excluded. An executed test failure is never excluded.
 
 The runner does not sandbox the app or the tests; they run with your environment, the values of
 `.env.e2e` (the shell wins over the file) and `CI=1 E2E_TELEMETRY_DISABLED=1`.

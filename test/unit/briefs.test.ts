@@ -88,8 +88,8 @@ describe("briefs", () => {
     assert.match(second, /Repair since your last review: `git diff --stat tree2 tree3`/);
     assert.match(second, /report what still holds and anything new/);
     assert.match(second, /The code changed since your last run: inspect the current files/);
-    assert.match(review(3), /This is the final review\. Request changes only for high or critical defects/);
-    assert.match(review(1, 1), /This is the final review/);
+    assert.match(review(3), /This is the final scheduled review\. Apply the same severity and approval standard/);
+    assert.match(review(1, 1), /This is the final scheduled review/);
   });
 
   test("role prompts describe the simple workflow", () => {
@@ -145,13 +145,15 @@ describe("briefs", () => {
     assert.match(review(2), /rerun each one's Scope; close it only when no instance remains and its proof holds/);
   });
 
-  test("Planner, Debater, Tester and Reviewer briefs state what can produce evidence; the Implementer's does not", () => {
+  test("all phase roles see the available verification; the Reviewer sees exclusions", () => {
     const verification = { gates: [{ id: "GATE-core", kind: "test", negative: false }, { id: "GATE-neg", kind: "test", negative: true }, { id: "GATE-ui", kind: "manual", negative: false }], e2e: false };
-    for (const [role, task] of [["planner", "planning"], ["plan_debater", "debate"], ["tester", "testing"], ["reviewer", "review"]] as const) {
+    for (const [role, task] of [["planner", "planning"], ["plan_debater", "debate"], ["implementer", "implementation"], ["tester", "testing"], ["reviewer", "review"]] as const) {
       const b = assembleBrief(input({ role, task, verification }));
       assert.match(b, /Verification available: declared gates GATE-core \(test\), GATE-neg \(test, negative\); e2e gate off \(nothing runs a browser[^)]*\); manual gates GATE-ui\./, role);
     }
-    assert.doesNotMatch(assembleBrief(input({ role: "implementer", task: "implementation", verification })), /Verification available/);
+    const excluded = assembleBrief(input({ role: "reviewer", task: "review", excludedTests: [{ id: "browser focus return", reason: "no browser runner", limitation: "keyboard behavior unverified" }] }));
+    assert.match(excluded, /Tests excluded from this phase \(not pass evidence\):/);
+    assert.match(excluded, /browser focus return: no browser runner Verification limitation: keyboard behavior unverified/);
     assert.match(assembleBrief(input({ role: "reviewer", task: "review", verification: { gates: [], e2e: true } })), /declared gates none; e2e gate on \(Looprch runs the e2e gate in a real browser[^)]*\); manual gates none\./);
   });
 
@@ -189,8 +191,8 @@ describe("briefs", () => {
     assert.match(roleText("implementer", "implementation"), /is not a small gap: ask the Planner/);
     const tester = roleText("tester", "testing");
     assert.match(tester, /Never record a\s+stand-in/);
-    assert.match(tester, /prove every finding in the Delta, whoever owns it/);
-    assert.match(tester, /`fixed` means verified, with the testcase names\s+in `tests`/);
+    assert.match(tester, /prove every finding in the Delta that an available gate can exercise/);
+    assert.match(tester, /`fixed` means\s+verified, with the testcase names in `tests`/);
     assert.match(assembleBrief(input({ role: "reviewer", task: "review" })), /"plan_ref":"T-4 \| Decision 5[^"]*","scope":"where the rule applies/);
     assert.match(assembleBrief(input({ role: "tester", task: "testing" })), /"resolutions": \[\{"id":"R-12","status":"fixed\|not_fixed","note":"[^"]*","tests":\[/);
     assert.match(assembleBrief(input({ role: "implementer", task: "repair" })), /"resolutions": \[\{"id":"R-1","status":"fixed\|not_fixed","note":"the instances you fixed and the search that found them","tests":\[/);

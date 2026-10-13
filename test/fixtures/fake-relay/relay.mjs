@@ -157,6 +157,7 @@ switch (role) {
     copyFixture(rule.variant || "tests");
     decision ||= "pass";
     extra.tests_written = [];
+    if (rule.excluded_tests) extra.excluded_tests = rule.excluded_tests;
     if (decision === "fail") extra.failures = rule.failures || [{ id: "T-1", summary: "scripted failure" }];
     if (rule.resolution_status) extra.resolutions = deltaIds().map((id) => ({ id, status: rule.resolution_status, note: "scripted", ...(rule.resolution_tests ? { tests: rule.resolution_tests } : {}) }));
     break;

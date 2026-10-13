@@ -4,6 +4,7 @@ import type { AgentId, Assignment, Mode } from "./config.js";
 import { readJson, writeJsonAtomic } from "./fsx.js";
 import { migrate, type Migration } from "./migrations.js";
 import { projectPaths } from "./paths.js";
+import type { ExcludedTest } from "./results.js";
 
 export const STAGES = [
   "preflight",
@@ -133,6 +134,8 @@ export interface Current {
   stage_entered_at: string;
   tester_verdict: "pass" | "fail" | null;
   tester_failures: Finding[];
+  /** Checks unavailable in this phase, with the verification gap made explicit. */
+  excluded_tests?: ExcludedTest[];
   review_findings: Finding[];
   repair_source: "test" | "review" | null;
   /** Reviews in this phase that requested changes; absent in older state files. */
@@ -165,6 +168,8 @@ export interface Current {
   debate_final?: string[] | null;
   /** Tree on which the optional e2e gate last passed (it is not run again on the same tree). */
   e2e_passed_tree?: string | null;
+  /** Tree on which an unavailable optional e2e gate was excluded for this phase. */
+  e2e_excluded_tree?: string | null;
   expansion_round: number;
   reask_count: number;
   extra_rounds: number;
@@ -193,6 +198,7 @@ export interface PhaseRecord {
   merge_commit: string | null;
   tag: string | null;
   rounds_used: number;
+  excluded_tests?: ExcludedTest[];
   implementers: { agent: AgentId; model: string; runs: string[] }[];
 }
 
@@ -279,6 +285,7 @@ export function newCurrent(phase: string, title: string, at: string): Current {
     stage_entered_at: at,
     tester_verdict: null,
     tester_failures: [],
+    excluded_tests: [],
     review_findings: [],
     repair_source: null,
     review_changes: 0,

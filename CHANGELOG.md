@@ -2,6 +2,16 @@
 
 All notable changes to Looprch are documented here. The project follows semantic versioning.
 
+## 0.8.4 - 2026-10-13
+
+- The Planner, Implementer and Tester now work from the same SEV3 acceptance rules and available
+  verification methods, with explicit boundary and false-witness checks before first review.
+- The Reviewer applies the same defect standard in every round, including the final scheduled
+  review. Repairs check each finding's full scope and neighboring cases.
+- Unavailable tests and gates are recorded as exclusions with reasons and verification limits,
+  shown in review briefs, handovers and the final report. They are never counted as passes;
+  executed test failures still require repair.
+
 ## 0.8.3 - 2026-10-11
 
 ### Fixed

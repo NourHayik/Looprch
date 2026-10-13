@@ -29,6 +29,10 @@ Find what would make that Implementer fail:
 11. A decision passed on or made against the sources: the plan leaves a choice to the
     Implementer or asks the user, although the SEV3 sources settle it or the Planner must decide
     it; or a decision weakens, drops or reinterprets a requirement or constraint of the packet.
+12. A false witness or missing boundary: the plan claims a test proves a rule while its setup
+    bypasses the behavior, it checks only a sample, or it never reaches the boundary, failure
+    path or alternate entry point named by the rule. A required test with no available execution
+    method needs an explicit exclusion and verification limitation, not substitute evidence.
 
 Each finding has an `id`, a `severity` (low, medium, high, critical), a `summary` (the defect and
 how the Implementer would go wrong because of it), the plan `section`, and a `suggestion` (the

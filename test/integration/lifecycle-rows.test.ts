@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "../helpers/tmp.js";
 import { drive, readJson, runDirect, setupProject, type Project } from "../helpers/lead.js";
@@ -57,6 +57,25 @@ describe("lifecycle transition rows", () => {
     patchState(p, (s) => (s.spec.package_fingerprint = null));
     const a = next(p);
     assert.equal(a.code, "not_initialized");
+    p.s.cleanup();
+  });
+
+  test("an unavailable declared gate is excluded without claiming a pass or ticking its SEV3 item", () => {
+    const p = setupProject();
+    const noBins = join(p.s.dir, "no-gate-binaries");
+    mkdirSync(noBins);
+    assert.equal(cli(p, ["config", "set", "gates.env.PATH", noBins]).ok, true);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    assert.ok(!r.actions.some((a) => a.action === "run_role" && a.task === "repair"));
+    const gate = readJson(join(p.root, ".looprch/phases/P-001/gates.json")).runs.at(-1);
+    assert.equal(gate.ok, false);
+    assert.equal(gate.excluded, true);
+    assert.match(gate.reason, /command not found: python3/);
+    const gateBatch = readFileSync(join(p.root, ".looprch/events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line)).find((event: any) => event.type === "gates.run" && event.phase === "P-001");
+    assert.equal(gateBatch.data.all_passed, false, "an excluded gate is never reported as passed");
+    assert.match(readFileSync(join(p.root, "phases/todo.md"), "utf8"), /- \[ \] P-001:gate:GATE-P-001-negative/);
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/handover.md"), "utf8"), /GATE-P-001-negative: command not found: python3 Verification limitation/);
     p.s.cleanup();
   });
 
@@ -350,7 +369,7 @@ describe("lifecycle transition rows", () => {
     const brief = (id: string) => readFileSync(join(p.root, `.looprch/runs/${id}/brief.md`), "utf8");
     assert.match(brief("P-001-implementer-2"), scopeLine);
     assert.match(brief("P-001-tester-2"), scopeLine);
-    assert.match(brief("P-001-tester-2"), /prove every finding below with a test that covers its rule across its Scope/);
+    assert.match(brief("P-001-tester-2"), /prove each finding an available gate can exercise with a test that covers its rule across its Scope/);
     assert.match(brief("P-001-reviewer-2"), scopeLine);
     assert.match(brief("P-001-reviewer-2"), /- R-1: the Tester reported fixed: scripted \(tests: test_every_command_rejects_bad_id\)/);
     const design = r.actions.find((a) => a.action === "run_role" && a.task === "context_answer");

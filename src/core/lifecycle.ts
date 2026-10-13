@@ -14,7 +14,7 @@ import { appendEvent, readEvents, type EventInput } from "./journal.js";
 import { resolveMode, type ModeReason } from "./mode.js";
 import { projectPaths } from "./paths.js";
 import { preflightChecks } from "./preflight.js";
-import { extractResultBlock, validateResult, type ExpansionRequest, type RoleResult } from "./results.js";
+import { extractResultBlock, validateResult, type ExcludedTest, type ExpansionRequest, type RoleResult } from "./results.js";
 import { loadRun, relayOutDir, saveRun, type RunRecord, type RunStatus } from "./runs.js";
 import { basisCounts, loadState, markPhaseStart, newCurrent, QUESTION_KINDS, saveState, type AssignmentChange, type Current, type Delta, type Finding, type QuestionKind, type ResolutionRecord, type Scope, type Stage, type State } from "./state.js";
 import { incomingDeferrals, loadPlan, newPlan, normalizeSessions, savePlan, unmappedRequirements, type Plan } from "./plan.js";
@@ -33,7 +33,7 @@ import { commitBaseline, ensureRepo, requireIdentity } from "../git/baseline.js"
 import { closePhase, phaseBranch, startPhaseBranch } from "../git/phase.js";
 import { changedBetween, diffNameStatus, snapshotTree } from "../git/snapshot.js";
 import { loadGates, type GatesOutcome } from "../gates/runner.js";
-import { e2eSelected, type E2eOutcome } from "../gates/e2e.js";
+import { e2eSelected, E2E_GATE_ID, type E2eOutcome } from "../gates/e2e.js";
 
 export interface Engine {
   root: string;
@@ -609,6 +609,7 @@ export function issueRun(e: Engine, role: Role, task: Task): Action | null {
     resume: !!sessionId,
     gateIds: phase.gates.map((g) => g.id),
     verification: { gates: phase.gates.map((g) => ({ id: g.id, kind: g.kind, negative: g.negative })), e2e: e2eSelected(e.cfg.integrations.e2e, c.phase) },
+    excludedTests: c.excluded_tests ?? [],
     readOnly,
     ...(role === "planner" || role === "plan_debater" ? { implementer: implementerInfo(e) } : {}),
     ...(debateRound ? { debateRound } : {}),
@@ -1123,7 +1124,7 @@ function repairOrBlock(e: Engine, source: "test" | "review", findings: Finding[]
   else delete c.deltas.implementer;
   c.deltas.tester = {
     kind: "repair",
-    text: `Round ${c.round}: review findings. Fix the findings owned by the Tester, and prove every finding below with a test that covers its rule across its Scope, every instance and not only the cited example; each test must fail without the fix. Report each finding in "resolutions" with the testcase names in "tests".`,
+    text: `Round ${c.round}: review findings. Fix the findings owned by the Tester, and prove each finding an available gate can exercise with a test that covers its rule across its Scope, every instance and not only the cited example; each test must fail without the fix. Report executable findings in "resolutions" with the testcase names in "tests". Put tests that cannot run because their capability is unavailable in "excluded_tests" with the reason and verification limitation.`,
     findings,
     paths,
   };
@@ -1545,6 +1546,9 @@ function applyResult(e: Engine, run: RunRecord, r: RoleResult, artifact: string,
       const path = writeArtifact(e, "test-report.md", artifact);
       c.tester_verdict = r.decision === "pass" ? "pass" : "fail";
       c.tester_failures = (r.failures ?? []).map((f) => ({ id: f.id, summary: f.summary, gate_id: f.gate_id, files: f.files }));
+      const gateIds = new Set([...e.manifest.phases.find((p) => p.id === c.phase)!.gates.map((g) => g.id), E2E_GATE_ID]);
+      const reported = r.excluded_tests ?? [];
+      c.excluded_tests = [...(c.excluded_tests ?? []).filter((x) => gateIds.has(x.id) && !reported.some((newItem) => newItem.id === x.id)), ...reported];
       for (const m of r.manual_gate_reports ?? []) c.manual_reports[m.gate_id] = m.path;
       recordResolutions(c, r, "tester");
       transition(e, "gating");
@@ -1667,14 +1671,15 @@ function acceptHandover(e: Engine, run: RunRecord, artifact: string): string | n
       Object.values(gates.latest)
         .map((id) => {
           const g = gates.runs.find((x) => x.gate_run_id === id)!;
-          return `- ${g.gate_id}: ${g.gate_run_id}, ${g.ok ? "passed" : "failed"}, tests ${g.evidence.tests}, evidence sha256 ${g.evidence.sha256 ?? "-"}, tree ${g.snapshot_tree}`;
+          return `- ${g.gate_id}: ${g.gate_run_id}, ${g.excluded ? "EXCLUDED (no test evidence)" : g.ok ? "passed" : "failed"}, tests ${g.evidence.tests}, evidence sha256 ${g.evidence.sha256 ?? "-"}, tree ${g.snapshot_tree}`;
         })
         .join("\n"),
     )
     .replace("{{unreviewed}}", `${c.snapshots.review ? "" : unreviewedSection(e, c.review_findings)}${notesSection(c.review_notes ?? [])}`)
     .replace("{{plan}}", planSection(loadPlan(e.root, c.phase), c.todos_done ?? []))
     .replace("{{debate}}", debateSection(loadLedger(e.root, c.phase)));
-  const path = writeArtifact(e, "handover.md", `${artifact.trim()}\n${extra}`);
+  const exclusions = (c.excluded_tests ?? []).map((x) => `- ${x.id}: ${x.reason} Verification limitation: ${x.limitation}`).join("\n") || "- None.";
+  const path = writeArtifact(e, "handover.md", `${artifact.trim()}\n${extra}\n\n## Tests excluded from this phase\n\n${exclusions}\n`);
   c.snapshots.handover = snap;
   ev(e, { type: "handover.accepted", run_id: run.run_id, data: { files: actual } });
   c.close_step = "ticks";
@@ -1690,31 +1695,41 @@ export interface GateExtras {
   e2e?: { outcome: E2eOutcome; reason: string | null; tree: string };
 }
 
+function addExcludedTest(c: Current, test: ExcludedTest): void {
+  c.excluded_tests = [...(c.excluded_tests ?? []).filter((x) => x.id !== test.id), test];
+}
+
 const E2E_HINTS: Record<Exclude<E2eOutcome, "pass" | "fail">, string> = {
-  config: "Fix the e2e setup (run /lr-e2e-test-init, or looprch e2e configure), or turn the gate off with looprch e2e disable; then run looprch resume",
-  missing: "Install the e2e package in the project (looprch e2e init --install) and run looprch e2e configure, or run looprch e2e disable; then looprch resume",
-  environment: "Check that the app starts and the model provider is reachable (see the LR-E2E .out/.err files of the gate run), then looprch resume to run the gates again; or looprch e2e disable",
-  runner: "The e2e runner failed internally or was interrupted; looprch resume runs the gates again, or looprch e2e disable",
+  config: "Fix the e2e configuration or collection error, then run looprch resume",
+  missing: "Install the e2e capability, then run looprch resume",
+  environment: "Check whether the app, browser engine or provider failed, then run looprch resume",
+  runner: "Inspect the LR-E2E runner output, repair its setup, then run looprch resume",
 };
 
 export function applyGates(e: Engine, outcome: GatesOutcome, extras: GateExtras = {}): void {
   const c = cur(e);
-  for (const r of outcome.runs) ev(e, { type: "gate.result", data: { gate_id: r.gate_id, gate_run_id: r.gate_run_id, ok: r.ok, reason: r.reason, tests: r.evidence.tests } });
+  for (const r of outcome.runs) {
+    ev(e, { type: "gate.result", data: { gate_id: r.gate_id, gate_run_id: r.gate_run_id, ok: r.ok, excluded: !!r.excluded, reason: r.reason, tests: r.evidence.tests } });
+    c.excluded_tests = (c.excluded_tests ?? []).filter((x) => x.id !== r.gate_id);
+    if (r.excluded) addExcludedTest(c, { id: r.gate_id, reason: r.reason ?? "testing capability unavailable", limitation: "This gate supplied no executable test evidence for the current phase." });
+  }
   ev(e, { type: "gates.run", data: { all_passed: outcome.all_passed, snapshot: outcome.snapshot_tree, ...(outcome.cached ? { cached: true } : {}), ...(extras.e2e ? { e2e: extras.e2e.outcome } : {}) } });
   const e2e = extras.e2e;
   if (e2e?.outcome === "pass") c.e2e_passed_tree = e2e.tree;
-  if (e2e && e2e.outcome !== "pass" && e2e.outcome !== "fail") {
+  const e2eRun = outcome.runs.find((r) => r.gate_id === E2E_GATE_ID);
+  if (e2eRun?.excluded && e2e) c.e2e_excluded_tree = e2e.tree;
+  if (e2e && e2e.outcome !== "pass" && e2e.outcome !== "fail" && !e2eRun?.excluded) {
     block(e, `e2e_${e2e.outcome}`, `The optional e2e gate could not judge the application: ${e2e.reason ?? e2e.outcome}`, E2E_HINTS[e2e.outcome]);
     return;
   }
-  if (outcome.all_passed && c.tester_verdict === "pass") {
+  if (outcome.runs.every((r) => r.ok || r.excluded) && c.tester_verdict === "pass") {
     c.snapshots.gates = outcome.snapshot_tree;
     afterGatesPassed(e);
     return;
   }
-  const findings: Finding[] = outcome.runs.filter((r) => !r.ok).map((r) => ({ id: r.gate_run_id, gate_id: r.gate_id, summary: `${r.reason ?? "failed"}${r.stdout_tail ? `\n${r.stdout_tail.split("\n").slice(-8).join("\n")}` : ""}` }));
+  const findings: Finding[] = outcome.runs.filter((r) => !r.ok && !r.excluded).map((r) => ({ id: r.gate_run_id, gate_id: r.gate_id, summary: `${r.reason ?? "failed"}${r.stdout_tail ? `\n${r.stdout_tail.split("\n").slice(-8).join("\n")}` : ""}` }));
   findings.push(...c.tester_failures);
-  const paths = outcome.runs.filter((r) => !r.ok).flatMap((r) => [r.stdout_path, r.stderr_path]);
+  const paths = outcome.runs.filter((r) => !r.ok && !r.excluded).flatMap((r) => [r.stdout_path, r.stderr_path]);
   repairOrBlock(e, "test", findings, paths, findings.map((f) => f.gate_id ?? f.id).join(", ") || "tester verdict fail");
 }
 
@@ -1744,7 +1759,8 @@ function runClosing(e: Engine, phase: PhaseDef): Action | null {
   const c = cur(e);
   const st = e.st;
   if (!c.close_step || c.close_step === "ticks") {
-    const keys = [`${c.phase}:implementation`, ...phase.gates.map((g) => `${c.phase}:gate:${g.id}`), `${c.phase}:independent-test`, `${c.phase}:independent-review`, `${c.phase}:handover`, c.phase];
+    const excluded = new Set((c.excluded_tests ?? []).map((x) => x.id));
+    const keys = [`${c.phase}:implementation`, ...phase.gates.filter((g) => !excluded.has(g.id)).map((g) => `${c.phase}:gate:${g.id}`), `${c.phase}:independent-test`, `${c.phase}:independent-review`, `${c.phase}:handover`, c.phase];
     for (const k of keys) if (tick(e.root, k).changed) ev(e, { type: "todo.ticked", data: { key: k } });
     const v = verifyPackage(e.root);
     if (!v.ok) return block(e, "spec_changed", `The package no longer verifies after ticking todo.md: ${v.error}`, "Inspect phases/todo.md; only Looprch edits it");
@@ -1782,6 +1798,7 @@ function runClosing(e: Engine, phase: PhaseDef): Action | null {
   rec.merge_commit = res.merge_commit;
   rec.tag = res.tag;
   rec.rounds_used = c.round;
+  rec.excluded_tests = c.excluded_tests ?? [];
   ev(e, { type: "phase.merged", data: { merge_commit: res.merge_commit, close_commit: res.close_commit } });
   ev(e, { type: "phase.closed", data: { tag: res.tag } });
   st.current = null;
@@ -1809,8 +1826,9 @@ function finishProject(e: Engine): Action {
     lines.push(`- Implementers: ${(r?.implementers ?? []).map((i) => `${i.agent}/${i.model}`).join(", ") || "-"}`);
     for (const id of Object.values(gates.latest)) {
       const g = gates.runs.find((x) => x.gate_run_id === id);
-      if (g) lines.push(`- Gate ${g.gate_id}: ${g.ok ? "passed" : "FAILED"} (${g.gate_run_id}, ${g.evidence.tests} tests, tree ${g.snapshot_tree.slice(0, 12)})`);
+      if (g) lines.push(`- Gate ${g.gate_id}: ${g.excluded ? "EXCLUDED (no test evidence)" : g.ok ? "passed" : "FAILED"} (${g.gate_run_id}, ${g.evidence.tests} tests, tree ${g.snapshot_tree.slice(0, 12)})`);
     }
+    lines.push("- Tests excluded from this phase:", ...(r?.excluded_tests?.length ? r.excluded_tests.map((x) => `  - ${x.id}: ${x.reason} Verification limitation: ${x.limitation}`) : ["  - None."]));
     lines.push(`- Handover: .looprch/phases/${p.id}/handover.md`, "");
   }
   lines.push("## Assignment changes", "", ...(st.assignments_history.filter((h) => h.reason !== "config").map((h) => `- ${h.phase} ${h.role}: ${h.from?.agent ?? "-"} -> ${h.to.agent} (${h.reason})`) || []), "");

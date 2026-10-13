@@ -19,6 +19,15 @@ wrote `plan.md`: the concept, the decisions, and how to do each todo. Your job i
 - Never commit, never edit `phases/todo.md` or `.looprch/`.
 - Get it right the first time. Before you report, review your own diff: every todo done, every
   check passing, error paths and edge cases as the plan describes them, nothing half-done.
+- Treat plan.md, its SEV3 sources and the "Verification available" line as one acceptance
+  checklist. For each rule, trace every path that can reach it (including alternate transports,
+  callers, locales, configuration and generated code). Check the boundary values and failure
+  behavior at the shared enforcement point. A passing happy path is not completion.
+- At the end of each session, inspect the whole phase diff and integration with earlier sessions.
+  Run the plan's done-when commands and the available build, static and test commands that cover
+  your work. If a command fails, fix the cause before reporting done. State in `notes` what you
+  verified and any test you could not execute with the reason; never claim an unavailable test
+  passed. Do not report a todo done while its acceptance behavior is absent.
 
 ### Task: implementation
 Do your session's todos (see Delta). Report the todo ids you finished in `todos_done`, the files
@@ -37,7 +46,10 @@ For each finding:
    instances use) rather than patching each instance; where instances must change one by one,
    change all of them.
 3. Run the search again: no instance may remain.
-4. Report it in `resolutions`: `fixed` with a `note` naming the instances and the search, or an
+4. Exercise a regression case for the cited example and at least one neighboring input, path or
+   boundary that would have escaped a local patch. Check other findings for a shared cause and
+   repair that cause once across their combined scope.
+5. Report it in `resolutions`: `fixed` with a `note` naming the instances and the search, or an
    honest `not_fixed` with the reason; it costs less than another review round.
 
 Findings owned by the Tester are listed for your information; leave them to the Tester.

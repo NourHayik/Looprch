@@ -81,7 +81,10 @@ describe("gate runner", () => {
 
   test("a missing binary is reported", () => {
     const d = tmp();
-    assert.match(runGate(d, cfg, gate({ kind: "static", command: ["no-such-binary-xyz"] }), "g1", d, "t", null).reason!, /command not found/);
+    const unavailable = runGate(d, cfg, gate({ kind: "static", command: ["no-such-binary-xyz"] }), "g1", d, "t", null);
+    assert.match(unavailable.reason!, /command not found/);
+    assert.equal(unavailable.excluded, true);
+    assert.equal(unavailable.ok, false);
   });
 
   test("gates.env is passed to the gate process", () => {
@@ -143,6 +146,8 @@ describe("result blocks", () => {
     assert.equal(validateResult("reviewer", { role: "reviewer", decision: "changes_requested", findings: [{ id: "R-1", summary: "x", plan_ref: 4 }] }).ok, true, "a malformed plan_ref costs no re-ask; Looprch drops it");
     assert.equal(validateResult("tester", { role: "tester", decision: "pass", resolutions: [{ id: "R-12", status: "fixed", note: "two-connection test" }, { id: "R-13", status: "not_fixed", note: "the e2e gate is off" }] }).ok, true);
     assert.equal(validateResult("tester", { role: "tester", decision: "pass" }).ok, true);
+    assert.equal(validateResult("tester", { role: "tester", decision: "pass", excluded_tests: [{ id: "keyboard traversal", reason: "no browser runner", limitation: "focus order unverified" }] }).ok, true);
+    assert.match(errs(validateResult("tester", { role: "tester", decision: "pass", excluded_tests: [{ id: "keyboard traversal", reason: "" }] })), /needs id, reason and limitation/);
     assert.match(errs(validateResult("tester", { role: "tester", decision: "pass", resolutions: [{ id: "R-12", status: "proxy" }] })), /status must be one of fixed, not_fixed/);
   });
   test("scope on review findings and tests on resolutions are optional; malformed values cost no re-ask", () => {

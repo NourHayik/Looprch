@@ -25,20 +25,20 @@ export async function run(argv: string[]): Promise<number> {
     const outcome = cachedOutcome(root, phase, tested) ?? runPhaseGates(root, e.cfg, phase, tested, c.manual_reports);
     const extras: GateExtras = {};
     const e2e = e.cfg.integrations.e2e;
-    if (outcome.all_passed && e2eSelected(e2e, c.phase) && c.e2e_passed_tree !== tested) {
+    if (outcome.runs.every((r) => r.ok || r.excluded) && e2eSelected(e2e, c.phase) && c.e2e_passed_tree !== tested && c.e2e_excluded_tree !== tested) {
       const slot = extraRunSlot(root, c.phase);
       const er = runE2eGate(root, e.cfg, e2e, slot.gateRunId, slot.outDir, tested, head(root));
       recordExtraRun(root, c.phase, er.run);
       outcome.runs.push(er.run);
-      outcome.results.push({ gate_run_id: er.run.gate_run_id, gate_id: er.run.gate_id, ok: er.run.ok, reason: er.run.reason });
+      outcome.results.push({ gate_run_id: er.run.gate_run_id, gate_id: er.run.gate_id, ok: er.run.ok, excluded: er.run.excluded, reason: er.run.reason });
       if (!er.run.ok) outcome.all_passed = false;
       extras.e2e = { outcome: er.outcome, reason: er.run.reason, tree: tested };
     }
     outcome.snapshot_tree = snapshotTree(root);
     applyGates(e, outcome, extras);
     persist(e);
-    return { phase: outcome.phase, snapshot_tree: outcome.snapshot_tree, all_passed: outcome.all_passed, cached: !!outcome.cached, results: outcome.results, next_stage: e.st.current?.stage ?? null };
+    return { phase: outcome.phase, snapshot_tree: outcome.snapshot_tree, all_passed: outcome.all_passed, can_continue: outcome.runs.every((r) => r.ok || r.excluded), cached: !!outcome.cached, results: outcome.results, next_stage: e.st.current?.stage ?? null };
   });
-  out(!!values.json, r, () => [...r.results.map((x) => `${x.ok ? "pass" : "FAIL"} ${x.gate_id} (${x.gate_run_id})${x.reason ? `: ${x.reason}` : ""}`), ...(r.cached ? ["(cached: the gates already passed on this exact tree)"] : []), `Next stage: ${r.next_stage}`].join("\n"));
+  out(!!values.json, r, () => [...r.results.map((x) => `${x.excluded ? "EXCLUDED" : x.ok ? "pass" : "FAIL"} ${x.gate_id} (${x.gate_run_id})${x.reason ? `: ${x.reason}` : ""}`), ...(r.cached ? ["(cached: the gates already passed or were excluded on this exact tree)"] : []), `Next stage: ${r.next_stage}`].join("\n"));
   return 0;
 }

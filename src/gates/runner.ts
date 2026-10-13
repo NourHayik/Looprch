@@ -37,6 +37,8 @@ export interface GateRun {
   stderr_path: string;
   stdout_tail: string;
   ok: boolean;
+  /** The command could not start because its executable is unavailable. No test passed. */
+  excluded?: boolean;
   reason: string | null;
   snapshot_tree: string;
 }
@@ -106,7 +108,8 @@ export function runGate(root: string, cfg: Config, gate: Gate, gateRunId: string
     snapshot_tree: snapshot,
   };
   if (res.error && !timedOut) {
-    run.reason = (res.error as NodeJS.ErrnoException).code === "ENOENT" ? `command not found: ${gate.command[0]}` : res.error.message;
+    run.excluded = (res.error as NodeJS.ErrnoException).code === "ENOENT";
+    run.reason = run.excluded ? `command not found: ${gate.command[0]}` : res.error.message;
     return run;
   }
   if (timedOut) {
@@ -171,7 +174,7 @@ export interface GatesOutcome {
   phase: string;
   snapshot_tree: string;
   all_passed: boolean;
-  results: { gate_run_id: string; gate_id: string; ok: boolean; reason: string | null }[];
+  results: { gate_run_id: string; gate_id: string; ok: boolean; excluded?: boolean; reason: string | null }[];
   runs: GateRun[];
   /** The runs are the latest passing runs on this same tree (nothing was executed). */
   cached?: boolean;
@@ -187,14 +190,14 @@ export function cachedOutcome(root: string, phase: PhaseDef, snapshot: string): 
   if (!phase.gates.length || phase.gates.some((g) => g.kind === "manual")) return null;
   const file = loadGates(root, phase.id);
   const runs = phase.gates.map((g) => file.runs.find((r) => r.gate_run_id === file.latest[g.id]));
-  if (runs.some((r) => !r || !r.ok || r.snapshot_tree !== snapshot)) return null;
+  if (runs.some((r) => !r || (!r.ok && !r.excluded) || r.snapshot_tree !== snapshot)) return null;
   for (const r of runs as GateRun[]) {
     if (r.evidence.format !== "junit") continue;
     const abs = r.evidence.path ? join(root, r.evidence.path) : null;
     if (!abs || !existsSync(abs) || sha256(readFileSync(abs, "utf8")) !== r.evidence.sha256) return null;
   }
   const list = runs as GateRun[];
-  return { phase: phase.id, snapshot_tree: snapshot, all_passed: true, results: list.map((r) => ({ gate_run_id: r.gate_run_id, gate_id: r.gate_id, ok: r.ok, reason: r.reason })), runs: list, cached: true };
+  return { phase: phase.id, snapshot_tree: snapshot, all_passed: list.every((r) => r.ok), results: list.map((r) => ({ gate_run_id: r.gate_run_id, gate_id: r.gate_id, ok: r.ok, excluded: r.excluded, reason: r.reason })), runs: list, cached: true };
 }
 
 /** Append a run Looprch made outside the SEV3 gates (the optional e2e gate) to gates.json. */
@@ -230,5 +233,5 @@ export function runPhaseGates(root: string, cfg: Config, phase: PhaseDef, snapsh
     file.latest[gate.id] = r.gate_run_id;
   }
   writeJsonAtomic(gatesPath(root, phase.id), file);
-  return { phase: phase.id, snapshot_tree: snapshot, all_passed: runs.every((r) => r.ok), results: runs.map((r) => ({ gate_run_id: r.gate_run_id, gate_id: r.gate_id, ok: r.ok, reason: r.reason })), runs };
+  return { phase: phase.id, snapshot_tree: snapshot, all_passed: runs.every((r) => r.ok), results: runs.map((r) => ({ gate_run_id: r.gate_run_id, gate_id: r.gate_id, ok: r.ok, excluded: r.excluded, reason: r.reason })), runs };
 }

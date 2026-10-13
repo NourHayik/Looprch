@@ -4,6 +4,7 @@ import { packageRoot, PROTOCOL, READ_ONLY_ROLES, type Role } from "./constants.j
 import { writeFileAtomic } from "./fsx.js";
 import { projectPaths } from "./paths.js";
 import { DECISIONS } from "./results.js";
+import type { ExcludedTest } from "./results.js";
 import type { Delta } from "./state.js";
 
 export type Task =
@@ -55,6 +56,7 @@ export interface BriefInput {
   implementer?: ImplementerInfo | null;
   /** What can produce evidence in this phase: the declared gates and whether the e2e gate runs. */
   verification?: Verification;
+  excludedTests?: ExcludedTest[];
 }
 
 export interface Verification {
@@ -106,7 +108,7 @@ function fields(role: Role, task: Task): string {
       if (task === "repair") return `"files_changed": ["…"], "resolutions": [{"id":"R-1","status":"fixed|not_fixed","note":"the instances you fixed and the search that found them","tests":["testcases that cover the rule, if you ran any"]}] (one per finding), "notes": ["…"]; ${CONTEXT_REQUEST}`;
       return `"todos_done": ["T-1"] (the todos of your session you finished), "files_changed": ["…"], "notes": ["choices you made where the plan left a small gap"]; ${CONTEXT_REQUEST}`;
     case "tester":
-      return '"tests_written": ["…"], "failures": [{"id":"F-1","gate_id":"…","summary":"…","files":["…"]}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}], "resolutions": [{"id":"R-12","status":"fixed|not_fixed","note":"what the tests prove across the finding\'s scope, or why no declared gate can","tests":["the testcase names a declared gate runs"]}] (after a review repair: one per finding in the Delta; fixed means verified)';
+      return '"tests_written": ["…"], "failures": [{"id":"F-1","gate_id":"…","summary":"…","files":["…"]}], "excluded_tests": [{"id":"test or gate id","reason":"missing capability or environment","limitation":"behavior left unverified"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}], "resolutions": [{"id":"R-12","status":"fixed|not_fixed","note":"what the tests prove across the finding\'s scope","tests":["the testcase names a declared gate runs"]}] (after a review repair: one per finding in the Delta; fixed means verified)';
     case "reviewer":
       return '"findings": [{"id":"R-1","severity":"low|medium|high|critical","summary":"the broken rule and where it breaks","files":["…"],"fix":"the condition the repair must meet","owner":"implementer|tester","plan_ref":"T-4 | Decision 5 | a requirement id the plan does not cover | defect","scope":"where the rule applies and how to find every instance (the search you ran, the entry points)"}], "manual_gate_reports": [{"gate_id":"…","path":".looprch/reports/…"}]';
     case "worker":
@@ -133,7 +135,7 @@ function implementerLine(info: ImplementerInfo | null | undefined): string {
   return `The Implementer of this phase is ${info.agent}/${info.model}, with ${budget}.`;
 }
 
-const VERIFYING_ROLES = new Set<Role>(["planner", "plan_debater", "tester", "reviewer"]);
+const VERIFYING_ROLES = new Set<Role>(["planner", "plan_debater", "implementer", "tester", "reviewer"]);
 
 /** The checks that can produce evidence in this phase; nothing else counts as Tester evidence. */
 export function verificationLine(v: Verification): string {
@@ -195,7 +197,7 @@ function taskText(input: BriefInput): string {
         lines.push("");
         if (r.n === 1) lines.push("This is the first review: report every finding in this one pass. For each one, search the whole phase for every instance of the rule it breaks, and record the search in its scope.");
         else lines.push("This is a re-review: check the earlier findings in the Delta against the current code (rerun each one's Scope; close it only when no instance remains and its proof holds), check the repair diff for regressions, and report what still holds and anything new.");
-        if (r.n >= r.of) lines.push("This is the final review. Request changes only for high or critical defects; with only medium or low findings, approve: Looprch records them as open review notes in the handover.");
+        if (r.n >= r.of) lines.push("This is the final scheduled review. Apply the same severity and approval standard as every earlier review; a legitimate medium, high or critical defect still requests changes. Looprch will ask the user how to continue if the review limit is reached.");
       } else lines.push(`Phase diff: \`git diff --stat ${base}\` plus untracked files (\`git status --short\`).`);
       break;
     }
@@ -211,6 +213,7 @@ function taskText(input: BriefInput): string {
     }
   }
   if (input.verification && VERIFYING_ROLES.has(input.role)) lines.push("", verificationLine(input.verification));
+  if (input.role === "reviewer" && input.excludedTests?.length) lines.push("", "Tests excluded from this phase (not pass evidence):", ...input.excludedTests.map((x) => `- ${x.id}: ${x.reason} Verification limitation: ${x.limitation}`));
   return lines.join("\n");
 }
 

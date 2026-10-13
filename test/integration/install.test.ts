@@ -12,14 +12,14 @@ describe("install / update / rollback / uninstall", () => {
     const s = sandbox();
     const r = runCli(["install", "--from", REPO, "--json"], { env: s.env });
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.json.version, "0.8.3");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.3");
-    assert.ok(existsSync(join(s.lrHome, "versions/0.8.3/dist/looprch.mjs")));
+    assert.equal(r.json.version, "0.8.4");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.4");
+    assert.ok(existsSync(join(s.lrHome, "versions/0.8.4/dist/looprch.mjs")));
     assert.match(readFileSync(join(s.home, ".local/bin/looprch"), "utf8"), /looprch shim/);
     assert.equal(r.json.on_path, false);
     assert.match(r.json.path_hint, /\.local\/bin/);
     const v = spawnSync(join(s.home, ".local/bin/looprch"), ["version"], { env: { ...process.env, ...s.env }, encoding: "utf8" });
-    assert.match(v.stdout, /looprch 0\.8\.3 \(protocol 5,/);
+    assert.match(v.stdout, /looprch 0\.8\.4 \(protocol 5,/);
     s.cleanup();
   });
 
@@ -39,7 +39,7 @@ describe("install / update / rollback / uninstall", () => {
     const r = runCli(["install", "--from", bad, "--json"], { env: s.env });
     assert.equal(r.code, 1);
     assert.equal(r.json.error.code, "manifest_mismatch");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.3");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.4");
     s.cleanup();
   });
 
@@ -49,14 +49,14 @@ describe("install / update / rollback / uninstall", () => {
     const pkg = makePackage("0.9.0");
     const u = runCli(["update", "--from", pkg, "--yes", "--json"], { env: s.env });
     assert.equal(u.code, 0, u.stdout + u.stderr);
-    assert.equal(u.json.from, "0.8.3");
+    assert.equal(u.json.from, "0.8.4");
     assert.equal(u.json.to, "0.9.0");
     assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.9.0");
-    assert.ok(existsSync(join(s.lrHome, "versions/0.8.3")));
+    assert.ok(existsSync(join(s.lrHome, "versions/0.8.4")));
     const rb = runCli(["rollback", "--json"], { env: s.env });
     assert.equal(rb.code, 0);
-    assert.equal(rb.json.to, "0.8.3");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.3");
+    assert.equal(rb.json.to, "0.8.4");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.4");
     s.cleanup();
   });
 
@@ -67,16 +67,16 @@ describe("install / update / rollback / uninstall", () => {
     const u = runCli(["update", "--from", pkg, "--yes", "--json"], { env: s.env });
     assert.equal(u.code, 1);
     assert.equal(u.json.error.code, "self_test_failed");
-    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.3");
+    assert.equal(readlinkSync(join(s.lrHome, "current")), "versions/0.8.4");
     s.cleanup();
   });
 
   test("prune keeps two versions", () => {
     const s = sandbox();
     runCli(["install", "--from", REPO], { env: s.env });
-    for (const v of ["0.8.3", "0.8.4", "0.9.0"]) assert.equal(runCli(["update", "--from", makePackage(v), "--yes"], { env: s.env }).code, 0);
+    for (const v of ["0.8.5", "0.8.6", "0.9.0"]) assert.equal(runCli(["update", "--from", makePackage(v), "--yes"], { env: s.env }).code, 0);
     const versions = spawnSync("ls", [join(s.lrHome, "versions")], { encoding: "utf8" }).stdout.trim().split("\n");
-    assert.deepEqual(versions, ["0.8.4", "0.9.0"]);
+    assert.deepEqual(versions, ["0.8.6", "0.9.0"]);
     s.cleanup();
   });
 
@@ -113,9 +113,9 @@ describe("install / update / rollback / uninstall", () => {
   });
 
   for (const [label, published, version, expected] of [
-    ["npm registry", true, "0.1.0", "npx -y looprch@0.1.0 install"],
-    ["GitHub when not on npm", false, "", "npx -y github:NourHayik/Looprch install"],
-    ["GitHub tag for a pinned version", false, "0.1.0", "npx -y github:NourHayik/Looprch#v0.1.0 install"],
+    ["npm registry", true, "0.1.0", "npx -y --package looprch@0.1.0 -- looprch install"],
+    ["GitHub when not on npm", false, "", "npx -y --package github:NourHayik/Looprch -- looprch install"],
+    ["GitHub tag for a pinned version", false, "0.1.0", "npx -y --package github:NourHayik/Looprch#v0.1.0 -- looprch install"],
   ] as const) {
     test(`install.sh uses the ${label}`, () => {
       const s = sandbox();
@@ -130,6 +130,20 @@ describe("install / update / rollback / uninstall", () => {
       s.cleanup();
     });
   }
+
+  test("install.sh runs a local tarball override as the looprch package", () => {
+    const s = sandbox();
+    writeExecutable(join(s.bin, "npx"), `#!/bin/sh\necho "npx $*" > ${join(s.dir, "npx.log")}\n`);
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: `${s.bin}:${process.env.PATH}`,
+      LOOPRCH_NPX_SPEC: "./looprch-0.8.4.tgz",
+    };
+    const r = spawnSync("sh", [join(REPO, "install.sh")], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(join(s.dir, "npx.log"), "utf8").trim(), "npx -y --package ./looprch-0.8.4.tgz -- looprch install");
+    s.cleanup();
+  });
 
   test("update downloads when the working directory was removed", () => {
     const s = sandbox();

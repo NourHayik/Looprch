@@ -22,7 +22,9 @@ Type the model id its CLI uses. Looprch never invents model ids.
 It is advisory. It never satisfies a gate or replaces a requirement.
 
 **What does "specification verified" mean in reports?**
-That the SEV3 toolkit validated the package. The application is verified only by the gate runs.
+That the SEV3 toolkit validated the package. Application evidence comes from passing gate runs;
+excluded tests and gates supply no evidence and are listed with their limitations in the handover
+and final report.
 
 **Can I use Looprch without delegate-skills?**
 Yes, if every role is Direct in the agent you run the Lead in (Codex, Cursor or OpenCode).

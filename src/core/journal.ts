@@ -507,7 +507,10 @@ function gatesLine(e: LrEvent, i: number, all: LrEvent[]): string {
   const results: LrEvent[] = [];
   for (let j = i - 1; j >= 0 && all[j]!.type === "gate.result"; j--) results.unshift(all[j]!);
   if (!results.length) return `[GATES COMPLETE] ${e.data.all_passed ? "All gates passed." : "Some gates failed."}`;
-  const failed = results.filter((r) => r.data.ok !== true);
-  if (!failed.length) return `[GATES COMPLETE] ${results.length === 1 ? "The gate passed." : `All ${results.length} gates passed.`}`;
-  return block("[GATES COMPLETE]", `Result: ${results.length - failed.length}/${results.length} gates passed.`, `Failed: ${failed.map((f) => `${str(f.data.gate_id)}${f.data.reason ? ` (${clip(str(f.data.reason), 80)})` : ""}`).join("; ")}`);
+  const excluded = results.filter((r) => r.data.excluded === true);
+  const failed = results.filter((r) => r.data.ok !== true && r.data.excluded !== true);
+  const passed = results.length - failed.length - excluded.length;
+  if (!failed.length && !excluded.length) return `[GATES COMPLETE] ${results.length === 1 ? "The gate passed." : `All ${results.length} gates passed.`}`;
+  if (!excluded.length) return block("[GATES COMPLETE]", `Result: ${passed}/${results.length} gates passed.`, `Failed: ${failed.map((f) => `${str(f.data.gate_id)}${f.data.reason ? ` (${clip(str(f.data.reason), 80)})` : ""}`).join("; ")}`);
+  return block("[GATES COMPLETE]", `Result: ${passed}/${results.length} gates passed; ${excluded.length} excluded (no test evidence).`, ...(excluded.length ? [`Excluded: ${excluded.map((r) => `${str(r.data.gate_id)}${r.data.reason ? ` (${clip(str(r.data.reason), 80)})` : ""}`).join("; ")}`] : []), ...(failed.length ? [`Failed: ${failed.map((f) => `${str(f.data.gate_id)}${f.data.reason ? ` (${clip(str(f.data.reason), 80)})` : ""}`).join("; ")}`] : []));
 }

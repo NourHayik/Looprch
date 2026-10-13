@@ -48,7 +48,10 @@ gates.json, handover). Runtime files (`runs/`, `packets/`, test evidence) are gi
 
 ## Phases and gates
 
-A phase closes only when every declared gate passed on the final snapshot of your working tree,
-the Tester's verdict is pass, the Reviewer approved, and the Implementer's handover lists exactly
-the files git shows. Then Looprch ticks `phases/todo.md`, commits, merges `looprch/P-NNN` into
-your base branch with `--no-ff` and tags `looprch/P-NNN`.
+A phase closes when every executable declared gate passed on the final snapshot of your working
+tree, the Tester's verdict is pass, the Reviewer approved, and the Implementer's handover lists
+exactly the files git shows. A gate whose executable is missing is excluded for this phase and
+supplies no test evidence; Looprch records its reason and verification limitation in the handover
+and final report, and does not tick its SEV3 gate item. Then Looprch ticks the completed items in
+`phases/todo.md`, commits, merges `looprch/P-NNN` into your base branch with `--no-ff` and tags
+`looprch/P-NNN`.

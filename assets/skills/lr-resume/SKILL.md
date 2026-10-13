@@ -46,6 +46,11 @@ Repeat until an action tells you to stop. Keep no workflow state in your memory:
 
 ## Reporting
 
+At `phase_closed`, read that phase's handover section "Tests excluded from this phase" and
+explicitly list every excluded test, why it could not run and what remains unverified in your
+final report. At `project_done`, use the exclusions in `.looprch/FINAL_REPORT.md`. Never present
+an excluded test as passed or omit it because the phase closed.
+
 Never work silently: the user must always see what just happened, what runs now and what comes next.
 
 - `looprch next`, `looprch record` and `looprch dispatch` return `progress`: tagged status lines such as `[PHASE START]`, `[PLANNING COMPLETE]`, `[DEBATE COMPLETE]`, `[TASK START]`, `[ISSUE]`, `[RETRY]`, `[FALLBACK]`, `[WAITING]`, `[GATES COMPLETE]` or `[BLOCKED]`. After each of these commands, post every `progress` line in the chat exactly as given (a multi-line entry stays multi-line) before you run anything else.

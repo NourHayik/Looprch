@@ -50,6 +50,13 @@ export interface Resolution {
   tests?: string[];
 }
 
+/** A test that could not run in this phase; it is never evidence of a pass. */
+export interface ExcludedTest {
+  id: string;
+  reason: string;
+  limitation: string;
+}
+
 export interface RoleResult {
   role: ResultRole;
   decision: string;
@@ -61,6 +68,7 @@ export interface RoleResult {
   files_changed?: string[];
   context_request?: { question: string; reason: string };
   tests_written?: string[];
+  excluded_tests?: ExcludedTest[];
   manual_gate_reports?: { gate_id: string; path: string }[];
   limitations?: string[];
   evidence?: { path: string; lines?: string; note: string }[];
@@ -137,6 +145,7 @@ const expansion = (x: unknown) => {
 
 const strings = (x: unknown) => (typeof x === "string" ? null : "must be a string");
 const gateReport = (x: unknown) => (isObject(x) && isNonEmptyString(x.gate_id) && isNonEmptyString(x.path) ? null : "needs gate_id and path");
+const excludedTest = (x: unknown) => (isObject(x) && isNonEmptyString(x.id) && isNonEmptyString(x.reason) && isNonEmptyString(x.limitation) ? null : "needs id, reason and limitation");
 
 /** The result block's shape: only what Looprch needs to read the answer and continue. */
 export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: string): { ok: true; result: RoleResult } | { ok: false; errors: string[] } {
@@ -169,6 +178,7 @@ export function validateResult(expectedRole: ResultRole, raw: unknown, runId?: s
       break;
     case "tester":
       checkList(errors, raw, "tests_written", strings);
+      checkList(errors, raw, "excluded_tests", excludedTest);
       checkList(errors, raw, "failures", (x) => (isObject(x) && isNonEmptyString(x.id) && isNonEmptyString(x.summary) ? null : "needs id and summary"));
       checkList(errors, raw, "manual_gate_reports", gateReport);
       checkList(errors, raw, "resolutions", resolution);

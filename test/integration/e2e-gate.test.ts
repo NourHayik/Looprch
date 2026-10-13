@@ -89,32 +89,49 @@ describe("optional e2e gate (TesterArmy e2e)", { concurrency: 2 }, () => {
     p.s.cleanup();
   });
 
-  test("a configuration error (exit 2) or an environment failure (exit 3, timeout) blocks with a fix hint, not a repair; disable and resume continue", () => {
+  test("an ambiguous e2e process failure blocks for diagnosis, without a repair cycle", () => {
     for (const [extra, code] of [[{ FAKE_E2E_EXIT: "2" }, "e2e_config"], [{ FAKE_E2E_EXIT: "3" }, "e2e_environment"], [{ FAKE_E2E_SLEEP_MS: "4000" }, "e2e_environment"]] as const) {
       const p = withE2e();
       const env = { ...p.env, ...extra };
       assert.equal(cli(p, ["e2e", "configure", "--enable", "--timeout", "2s"], p.env).code, 0);
       const r = drive({ root: p.root, env, scope: "phase" });
-      assert.equal(r.last.action, "blocked");
-      assert.equal(r.last.code, code, JSON.stringify(r.last));
-      assert.match(r.last.hint, /looprch e2e disable/);
+      assert.equal(r.last.action, "blocked", JSON.stringify(r.last));
+      assert.equal(r.last.code, code);
       assert.ok(!r.actions.some((a) => a.action === "run_role" && a.task === "repair"), "no repair for an infrastructure problem");
-      cli(p, ["e2e", "disable"]);
-      cli(p, ["resume"]);
-      const r2 = drive({ root: p.root, env, scope: "phase" });
-      assert.equal(r2.last.action, "phase_closed", JSON.stringify(r2.last));
+      const gate = readJson(join(p.root, ".looprch/phases/P-001/gates.json")).runs.find((x: any) => x.gate_id === "LR-E2E");
+      assert.notEqual(gate.excluded, true);
+      assert.equal(gate.ok, false);
       p.s.cleanup();
     }
   });
 
-  test("a missing e2e binary blocks e2e_missing; a run that writes no report fails", () => {
+  test("a missing required e2e environment value is excluded with its limitation", () => {
+    const p = withE2e();
+    const ready = { ...p.env, LR_TEST_MODEL_KEY: "present-for-configuration" };
+    assert.equal(cli(p, ["e2e", "configure", "--enable", "--require-env", "LR_TEST_MODEL_KEY"], ready).code, 0);
+    const r = drive({ root: p.root, env: p.env, scope: "phase" });
+    assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    const record = readJson(join(p.root, ".looprch/state.json")).phases["P-001"];
+    assert.equal(record.excluded_tests[0].id, "LR-E2E");
+    assert.match(record.excluded_tests[0].reason, /not filled in yet: LR_TEST_MODEL_KEY/);
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/handover.md"), "utf8"), /LR-E2E: .*Verification limitation: This gate supplied no executable test evidence/);
+    const gate = readJson(join(p.root, ".looprch/phases/P-001/gates.json")).runs.find((x: any) => x.gate_id === "LR-E2E");
+    assert.equal(gate.excluded, true);
+    assert.equal(gate.ok, false);
+    const batch = readFileSync(join(p.root, ".looprch/events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line)).find((event: any) => event.type === "gates.run" && event.phase === "P-001");
+    assert.equal(batch.data.all_passed, false);
+    p.s.cleanup();
+  });
+
+  test("a missing e2e binary is excluded; a run that writes no report fails", () => {
     const p = withE2e();
     assert.equal(cli(p, ["e2e", "configure", "--enable"]).code, 0);
     const cfg = readJson(join(p.root, ".looprch/config.json"));
     cfg.integrations.e2e.bin = "node_modules/.bin/missing-e2e";
     writeFileSync(join(p.root, ".looprch/config.json"), JSON.stringify(cfg, null, 2));
     const r = drive({ root: p.root, env: p.env, scope: "phase" });
-    assert.equal(r.last.code, "e2e_missing", JSON.stringify(r.last));
+    assert.equal(r.last.action, "phase_closed", JSON.stringify(r.last));
+    assert.equal(readJson(join(p.root, ".looprch/state.json")).phases["P-001"].excluded_tests[0].id, "LR-E2E");
     p.s.cleanup();
 
     const q = withE2e();

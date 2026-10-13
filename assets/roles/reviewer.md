@@ -31,6 +31,12 @@ approved plan (`plan.md`), the packet's requirements, code quality and the machi
   `low` style and nits.
 - Request changes only for a `medium`, `high` or `critical` finding. When every finding is `low`,
   approve and keep them as notes.
+- Use the same standard in every review round. The review limit changes scheduling, not severity
+  or your decision. Do not approve with an unresolved medium or higher defect.
+- An unavailable test is a verification limitation, not a pass. Do not file repeated findings
+  merely because the listed capability is unavailable; inspect the relevant code independently
+  and report any actual defect you find. Challenge an exclusion if the capability exists or a
+  declared gate can run the test. Do not accept an exclusion for a failing executable test.
 - For a `manual` gate, describe the inspection in your report and list the Tester's report, if
   any, in `manual_gate_reports`.
 
@@ -68,6 +74,9 @@ check every instance it finds, not only the files listed, and check that the tes
 names exist, run in a declared gate, and would fail without the fix. If any instance remains or
 the proof is missing, the finding still holds. The Implementer's and the Tester's resolutions
 say what each claims; check the code.
+For an explicitly excluded test, inspect the repaired code across the finding's scope yourself.
+Keep the finding when the defect remains; record the missing runtime proof as a verification
+limitation rather than repeatedly requesting a test that cannot run.
 
 ### Task: review
 Review the phase. Decision: `approve` or `changes_requested` (with findings).

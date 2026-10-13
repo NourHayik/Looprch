@@ -63,6 +63,7 @@
         "role": { "const": "tester" },
         "decision": { "enum": ["pass", "fail"] },
         "tests_written": { "$ref": "#/$defs/paths" },
+        "excluded_tests": { "type": "array", "items": { "$ref": "#/$defs/excluded_test" }, "description": "Tests unavailable in this phase; each names its verification limitation and is never pass evidence" },
         "failures": { "type": "array", "items": { "type": "object", "required": ["id", "summary"], "properties": { "id": { "type": "string" }, "gate_id": { "type": "string" }, "summary": { "type": "string" }, "files": { "$ref": "#/$defs/paths" } } } },
         "manual_gate_reports": { "$ref": "#/$defs/reports" },
         "resolutions": {
@@ -129,6 +130,11 @@
       "type": "object",
       "required": ["kind", "id", "question", "reason"],
       "properties": { "kind": { "enum": ["document", "phase"] }, "id": { "type": "string" }, "question": { "type": "string" }, "reason": { "type": "string" } }
+    },
+    "excluded_test": {
+      "type": "object",
+      "required": ["id", "reason", "limitation"],
+      "properties": { "id": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 }, "limitation": { "type": "string", "minLength": 1 } }
     },
     "reports": { "type": "array", "items": { "type": "object", "required": ["gate_id", "path"] } }
   }

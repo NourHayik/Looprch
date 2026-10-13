@@ -143,26 +143,31 @@ second is a safety net, and a third is for exceptional cases.
   see whether the Implementer missed the plan or the plan missed something.
 - **Repairs go straight to the Implementer.** It fixes the findings it owns (optionally reporting
   `fixed` or `not_fixed` per finding); the Tester fixes the test findings, reports `fixed` or
-  `not_fixed` for each, and adds tests that prove the repairs; the gates run again; then the
+  `not_fixed` for each finding an available gate can exercise, and adds tests that prove the repairs; the gates run again; then the
   re-review, which sees both roles' reports as claims to check.
 - **Findings are defect classes.** A finding names the broken rule, lists every instance in
   `files`, and says in `scope` where the rule applies and how the Reviewer searched. The
   Implementer runs that search, fixes the shared cause at one place, and reports the instances it
-  fixed; the Tester proves each finding with a test over its whole scope and names the tests; the
-  re-review reruns the search and closes a finding only when no instance remains and the named
-  tests prove it. The first review is built to find and fix everything; later rounds are a
+  fixed; the Tester proves each executable finding with a test over its whole scope and names the
+  tests; the re-review reruns the search and closes a finding only when no instance remains and
+  available tests prove it. An excluded test leaves an explicit verification limitation. The
+  first review is built to find and fix everything; later rounds are a
   safety net.
 - **A finding that comes back gets a repair design.** If the re-review reports a finding id again,
   the cheaper roles fixed the examples, not the rule. Before the next repair the Planner writes a
   repair design (`[REPAIR DESIGN]`): the rule for the whole class, where it is enforced and the
   test that fails without it, appended to plan.md as an addendum the Implementer and the Tester
   follow.
-- **Evidence comes only from what can run.** Every brief of the Planner, the Plan Debater, the
-  Tester and the Reviewer lists the declared gates and whether the e2e gate is on. Without the e2e
-  gate nothing runs a browser, so the plan turns UI rules into assertions a gate runs, the Tester
-  reports `not_fixed` instead of recording a stand-in, and the Reviewer inspects the code instead
-  of asking for browser evidence. Turn on the e2e gate (`looprch e2e init`) when a phase needs
-  real browser checks.
+- **Evidence comes only from what can run.** Every phase role's brief lists the declared gates
+  and whether the e2e gate is on. If a required test cannot run because its capability or
+  environment is unavailable, the Tester names it in `excluded_tests` with the reason and
+  verification limitation. Looprch records unavailable gates separately from passes and failures.
+  The Reviewer inspects the code and still reports real defects. The Lead lists every exclusion
+  and its limitation when reporting phase and project completion. An executed failing test is
+  never an exclusion. Turn on the e2e gate (`looprch e2e init`) when a phase needs browser checks.
+- **The review standard is constant.** A medium or more severe defect requests changes even on
+  the final scheduled review. At the limit, Looprch asks how to continue; it does not tell the
+  Reviewer to approve a defect.
 - **Round 2 is the safety net.** The re-review gets the earlier findings, the repair reports and
   the repair diff. It reports what still holds, any regression and anything round 1 missed.
 - **Each round gets more time.** Review round n runs with the Reviewer timeout × (1 + 0.5 ×

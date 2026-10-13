@@ -54,6 +54,22 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     p.s.cleanup();
   });
 
+  test("an unavailable planned test remains visible in the review, handover and final report", () => {
+    const p = setupProject();
+    const missing = { id: "browser focus traversal", reason: "no browser-testing method", limitation: "runtime keyboard focus is unverified" };
+    p.setScenario([{ role: "tester", phase: "P-001", task: "testing", excluded_tests: [missing] }]);
+    const auto = drive({ root: p.root, env: p.env, scope: "auto" });
+    assert.equal(auto.last.action, "stop_before_closure");
+    const review = readFileSync(join(p.root, ".looprch/runs/P-001-reviewer-1/brief.md"), "utf8");
+    assert.match(review, /browser focus traversal: no browser-testing method Verification limitation: runtime keyboard focus is unverified/);
+    assert.deepEqual(state(p).phases["P-001"].excluded_tests, [missing]);
+    assert.match(readFileSync(join(p.root, ".looprch/phases/P-001/handover.md"), "utf8"), /## Tests excluded from this phase\n\n- browser focus traversal: no browser-testing method Verification limitation: runtime keyboard focus is unverified/);
+    const fin = drive({ root: p.root, env: p.env, scope: "finish" });
+    assert.equal(fin.last.action, "project_done");
+    assert.match(readFileSync(join(p.root, ".looprch/FINAL_REPORT.md"), "utf8"), /browser focus traversal: no browser-testing method Verification limitation: runtime keyboard focus is unverified/);
+    p.s.cleanup();
+  });
+
   test("E-2 test repair: a failing gate goes back to the same Implementer session", () => {
     const p = setupProject();
     drive({ root: p.root, env: p.env, scope: "phase" });
@@ -97,7 +113,7 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.match(brief("P-001-implementer-2"), /Repair round 1 \(the review requested changes\)\. Fix every finding below at its root cause/);
     assert.match(brief("P-001-implementer-2"), /- R-1 \[high, owner implementer\]: Scripted finding — noteapp\.py\n  Fix: Scripted fix condition/);
     const tester = brief("P-001-tester-2");
-    assert.match(tester, /prove every finding below with a test that covers its rule across its Scope/);
+    assert.match(tester, /prove each finding an available gate can exercise with a test that covers its rule across its Scope/);
     assert.match(tester, /P-001-implementer-2\/final\.md/);
     const repair = events(p).find((e) => e.type === "result.accepted" && e.data.task === "repair");
     assert.deepEqual(repair.data.resolutions, [{ id: "R-1", status: "fixed" }]);
@@ -205,7 +221,7 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     const briefs = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-reviewer-")).sort().map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8"));
     assert.match(briefs[0]!, /Review round 1 of 3/);
     assert.match(briefs[1]!, /re-review/);
-    assert.match(briefs[2]!, /This is the final review/);
+    assert.match(briefs[2]!, /This is the final scheduled review/);
     const finalRepair = readdirSync(join(p.root, ".looprch/runs")).filter((d) => d.startsWith("P-001-implementer-")).map((d) => readFileSync(join(p.root, ".looprch/runs", d, "brief.md"), "utf8")).find((b) => b.includes("Final repair round"));
     assert.ok(finalRepair, "the last repair is told there is no further review");
     assert.ok(events(p).some((e) => e.type === "review.skipped"));
@@ -248,7 +264,7 @@ describe("e2e: SEV3 notes-spec with fake relays", { concurrency: 3 }, () => {
     assert.deepEqual(seq.slice(asked, asked + 3), ["ask:final_review", "planner:context_answer", "implementer:repair"], "the answered final review designs the recurring R-1 first");
     const third = readFileSync(join(p.root, `.looprch/${reviews[2].brief.replace(/^\.looprch\//, "")}`), "utf8");
     assert.match(third, /Review round 3 of 3\./);
-    assert.match(third, /This is the final review/);
+    assert.match(third, /This is the final scheduled review/);
     assert.ok(!events(p).some((e) => e.type === "review.skipped"));
     assert.doesNotMatch(readFileSync(join(p.root, ".looprch/phases/P-001/handover.md"), "utf8"), /Open review findings/);
     p.s.cleanup();

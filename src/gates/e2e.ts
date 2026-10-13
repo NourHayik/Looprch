@@ -87,6 +87,7 @@ export function runE2eGate(root: string, cfg: Config, e2e: E2eConfig, gateRunId:
     writeFileAtomic(join(root, run.stdout_path), "");
     writeFileAtomic(join(root, run.stderr_path), `${setup.reason}\n`);
     run.reason = setup.reason;
+    run.excluded = true;
     run.finished_at = nowIso();
     return { run, outcome: setup.outcome };
   }

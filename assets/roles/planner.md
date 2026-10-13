@@ -76,6 +76,15 @@ Rules that make the review converge:
   provisions settings, every query scoped to the owner) gets one enforcing check that covers every
   place: a key-parity test, a scan test over the source tree, a single choke point. A list of
   examples gets fixed example by example, one review round each.
+- For every acceptance rule, name the enforcing component, all entry points and boundary cases,
+  and the test that would fail if the rule were removed. Include alternate input transports,
+  state transitions, concurrency and pagination where the rule applies. This is the Implementer's
+  completion checklist and the Tester's test design, so describe the same behavior in both
+  sections. Inspect existing code and test fixtures before assuming a path is covered.
+- In Tests, mark a required check **excluded for this phase** when no available capability or
+  environment can run it. Name the exact check, why it cannot run and what remains unverified.
+  Keep its behavior requirement and ask the Reviewer to inspect the code; do not treat a weaker
+  check as equivalent evidence. Do not exclude a test merely because it currently fails.
 
 ## The result block
 
